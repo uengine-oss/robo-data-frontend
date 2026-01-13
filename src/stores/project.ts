@@ -450,20 +450,46 @@ export const useProjectStore = defineStore('project', () => {
           addMessage(event.type === 'error' ? 'error' : 'message', event.content)
         }
         
-        // Phase 이벤트 처리 - 진행 상태 업데이트
+        // Phase 이벤트 처리 - 진행 상태 업데이트 (세부 진행률 포함)
         if (event.type === 'phase_event') {
           const phaseNum = event.phase as number
           const phaseName = event.name || ''
+          const phaseProgress = (event.progress as number) || 0  // 단계 내 세부 진행률 (0-100)
+          const details = event.details || {}
           
           if (event.status === 'started') {
-            // 시작 상태 - 현재 단계 표시 및 진행중 상태
-            currentStep.value = `[${phaseNum + 1}단계] ${phaseName} 진행 중...`
-            // 진행률: 해당 단계의 시작점으로 설정 (0단계 시작=0%, 1단계 시작=25%, 2단계 시작=50%, 3단계 시작=75%)
+            // 시작 상태 - 현재 단계 표시
+            currentStep.value = `[${phaseNum + 1}단계] ${phaseName} 시작...`
             completedSteps.value = phaseNum
+          } else if (event.status === 'in_progress') {
+            // 진행 중 상태 - 세부 진행률 표시
+            // 각 단계는 totalSteps로 나눠진 범위를 가짐
+            // phaseNum이 0이면 0~20%, 1이면 20~40%, 2이면 40~60%, 3이면 60~80%, 4이면 80~100%
+            const phaseWeight = 100 / totalSteps.value  // 각 단계가 차지하는 비율 (예: 20%)
+            const phaseStart = phaseNum * phaseWeight
+            const phaseContribution = (phaseProgress / 100) * phaseWeight
+            completedSteps.value = (phaseStart + phaseContribution) / (100 / totalSteps.value)
+            
+            // 상세 정보가 있으면 표시
+            if (details.step) {
+              const stepName = details.step === 'saving_to_neo4j' ? 'Neo4j 저장 중' :
+                              details.step === 'batch_saving' ? `배치 저장 중 (${details.batch}/${details.total_batches})` :
+                              details.step === 'table_embedding' ? `테이블 임베딩 (${details.batch}/${details.total_batches})` :
+                              details.step === 'column_embedding' ? `컬럼 임베딩 (${details.batch}/${details.total_batches})` :
+                              details.step
+              currentStep.value = `[${phaseNum + 1}단계] ${phaseName} - ${stepName} (${phaseProgress}%)`
+            } else if (details.completed && details.total) {
+              currentStep.value = `[${phaseNum + 1}단계] ${phaseName} (${details.completed}/${details.total}) ${phaseProgress}%`
+            } else {
+              currentStep.value = `[${phaseNum + 1}단계] ${phaseName} 진행 중... (${phaseProgress}%)`
+            }
           } else if (event.status === 'completed') {
-            // 완료 상태 - Phase 0: DDL 처리, 1: AST 생성, 2: AI 분석, 3: 테이블 설명 보강
+            // 완료 상태
             completedSteps.value = phaseNum + 1
-            currentStep.value = `[${phaseNum + 1}단계] ${phaseName} 완료`
+            currentStep.value = `[${phaseNum + 1}단계] ${phaseName} 완료 ✓`
+          } else if (event.status === 'skipped') {
+            // 건너뜀 상태
+            currentStep.value = `[${phaseNum + 1}단계] ${phaseName} 건너뜀`
           }
         }
         
