@@ -43,342 +43,187 @@
         <div v-if="chatMessages.length === 0 && !reactStore.isRunning" class="welcome-message">
           <h1 class="gradient-title">자연어로 데이터를 분석하세요</h1>
           <p class="subtitle">질문을 입력하면 AI가 최적의 SQL 쿼리를 생성합니다</p>
+          
+          <!-- 최근 쿼리가 있으면 표시 -->
+          <div v-if="recentQueries.length > 0" class="examples recent">
+            <p class="examples-label">최근 질문</p>
+            <button v-for="query in recentQueries.slice(0, 5)" :key="query" class="example-btn recent" @click="setQuestion(query)">
+              {{ query.length > 40 ? query.slice(0, 40) + '...' : query }}
+            </button>
+          </div>
+          
+          <!-- 기본 예시 -->
           <div class="examples">
-            <button v-for="example in exampleQueries" :key="example" class="example-btn" @click="setQuestion(example)">
+            <p class="examples-label">예시 질문</p>
+            <button v-for="example in defaultExamples" :key="example" class="example-btn" @click="setQuestion(example)">
               {{ example }}
             </button>
           </div>
         </div>
 
-        <!-- 채팅 메시지들 -->
-        <TransitionGroup name="message-anim">
-          <div v-for="msg in chatMessages" :key="msg.id" :class="['chat-message', msg.type]">
-            <!-- 사용자 메시지 -->
-            <template v-if="msg.type === 'user'">
-              <div class="message-avatar user">👤</div>
-              <div class="message-content">
-                <div class="message-text">{{ msg.content }}</div>
+        <!-- 채팅 메시지들 (윈도우링 적용 - 최근 N개만 렌더링) -->
+        <div v-if="hiddenMessageCount > 0" class="hidden-messages-indicator" @click="showAllMessages = true">
+          <span>{{ hiddenMessageCount }}개의 이전 메시지 보기...</span>
+        </div>
+        
+        <div 
+          v-for="msg in visibleMessages" 
+          :key="msg.id" 
+          :class="['chat-message', msg.type]"
+          v-memo="[msg.id, msg.type, msg.content, msg.isStreaming, msg.isExecuting, expandedMessages.has(msg.id)]"
+        >
+          <!-- 사용자 메시지 -->
+          <template v-if="msg.type === 'user'">
+            <div class="message-avatar user">👤</div>
+            <div class="message-content">
+              <div class="message-text">{{ msg.content }}</div>
+            </div>
+          </template>
+
+          <!-- AI 사고 과정 - 간소화 -->
+          <template v-else-if="msg.type === 'thinking'">
+            <div class="message-avatar ai">🧠</div>
+            <div class="message-content">
+              <span class="step-badge">Step {{ msg.step }}</span>
+              <span class="phase-label thinking">사고 중...</span>
+              <span class="typing-dots"><span></span><span></span><span></span></span>
+            </div>
+          </template>
+
+          <!-- AI 추론 -->
+          <template v-else-if="msg.type === 'reasoning'">
+            <div class="message-avatar ai">💡</div>
+            <div class="message-content reasoning-content">
+              <div class="message-header">
+                <span class="step-badge">Step {{ msg.step }}</span>
+                <span class="phase-label reasoning">{{ msg.toolInfo?.name || '추론' }}</span>
+                <!-- 세부 정보 토글 버튼 -->
+                <button 
+                  v-if="msg.toolInfo" 
+                  class="details-toggle-btn"
+                  @click="toggleMessageExpand(msg.id)"
+                >
+                  {{ expandedMessages.has(msg.id) ? '세부 정보 접기' : '세부 정보 보기' }}
+                </button>
               </div>
-            </template>
-
-            <!-- AI 사고 과정 -->
-            <template v-else-if="msg.type === 'thinking'">
-              <div class="message-avatar ai">🧠</div>
-              <div class="message-content">
-                <div class="message-header">
-                  <span class="step-badge">Step {{ msg.step }}</span>
-                  <span class="phase-label thinking">사고 중...</span>
-                </div>
-                <div class="message-text typing-effect">
-                  <span class="typing-dots"><span></span><span></span><span></span></span>
-                  LLM이 질문을 분석하고 있습니다...
-                </div>
+              <div class="reasoning-text">{{ msg.content }}</div>
+              <!-- SQL이 있으면 표시 -->
+              <div v-if="msg.sql" class="reasoning-sql">
+                <pre class="sql-code"><code>{{ msg.sql }}</code></pre>
               </div>
-            </template>
-
-            <!-- AI 추론 -->
-            <template v-else-if="msg.type === 'reasoning'">
-              <div class="message-avatar ai">💭</div>
-              <div class="message-content">
-                <div class="message-header">
-                  <span class="step-badge">Step {{ msg.step }}</span>
-                  <span class="phase-label reasoning">추론</span>
+              <!-- 세부 정보 (도구 호출 정보) - 확장 시에만 표시 -->
+              <div v-if="msg.toolInfo && expandedMessages.has(msg.id)" class="tool-details">
+                <div class="tool-details-header">🔧 도구 호출 정보</div>
+                <div class="tool-detail-item">
+                  <span class="label">도구:</span>
+                  <span class="value">{{ msg.toolInfo.name }}</span>
                 </div>
-                <div class="message-text" :class="{ 'typing-active': msg.isStreaming }">
-                  <TypeWriter v-if="msg.isStreaming" :text="msg.content" :speed="20" />
-                  <span v-else>{{ msg.content }}</span>
+                <div v-if="msg.toolInfo.params" class="tool-detail-item">
+                  <span class="label">파라미터:</span>
+                  <code class="value">{{ msg.toolInfo.params }}</code>
                 </div>
-                <div v-if="msg.nextTool" class="next-action-badge">
-                  ⚡ 다음: {{ msg.nextTool }}
-                </div>
-              </div>
-            </template>
-
-            <!-- 도구 실행 -->
-            <template v-else-if="msg.type === 'tool'">
-              <div class="message-avatar ai">⚡</div>
-              <div class="message-content">
-                <div class="message-header">
-                  <span class="step-badge">Step {{ msg.step }}</span>
-                  <span class="phase-label tool">{{ msg.toolName }}</span>
-                  <span v-if="msg.isExecuting" class="executing-indicator">
-                    <span class="spinner-small"></span>
-                  </span>
-                  <span v-else class="completed-indicator">✓</span>
-                </div>
-                <div v-if="msg.params" class="tool-params-inline">
-                  <code>{{ msg.params }}</code>
-                </div>
-                <div v-if="msg.result" class="tool-result-inline">
-                  <div class="result-header" @click="toggleMessageExpand(msg.id)">
-                    <span>결과</span>
-                    <IconChevronDown :size="12" :class="{ rotated: expandedMessages.has(msg.id) }" />
-                  </div>
-                  <pre
-                    v-if="expandedMessages.has(msg.id) || !isResultLong(msg.result)"><code>{{ msg.result }}</code></pre>
-                  <pre v-else><code>{{ truncateResult(msg.result) }}</code></pre>
-                </div>
-
-                <!-- 스텝 상세(섹션별) -->
-                <div v-if="msg.step" class="step-details">
-                  <div class="step-details-header" @click="toggleStepDetails(msg.id)">
-                    <span>스텝 상세</span>
-                    <IconChevronDown :size="12" :class="{ rotated: expandedStepDetails.has(msg.id) }" />
-                  </div>
-                  <div v-if="expandedStepDetails.has(msg.id)" class="step-details-body">
-                    <template v-if="getLiveForStep(msg.step)">
-                      <details v-if="(getLiveForStep(msg.step)?.sections?.exploring ?? '').trim().length > 0"
-                        :open="!!getLiveForStep(msg.step)?.exploringOpen" class="live-section"
-                        @toggle="(e) => toggleExploringOpen(msg.step as number, e)">
-                        <summary>탐색(Exploring)</summary>
-                        <div class="live-text">{{ getLiveForStep(msg.step)?.sections?.exploring }}</div>
-                      </details>
-                      <details v-if="(getLiveForStep(msg.step)?.sections?.reasoning ?? '').trim().length > 0" open
-                        class="live-section">
-                        <summary>추론</summary>
-                        <div class="live-text">{{ getLiveForStep(msg.step)?.sections?.reasoning }}</div>
-                      </details>
-                      <!-- Metadata를 추론 바로 아래로 이동 (XML 구조와 동일한 순서) -->
-                      <details
-                        v-if="(getLiveForStep(msg.step)?.metadata?.table?.length || 0) + (getLiveForStep(msg.step)?.metadata?.column?.length || 0) + (getLiveForStep(msg.step)?.metadata?.value?.length || 0) + (getLiveForStep(msg.step)?.metadata?.relationship?.length || 0) + (getLiveForStep(msg.step)?.metadata?.constraint?.length || 0) > 0"
-                        class="live-section">
-                        <summary>
-                          Metadata
-                          <span class="meta-counts">
-                            T{{ getLiveForStep(msg.step)?.metadata?.table?.length || 0 }} ·
-                            C{{ getLiveForStep(msg.step)?.metadata?.column?.length || 0 }} ·
-                            V{{ getLiveForStep(msg.step)?.metadata?.value?.length || 0 }} ·
-                            R{{ getLiveForStep(msg.step)?.metadata?.relationship?.length || 0 }} ·
-                            K{{ getLiveForStep(msg.step)?.metadata?.constraint?.length || 0 }}
-                          </span>
-                        </summary>
-                        <div class="meta-groups">
-                          <div class="meta-group" v-for="t in availableMetaTypesForStep(msg.step)" :key="t">
-                            <button class="meta-toggle" type="button" @click="toggleMetaType(t)">
-                              {{ metaTypeLabel(t) }}
-                              <span class="meta-badge">{{ (getLiveForStep(msg.step)?.metadata?.[t]?.length ?? 0)
-                              }}</span>
-                            </button>
-                            <div v-if="expandedMetaTypes.has(t)" class="meta-items">
-                              <div v-for="(item, i) in (getLiveForStep(msg.step)?.metadata?.[t] ?? [])"
-                                :key="`${t}-${i}`" class="meta-item">
-                                <div class="meta-item-kv" v-for="(v, k) in item" :key="String(k)">
-                                  <span class="meta-item-key">{{ k }}</span>
-                                  <span class="meta-item-val">{{ String(v) }}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </details>
-
-                      <details v-if="(getLiveForStep(msg.step)?.sections?.partial_sql ?? '').trim().length > 0"
-                        class="live-section">
-                        <summary>부분 SQL</summary>
-                        <pre class="live-code"><code>{{ getLiveForStep(msg.step)?.sections?.partial_sql }}</code></pre>
-                      </details>
-                      <details
-                        v-if="((getLiveForStep(msg.step)?.sections?.['sql_completeness_check.confidence_level'] ?? '').trim().length > 0) || ((getLiveForStep(msg.step)?.sections?.['sql_completeness_check.missing_info'] ?? '').trim().length > 0)"
-                        class="live-section">
-                        <summary>완성도</summary>
-                        <div class="live-kv">
-                          <div class="kv-row">
-                            <span class="kv-key">confidence</span>
-                            <span class="kv-val">{{
-                              getLiveForStep(msg.step)?.sections?.['sql_completeness_check.confidence_level'] || '-'
-                            }}</span>
-                          </div>
-                          <div class="kv-row">
-                            <span class="kv-key">missing_info</span>
-                            <span class="kv-val">{{
-                              getLiveForStep(msg.step)?.sections?.['sql_completeness_check.missing_info'] || '-'
-                            }}</span>
-                          </div>
-                        </div>
-                      </details>
-                      <details
-                        v-if="((getLiveForStep(msg.step)?.sections?.['tool_call.tool_name'] ?? '').trim().length > 0) || ((getLiveForStep(msg.step)?.sections?.['tool_call.parameters'] ?? '').trim().length > 0)"
-                        class="live-section">
-                        <summary>Tool Call</summary>
-                        <div class="live-kv">
-                          <div class="kv-row">
-                            <span class="kv-key">tool</span>
-                            <span class="kv-val">{{ getLiveForStep(msg.step)?.sections?.['tool_call.tool_name'] || '-'
-                            }}</span>
-                          </div>
-                          <div class="kv-row">
-                            <span class="kv-key">params</span>
-                            <span class="kv-val mono">{{ getLiveForStep(msg.step)?.sections?.['tool_call.parameters'] ||
-                              '-' }}</span>
-                          </div>
-                        </div>
-                      </details>
-                    </template>
-                    <div v-else class="meta-empty">스텝 상세 데이터가 아직 없습니다.</div>
-                  </div>
+                <div v-if="msg.toolInfo.result" class="tool-detail-item">
+                  <span class="label">결과:</span>
+                  <pre class="result-preview"><code>{{ truncateResult(msg.toolInfo.result, 500) }}</code></pre>
                 </div>
               </div>
-            </template>
+            </div>
+          </template>
 
-            <!-- AI 질문 (사용자 입력 필요) -->
-            <template v-else-if="msg.type === 'question'">
-              <div class="message-avatar ai">❓</div>
-              <div class="message-content question-content">
-                <div class="message-header">
-                  <span class="phase-label question">질문</span>
-                </div>
-                <div class="message-text">
-                  <TypeWriter v-if="msg.isStreaming" :text="msg.content" :speed="15" />
-                  <span v-else>{{ msg.content }}</span>
-                </div>
+          <!-- 도구 실행 -->
+          <template v-else-if="msg.type === 'tool'">
+            <div class="message-avatar ai">⚡</div>
+            <div class="message-content">
+              <div class="message-header">
+                <span class="step-badge">Step {{ msg.step }}</span>
+                <span class="phase-label tool">{{ msg.toolName }}</span>
+                <span v-if="msg.isExecuting" class="spinner-small"></span>
+                <span v-else class="completed-indicator">✓</span>
               </div>
-            </template>
-
-            <!-- SQL 결과 -->
-            <template v-else-if="msg.type === 'sql'">
-              <div class="message-avatar ai">📝</div>
-              <div class="message-content sql-content">
-                <div class="message-header">
-                  <span class="phase-label sql">최종 SQL</span>
-                  <button class="copy-btn" @click="copySql(msg.content)">
-                    <IconCopy :size="12" />
-                  </button>
-                </div>
-                <pre class="sql-code"><code>{{ msg.content }}</code></pre>
+              
+              <!-- 파라미터 -->
+              <code v-if="msg.params" class="tool-params-compact">{{ msg.params }}</code>
+              
+              <!-- 결과 - 항상 표시 -->
+              <div v-if="msg.result" class="tool-result-display">
+                <pre class="result-code"><code>{{ truncateResult(msg.result, 800) }}</code></pre>
               </div>
-            </template>
+            </div>
+          </template>
 
-            <!-- 실행 결과 -->
-            <template v-else-if="msg.type === 'result'">
-              <div class="message-avatar ai">📊</div>
-              <div class="message-content result-content">
-                <div class="message-header">
-                  <span class="phase-label result">실행 결과</span>
-                  <span class="result-meta">{{ msg.rowCount }}개 행 · {{ msg.execTime }}ms</span>
-                  
-                  <!-- OLAP 내보내기 버튼 (복잡한 쿼리일 때) -->
-                  <button 
-                    v-if="getResultSql(msg) && isComplexQuery(getResultSql(msg))"
-                    class="olap-export-btn"
-                    @click="exportToOlapFromMsg(msg)"
-                    title="OLAP으로 내보내기 - DW 스키마 설계"
-                  >
-                    <IconBarChart :size="14" />
-                    <span>OLAP 큐브 설계</span>
-                  </button>
-                </div>
-                <ResultTable v-if="msg.data" :data="msg.data" />
+          <!-- AI 질문 -->
+          <template v-else-if="msg.type === 'question'">
+            <div class="message-avatar ai">❓</div>
+            <div class="message-content question-content">
+              <span class="phase-label question">질문</span>
+              <div class="message-text">{{ msg.content }}</div>
+            </div>
+          </template>
+
+          <!-- SQL 결과 -->
+          <template v-else-if="msg.type === 'sql'">
+            <div class="message-avatar ai">📝</div>
+            <div class="message-content sql-content">
+              <div class="message-header">
+                <span class="phase-label sql">최종 SQL</span>
+                <button class="copy-btn" @click="copySql(msg.content)">📋</button>
               </div>
-            </template>
+              <pre class="sql-code"><code>{{ msg.content }}</code></pre>
+            </div>
+          </template>
 
-            <!-- 에러 -->
-            <template v-else-if="msg.type === 'error'">
-              <div class="message-avatar error">⚠️</div>
-              <div class="message-content error-content">
-                <div class="message-text">{{ msg.content }}</div>
+          <!-- 실행 결과 -->
+          <template v-else-if="msg.type === 'result'">
+            <div class="message-avatar ai">📊</div>
+            <div class="message-content result-content">
+              <div class="message-header">
+                <span class="phase-label result">실행 결과</span>
+                <span class="result-meta">{{ msg.rowCount }}행 · {{ msg.execTime }}ms</span>
+                <button 
+                  v-if="getResultSql(msg)"
+                  class="olap-export-btn"
+                  @click="exportToOlapFromMsg(msg)"
+                >
+                  📊 OLAP
+                </button>
               </div>
-            </template>
-          </div>
-        </TransitionGroup>
+              <ResultTable v-if="msg.data" :data="msg.data" :max-rows="20" />
+            </div>
+          </template>
 
-        <!-- Live 스트리밍 패널 (섹션별) -->
+          <!-- 에러 -->
+          <template v-else-if="msg.type === 'error'">
+            <div class="message-avatar error">⚠️</div>
+            <div class="message-content error-content">{{ msg.content }}</div>
+          </template>
+
+          <!-- 시스템 메시지 (일시정지/재개 등) -->
+          <template v-else-if="msg.type === 'system'">
+            <div class="message-avatar system">ℹ️</div>
+            <div class="message-content system-content">{{ msg.content }}</div>
+          </template>
+        </div>
+
+        <!-- Live 스트리밍 패널 - 추론 + SQL 중심 -->
         <div v-if="reactStore.isRunning && liveCurrent" class="chat-message ai live">
           <div class="message-avatar ai">🧩</div>
           <div class="message-content live-content">
             <div class="message-header">
               <span class="step-badge">Step {{ reactStore.currentIteration }}</span>
-              <span class="phase-label thinking">실시간 생성 중</span>
-              <span v-if="liveRepairing" class="repair-badge">출력 포맷 정리 중...</span>
+              <span class="phase-label thinking">생성 중</span>
             </div>
-
-            <div class="live-sections">
-              <details v-if="liveExploring.trim().length > 0" :open="!!liveCurrent?.exploringOpen" class="live-section"
-                @toggle="(e) => toggleExploringOpen(reactStore.currentIteration, e)">
-                <summary>탐색(Exploring)</summary>
-                <div class="live-text">
-                  <span>{{ liveExploring }}</span><span class="cursor"
-                    v-if="reactStore.currentPhase === 'thinking'">▌</span>
-                </div>
-              </details>
-              <details v-if="liveReasoning.trim().length > 0" open class="live-section">
-                <summary>추론(Reasoning)</summary>
-                <div class="live-text">
-                  <span>{{ liveReasoning }}</span><span class="cursor"
-                    v-if="reactStore.currentPhase === 'thinking'">▌</span>
-                </div>
-              </details>
-
-              <!-- Metadata를 추론 바로 아래로 이동 (XML 구조와 동일한 순서) -->
-              <details
-                v-if="(liveMetaCounts.table + liveMetaCounts.column + liveMetaCounts.value + liveMetaCounts.relationship + liveMetaCounts.constraint) > 0"
-                open class="live-section">
-                <summary>
-                  메타데이터(Collected Metadata)
-                  <span class="meta-counts">
-                    T{{ liveMetaCounts.table }} · C{{ liveMetaCounts.column }} · V{{ liveMetaCounts.value }} · R{{
-                      liveMetaCounts.relationship }} · K{{ liveMetaCounts.constraint }}
-                  </span>
-                </summary>
-                <div class="meta-groups">
-                  <div class="meta-group" v-for="t in availableMetaTypesLive" :key="t">
-                    <button class="meta-toggle" type="button" @click="toggleMetaType(t)">
-                      {{ metaTypeLabel(t) }}
-                      <span class="meta-badge">{{ (liveCurrent?.metadata?.[t]?.length ?? 0) }}</span>
-                    </button>
-                    <div v-if="expandedMetaTypes.has(t)" class="meta-items">
-                      <div v-for="(item, i) in (liveCurrent?.metadata?.[t] ?? [])" :key="`${t}-${i}`" class="meta-item">
-                        <div class="meta-item-kv" v-for="(v, k) in item" :key="String(k)">
-                          <span class="meta-item-key">{{ k }}</span>
-                          <span class="meta-item-val">{{ String(v) }}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </details>
-
-              <details v-if="livePartialSql.trim().length > 0" open class="live-section">
-                <summary>부분 SQL(Partial SQL)</summary>
-                <pre class="live-code"><code>{{ livePartialSql }}</code><span class="cursor"
-            v-if="reactStore.currentPhase === 'thinking'">▌</span></pre>
-              </details>
-
-              <details v-if="(liveConfidence || '').trim().length > 0 || (liveMissingInfo || '').trim().length > 0" open
-                class="live-section">
-                <summary>완성도(SQL Completeness)</summary>
-                <div class="live-kv">
-                  <div class="kv-row">
-                    <span class="kv-key">confidence</span>
-                    <span class="kv-val">{{ liveConfidence || '-' }}</span>
-                  </div>
-                  <div class="kv-row">
-                    <span class="kv-key">missing_info</span>
-                    <span class="kv-val">{{ liveMissingInfo || '-' }}</span>
-                  </div>
-                </div>
-              </details>
-
-              <details v-if="(liveToolName || '').trim().length > 0 || (liveToolParams || '').trim().length > 0" open
-                class="live-section">
-                <summary>다음 액션(Next Tool)</summary>
-                <div class="live-kv">
-                  <div class="kv-row">
-                    <span class="kv-key">tool</span>
-                    <span class="kv-val">{{ liveToolName || '-' }}</span>
-                  </div>
-                  <div class="kv-row">
-                    <span class="kv-key">params</span>
-                    <span class="kv-val mono">{{ liveToolParams || '-' }}</span>
-                  </div>
-                </div>
-              </details>
-
-              <!-- Raw XML 토큰(디버그) -->
-              <details v-if="reactStore.debugStreamRawXmlTokens && reactStore.streamingText" class="live-section">
-                <summary>Raw XML (디버그)</summary>
-                <pre class="live-code raw"><code>{{ reactStore.streamingText }}</code><span class="cursor"
-            v-if="reactStore.isStreaming">▌</span></pre>
-              </details>
+            
+            <!-- 추론 + SQL만 표시 -->
+            <div class="live-summary">
+              <!-- 추론 내용 -->
+              <div v-if="liveReasoning" class="live-reasoning-text">
+                {{ liveReasoning }}
+                <span class="cursor" v-if="reactStore.currentPhase === 'thinking'">▌</span>
+              </div>
+              <!-- SQL 프리뷰 -->
+              <div v-if="livePartialSql" class="live-sql-preview">
+                <pre class="sql-code"><code>{{ livePartialSql }}</code></pre>
+              </div>
             </div>
           </div>
         </div>
@@ -386,21 +231,29 @@
 
       <!-- 입력 영역 -->
       <div class="chat-input-area">
+        <!-- 일시정지 상태 -->
+        <div v-if="reactStore.isPaused" class="status-bar paused-bar">
+          <span class="status-dot paused"></span>
+          <span>⏸️ 일시정지됨 - 피드백을 입력하고 재개하거나 바로 재개하세요</span>
+          <button class="resume-btn" @click="handleResume">▶ 재개</button>
+          <button class="cancel-btn" @click="handleCancel">✕ 취소</button>
+        </div>
         <!-- 진행 중 상태 표시 -->
-        <div v-if="isAnyRunning && !reactStore.isWaitingUser" class="status-bar">
+        <div v-else-if="isAnyRunning && !reactStore.isWaitingUser" class="status-bar">
           <span class="status-dot running"></span>
           <span>{{ mode === 'langchain' ? '⚡ 빠른 검색 중...' : '🧠 AI가 분석 중...' }}</span>
-          <button class="cancel-btn" @click="handleCancel">중단</button>
+          <button class="pause-btn" @click="handlePause">⏸ 잠시 멈춤</button>
+          <button class="cancel-btn" @click="handleCancel">✕ 중단</button>
         </div>
 
         <!-- 입력창 -->
         <div class="input-wrapper">
-          <textarea v-model="inputText" :placeholder="inputPlaceholder"
-            :disabled="reactStore.isRunning && !reactStore.isWaitingUser" rows="1"
+          <textarea v-model="inputText" :placeholder="pausedPlaceholder"
+            :disabled="reactStore.isRunning && !reactStore.isWaitingUser && !reactStore.isPaused" rows="1"
             @keydown.enter.exact.prevent="handleSubmit" @keydown.shift.enter="handleNewline" @input="autoResize"
             ref="inputRef"></textarea>
-          <button class="send-btn" :disabled="!canSubmit" @click="handleSubmit">
-            <IconPlay v-if="!reactStore.isRunning" :size="18" />
+          <button class="send-btn" :disabled="!canSubmitOrResume" @click="handleSubmit">
+            <IconPlay v-if="!reactStore.isRunning && !reactStore.isPaused" :size="18" />
             <IconUpload v-else :size="18" />
           </button>
         </div>
@@ -426,6 +279,11 @@
               <label>캐시 사용</label>
               <input v-model="useCache" type="checkbox" />
               <span class="setting-hint">동일 질문 시 빠른 응답</span>
+            </div>
+            <div class="setting-row">
+              <label>DW 스키마만 검색</label>
+              <input v-model="dwOnlySearch" type="checkbox" />
+              <span class="setting-hint">OLAP 큐브 데이터만 검색</span>
             </div>
             <div class="setting-row">
               <label>Raw XML(디버그)</label>
@@ -478,21 +336,25 @@ import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useReactStore, useHistoryStore, type QueryHistoryItem } from '@/stores/text2sql'
 import { useSessionStore } from '@/stores/session'
 import ResultTable from './ResultTable.vue'
-import TypeWriter from './TypeWriter.vue'
 import HistoryPanel from './HistoryPanel.vue'
 import DirectSqlInput from './DirectSqlInput.vue'
 import { useLangChainStore } from '@/stores/langchain'
 import type { ReactExecutionResult } from '@/types'
 import { buildSqlLineDiff, type PreviousSqlLine, type SqlDiffLine } from '@/utils/sqlLineDiff'
 import {
-  IconPlay, IconUpload, IconSettings, IconChevronDown,
-  IconCopy, IconBarChart
+  IconPlay, IconUpload, IconSettings, IconChevronDown, IconCopy
 } from '@/components/icons'
 
 // Types
+interface ToolInfo {
+  name: string
+  params?: string
+  result?: string
+}
+
 interface ChatMessage {
   id: string
-  type: 'user' | 'thinking' | 'reasoning' | 'tool' | 'question' | 'sql' | 'result' | 'error'
+  type: 'user' | 'thinking' | 'reasoning' | 'tool' | 'question' | 'sql' | 'result' | 'error' | 'system'
   content: string
   step?: number
   isStreaming?: boolean
@@ -507,6 +369,7 @@ interface ChatMessage {
   icon?: string
   sql?: string  // 결과에 연결된 SQL (히스토리 선택 시 사용)
   question?: string  // 원본 질문 (OLAP 내보내기 시 사용)
+  toolInfo?: ToolInfo  // 도구 호출 세부 정보 (디버깅용)
 }
 
 const reactStore = useReactStore()
@@ -577,27 +440,97 @@ const showSettings = ref(false)
 const maxToolCalls = ref(30)
 const maxSqlSeconds = ref(60)
 const useCache = ref(true)  // 캐시 사용 여부
+const dwOnlySearch = ref(false)  // DW 스키마만 검색 (OLAP 전용)
 const debugRawXml = ref(false)
 const expandedMessages = ref<Set<string>>(new Set())
-const expandedStepDetails = ref<Set<string>>(new Set())
-type MetadataItemType = 'table' | 'column' | 'value' | 'relationship' | 'constraint'
-const expandedMetaTypes = ref<Set<MetadataItemType>>(new Set())
-const metaTypesAll: MetadataItemType[] = ['table', 'column', 'value', 'relationship', 'constraint']
 
-const availableMetaTypesLive = computed(() => {
-  return metaTypesAll.filter(t => (liveCurrent.value?.metadata?.[t]?.length ?? 0) > 0)
+// DOM 최적화: 메시지 윈도우링
+const MAX_VISIBLE_MESSAGES = 30  // 최대 표시 메시지 수
+const showAllMessages = ref(false)
+
+const visibleMessages = computed(() => {
+  let messages = chatMessages.value
+  
+  // tool, thinking 메시지는 항상 숨김 (reasoning + SQL만 표시)
+  messages = messages.filter(msg => {
+    // tool과 thinking 타입은 제외
+    if (msg.type === 'tool' || msg.type === 'thinking') {
+      return false
+    }
+    return true
+  })
+  
+  if (showAllMessages.value || messages.length <= MAX_VISIBLE_MESSAGES) {
+    return messages
+  }
+  // 최근 N개만 표시
+  return messages.slice(-MAX_VISIBLE_MESSAGES)
 })
+
+const hiddenMessageCount = computed(() => {
+  if (showAllMessages.value) return 0
+  return Math.max(0, chatMessages.value.length - MAX_VISIBLE_MESSAGES)
+})
+
+// 파라미터 축소 표시
+function truncateParams(params: string, maxLen = 80): string {
+  if (params.length <= maxLen) return params
+  return params.slice(0, maxLen) + '...'
+}
 
 // Chat messages
 const chatMessages = ref<ChatMessage[]>([])
 let messageIdCounter = 0
 
-// Example queries
-const exampleQueries = [
+// Example queries (기본 예시)
+const defaultExamples = [
   '회의실 예약 현황을 보여줘',
   '오늘 예약된 회의 목록',
   '가장 많이 사용되는 회의실 Top 5'
 ]
+
+// 로컬 스토리지에서 최근 쿼리 불러오기
+const RECENT_QUERIES_KEY = 'text2sql_recent_queries'
+const MAX_RECENT_QUERIES = 10
+
+const recentQueries = ref<string[]>([])
+
+function loadRecentQueries() {
+  try {
+    const stored = localStorage.getItem(RECENT_QUERIES_KEY)
+    if (stored) {
+      recentQueries.value = JSON.parse(stored)
+    }
+  } catch (e) {
+    console.warn('Failed to load recent queries:', e)
+  }
+}
+
+function saveRecentQuery(query: string) {
+  if (!query || query.trim().length < 3) return
+  
+  const trimmed = query.trim()
+  // 중복 제거
+  const filtered = recentQueries.value.filter(q => q !== trimmed)
+  // 맨 앞에 추가
+  filtered.unshift(trimmed)
+  // 최대 개수 제한
+  recentQueries.value = filtered.slice(0, MAX_RECENT_QUERIES)
+  
+  try {
+    localStorage.setItem(RECENT_QUERIES_KEY, JSON.stringify(recentQueries.value))
+  } catch (e) {
+    console.warn('Failed to save recent queries:', e)
+  }
+}
+
+// 표시할 예시 쿼리 (최근 쿼리 우선, 없으면 기본 예시)
+const exampleQueries = computed(() => {
+  if (recentQueries.value.length > 0) {
+    return recentQueries.value.slice(0, 5)
+  }
+  return defaultExamples
+})
 
 // Computed
 const isAnyRunning = computed(() => reactStore.isRunning || langchainStore.isRunning)
@@ -605,11 +538,24 @@ const canSubmit = computed(() =>
   inputText.value.trim() && (!isAnyRunning.value || reactStore.isWaitingUser)
 )
 
+// 일시정지 상태에서도 제출 가능 (피드백 + 재개)
+const canSubmitOrResume = computed(() => {
+  if (reactStore.isPaused) return true  // 일시정지 상태에서는 항상 활성화 (피드백 없어도 재개 가능)
+  return canSubmit.value
+})
+
 const inputPlaceholder = computed(() =>
   reactStore.isWaitingUser
     ? '답변을 입력하세요...'
     : '질문을 입력하세요... (Enter로 전송)'
 )
+
+const pausedPlaceholder = computed(() => {
+  if (reactStore.isPaused) {
+    return '피드백을 입력하고 Enter로 재개... (빈 상태로 Enter시 바로 재개)'
+  }
+  return inputPlaceholder.value
+})
 
 // 스텝 단위 diff를 위해 latestStep.partial_sql만 사용하고,
 // finalSql 도착 시에도 동일한 패널에서 마지막 diff 애니메이션을 보여준다.
@@ -673,50 +619,12 @@ onBeforeUnmount(() => {
   clearDiffTimers()
 })
 
+// DOM 최적화: 라이브 스트리밍 데이터 (간소화)
 const liveCurrent = computed(() => reactStore.liveByIteration[reactStore.currentIteration] ?? null)
-const liveExploring = computed(() => liveCurrent.value?.sections?.exploring ?? '')
 const liveReasoning = computed(() => liveCurrent.value?.sections?.reasoning ?? '')
 const livePartialSql = computed(() => liveCurrent.value?.sections?.partial_sql ?? '')
 const liveToolName = computed(() => liveCurrent.value?.sections?.['tool_call.tool_name'] ?? '')
 const liveToolParams = computed(() => liveCurrent.value?.sections?.['tool_call.parameters'] ?? '')
-const liveMissingInfo = computed(() => liveCurrent.value?.sections?.['sql_completeness_check.missing_info'] ?? '')
-const liveConfidence = computed(() => liveCurrent.value?.sections?.['sql_completeness_check.confidence_level'] ?? '')
-const liveRepairing = computed(() => !!liveCurrent.value?.isRepairing)
-const liveMetaCounts = computed(() => {
-  const m = liveCurrent.value?.metadata
-  if (!m) return { table: 0, column: 0, value: 0, relationship: 0, constraint: 0 }
-  return {
-    table: m.table?.length ?? 0,
-    column: m.column?.length ?? 0,
-    value: m.value?.length ?? 0,
-    relationship: m.relationship?.length ?? 0,
-    constraint: m.constraint?.length ?? 0
-  }
-})
-
-function toggleMetaType(t: MetadataItemType) {
-  if (expandedMetaTypes.value.has(t)) {
-    expandedMetaTypes.value.delete(t)
-  } else {
-    expandedMetaTypes.value.add(t)
-  }
-}
-
-function metaTypeLabel(t: MetadataItemType): string {
-  switch (t) {
-    case 'table': return 'Tables'
-    case 'column': return 'Columns'
-    case 'value': return 'Values'
-    case 'relationship': return 'Relationships'
-    case 'constraint': return 'Constraints'
-  }
-}
-
-function availableMetaTypesForStep(step?: number): MetadataItemType[] {
-  const s = getLiveForStep(step)
-  if (!s) return []
-  return metaTypesAll.filter(t => (s.metadata?.[t]?.length ?? 0) > 0)
-}
 
 // Helper functions
 function generateId(): string {
@@ -770,19 +678,15 @@ function formatParams(params: Record<string, unknown>): string {
   }
 }
 
-function truncateResult(result: string): string {
+function truncateResult(result: string, maxLen = 300): string {
   const lines = result.split('\n')
   if (lines.length > 5) {
     return lines.slice(0, 5).join('\n') + '\n...'
   }
-  if (result.length > 300) {
-    return result.slice(0, 300) + '...'
+  if (result.length > maxLen) {
+    return result.slice(0, maxLen) + '...'
   }
   return result
-}
-
-function isResultLong(result: string): boolean {
-  return result.split('\n').length > 5 || result.length > 300
 }
 
 function toggleMessageExpand(id: string) {
@@ -791,24 +695,6 @@ function toggleMessageExpand(id: string) {
   } else {
     expandedMessages.value.add(id)
   }
-}
-
-function toggleStepDetails(id: string) {
-  if (expandedStepDetails.value.has(id)) {
-    expandedStepDetails.value.delete(id)
-  } else {
-    expandedStepDetails.value.add(id)
-  }
-}
-
-function getLiveForStep(step?: number) {
-  if (!step) return null
-  return reactStore.liveByIteration[step] ?? null
-}
-
-function toggleExploringOpen(iteration: number, e: Event) {
-  const el = e.target as HTMLDetailsElement
-  reactStore.setExploringOpen(iteration, !!el.open)
 }
 
 function getConfidenceClass(level: string): string {
@@ -862,10 +748,27 @@ function autoResize(e: Event) {
 
 // Event handlers
 async function handleSubmit() {
+  // 일시정지 상태에서는 피드백과 함께 재개
+  if (reactStore.isPaused) {
+    const feedback = inputText.value.trim()
+    inputText.value = ''
+    if (feedback) {
+      addMessage({ type: 'user', content: `[피드백] ${feedback}` })
+    }
+    addMessage({ type: 'system', content: '▶ 재개합니다...' })
+    await reactStore.resume(feedback)
+    return
+  }
+
   if (!canSubmit.value) return
 
   const text = inputText.value.trim()
   inputText.value = ''
+  
+  // 최근 쿼리 저장 (사용자 응답 제외)
+  if (!reactStore.isWaitingUser) {
+    saveRecentQuery(text)
+  }
 
   if (reactStore.isWaitingUser) {
     // 사용자 응답 (ReAct 모드)
@@ -887,7 +790,8 @@ async function handleSubmit() {
       maxToolCalls: maxToolCalls.value,
       maxSqlSeconds: maxSqlSeconds.value,
       debugStreamRawXmlTokens: debugRawXml.value,
-      useCache: useCache.value
+      useCache: useCache.value,
+      schemaFilter: dwOnlySearch.value ? ['dw'] : undefined
     })
   }
 }
@@ -902,7 +806,27 @@ function handleCancel() {
   } else {
     reactStore.cancel()
   }
+  inputText.value = ''
   addMessage({ type: 'error', content: '작업이 중단되었습니다.' })
+}
+
+// 일시정지: 현재 진행을 멈추고 피드백을 받을 수 있는 상태로 전환
+function handlePause() {
+  reactStore.pause()
+  addMessage({ type: 'system', content: '⏸️ 일시정지됨. 하단 입력창에 피드백을 입력하고 Enter 또는 재개 버튼을 누르세요.' })
+  // 입력창에 포커스
+  nextTick(() => inputRef.value?.focus())
+}
+
+// 재개: 하단 입력창의 피드백과 함께 계속 진행
+async function handleResume() {
+  const feedback = inputText.value.trim()
+  inputText.value = ''
+  if (feedback) {
+    addMessage({ type: 'user', content: `[피드백] ${feedback}` })
+  }
+  addMessage({ type: 'system', content: '▶ 재개합니다...' })
+  await reactStore.resume(feedback)
 }
 
 // Watch for phase changes
@@ -950,15 +874,76 @@ watch(() => reactStore.liveByIteration, () => {
   scrollToBottom()
 }, { deep: true })
 
-// Watch for steps completion
+// 이전 iteration 저장 (스텝 변경 감지용)
+const previousIterationRef = ref(0)
+
+// Watch for iteration changes - 이전 스텝의 추론 내용을 chatMessages에 저장
+watch(() => reactStore.currentIteration, (newIteration) => {
+  const prevIteration = previousIterationRef.value
+  
+  if (newIteration > prevIteration && prevIteration > 0) {
+    // 이전 스텝의 추론 내용을 가져와서 저장
+    const prevLive = reactStore.liveByIteration[prevIteration]
+    const reasoning = prevLive?.sections?.reasoning || ''
+    
+    if (reasoning) {
+      // 이미 해당 스텝의 reasoning이 있는지 확인
+      const existingReasoning = chatMessages.value.find(
+        m => m.type === 'reasoning' && m.step === prevIteration
+      )
+      if (!existingReasoning) {
+        // 도구 정보 수집
+        const toolName = prevLive?.sections?.['tool_call.tool_name'] || ''
+        const toolParams = prevLive?.sections?.['tool_call.parameters'] || ''
+        
+        // 해당 스텝의 tool 메시지에서 result 가져오기
+        const toolMsg = chatMessages.value.find(
+          m => m.type === 'tool' && m.step === prevIteration
+        )
+        
+        console.log(`[Reasoning] Adding step ${prevIteration}:`, { reasoning: reasoning.slice(0, 50), toolName })
+        
+        addMessage({
+          type: 'reasoning',
+          content: reasoning,
+          step: prevIteration,
+          sql: prevLive?.sections?.partial_sql || undefined,
+          toolInfo: toolName ? {
+            name: toolName,
+            params: toolParams,
+            result: toolMsg?.result
+          } : undefined,
+          isStreaming: false
+        })
+      }
+    }
+  }
+  previousIterationRef.value = newIteration
+})
+
+// Watch for steps completion - 완료된 스텝의 reasoning 저장 (백업)
 watch(() => reactStore.steps, (steps) => {
-  // 스텝이 완료되면 reasoning 메시지의 스트리밍 종료
   steps.forEach(step => {
-    const reasoningMsg = chatMessages.value.find(
-      m => m.type === 'reasoning' && m.step === step.iteration && m.isStreaming
+    if (!step.reasoning) return
+    
+    const existingReasoning = chatMessages.value.find(
+      m => m.type === 'reasoning' && m.step === step.iteration
     )
-    if (reasoningMsg && step.tool_result) {
-      updateMessage(reasoningMsg.id, { isStreaming: false })
+    // reasoning이 없으면 추가
+    if (!existingReasoning) {
+      console.log(`[Reasoning from steps] Adding step ${step.iteration}`)
+      addMessage({
+        type: 'reasoning',
+        content: step.reasoning,
+        step: step.iteration,
+        sql: step.partial_sql || undefined,
+        toolInfo: step.tool_call?.name ? {
+          name: step.tool_call.name,
+          params: JSON.stringify(step.tool_call.parameters),
+          result: step.tool_result || undefined
+        } : undefined,
+        isStreaming: false
+      })
     }
   })
 }, { deep: true })
@@ -1124,6 +1109,9 @@ watch(() => reactStore.status, async (status, oldStatus) => {
 onMounted(() => {
   inputRef.value?.focus()
   
+  // 로컬 스토리지에서 최근 쿼리 불러오기
+  loadRecentQueries()
+  
   // 상단 검색창에서 전달된 자연어 질문 처리
   const pendingQuery = sessionStore.consumeNLSearch()
   if (pendingQuery) {
@@ -1238,7 +1226,7 @@ $badge-error: #f87171;
   gap: 2px;
   padding: 3px;
   background: var(--color-bg-secondary);
-  backdrop-filter: blur(12px);
+  // backdrop-filter 제거 - 성능 최적화
   border: 1px solid var(--color-border);
   border-radius: 10px;
   box-shadow: var(--shadow-md);
@@ -1320,6 +1308,9 @@ $badge-error: #f87171;
   gap: 20px;
   position: relative;
   z-index: 1;
+  // 렌더링 성능 최적화
+  contain: layout style;
+  will-change: scroll-position;
 
   &::-webkit-scrollbar {
     width: 6px;
@@ -1390,12 +1381,35 @@ $badge-error: #f87171;
     gap: 12px;
     justify-content: center;
     align-items: center;
+    margin-bottom: 16px;
+    flex-direction: column;
+  }
+  
+  .examples-label {
+    font-size: 11px;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+    width: 100%;
+    text-align: center;
+  }
+  
+  .examples.recent .example-btn {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(168, 85, 247, 0.15));
+    border-color: rgba(99, 102, 241, 0.3);
+  }
+  
+  .examples > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
   }
 
   .example-btn {
     padding: 10px 20px;
     background: var(--chat-card-bg);
-    backdrop-filter: blur(12px);
     border: 1px solid var(--color-border);
     border-radius: 24px;
     color: var(--color-text);
@@ -1464,7 +1478,6 @@ $badge-error: #f87171;
 
     .message-content {
       background: var(--chat-msg-bg);
-      backdrop-filter: blur(16px);
       border: 1px solid var(--chat-msg-border);
       border-radius: 6px 20px 20px 20px;
       box-shadow: var(--chat-msg-shadow);
@@ -1476,7 +1489,6 @@ $badge-error: #f87171;
 
     .message-content {
       background: rgba(248, 113, 113, 0.08);
-      backdrop-filter: blur(16px);
       border: 1px solid rgba(248, 113, 113, 0.3);
       border-radius: 6px 20px 20px 20px;
     }
@@ -1525,7 +1537,6 @@ $badge-error: #f87171;
 
   &.ai {
     background: var(--chat-msg-bg);
-    backdrop-filter: blur(8px);
     border: 1px solid var(--chat-msg-border);
     box-shadow: var(--chat-msg-shadow);
   }
@@ -1588,6 +1599,108 @@ $badge-error: #f87171;
     background: rgba($badge-reasoning, 0.12);
     color: $badge-reasoning;
     border: 1px solid rgba($badge-reasoning, 0.25);
+  }
+}
+
+.reasoning-content {
+  .reasoning-text {
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--color-text);
+    margin-top: 10px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  
+  .reasoning-sql {
+    margin-top: 12px;
+    
+    .sql-code {
+      margin: 0;
+      padding: 12px;
+      background: var(--chat-code-bg);
+      border-radius: 8px;
+      overflow-x: auto;
+      
+      code {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 12px;
+        color: var(--chat-code-text);
+        white-space: pre-wrap;
+      }
+    }
+  }
+  
+  .details-toggle-btn {
+    margin-left: auto;
+    padding: 4px 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    color: var(--color-text-muted);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+    
+    &:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--color-text);
+    }
+  }
+  
+  .tool-details {
+    margin-top: 16px;
+    padding: 12px;
+    background: rgba(56, 189, 248, 0.05);
+    border: 1px solid rgba(56, 189, 248, 0.2);
+    border-radius: 8px;
+    
+    .tool-details-header {
+      font-size: 12px;
+      font-weight: 600;
+      color: #38bdf8;
+      margin-bottom: 10px;
+    }
+    
+    .tool-detail-item {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-size: 12px;
+      
+      .label {
+        color: var(--color-text-muted);
+        flex-shrink: 0;
+      }
+      
+      .value {
+        color: var(--color-text);
+        word-break: break-all;
+      }
+      
+      code.value {
+        font-family: 'JetBrains Mono', monospace;
+        background: rgba(0, 0, 0, 0.2);
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+    }
+    
+    .result-preview {
+      margin: 4px 0 0;
+      padding: 8px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 4px;
+      max-height: 150px;
+      overflow: auto;
+      
+      code {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        color: var(--chat-code-text);
+        white-space: pre-wrap;
+      }
+    }
   }
 
   &.tool {
@@ -2166,6 +2279,18 @@ $badge-error: #f87171;
   }
 }
 
+.system-content {
+  color: #ffc864;
+  font-style: italic;
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+.message-avatar.system {
+  background: linear-gradient(135deg, rgba(255, 200, 100, 0.2), rgba(255, 150, 80, 0.1));
+  border: 1px solid rgba(255, 200, 100, 0.3);
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Copy Button
 // ═══════════════════════════════════════════════════════════════
@@ -2195,7 +2320,6 @@ $badge-error: #f87171;
   padding: 20px 32px;
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
-  backdrop-filter: blur(20px);
   position: relative;
   z-index: 10;
 }
@@ -2223,21 +2347,66 @@ $badge-error: #f87171;
   }
 
   .cancel-btn {
-    margin-left: auto;
-    padding: 6px 16px;
+    padding: 6px 12px;
     background: transparent;
-    border: 1px solid rgba(0, 212, 170, 0.4);
+    border: 1px solid rgba(255, 100, 100, 0.5);
     border-radius: 8px;
-    color: #00d4aa;
+    color: #ff6464;
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s ease;
 
     &:hover {
-      background: rgba(0, 212, 170, 0.15);
-      border-color: #00d4aa;
+      background: rgba(255, 100, 100, 0.15);
+      border-color: #ff6464;
     }
+  }
+
+  .pause-btn {
+    margin-left: auto;
+    padding: 6px 12px;
+    background: transparent;
+    border: 1px solid rgba(255, 200, 100, 0.5);
+    border-radius: 8px;
+    color: #ffc864;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &:hover {
+      background: rgba(255, 200, 100, 0.15);
+      border-color: #ffc864;
+    }
+  }
+
+  &.paused-bar {
+    background: linear-gradient(135deg, rgba(255, 200, 100, 0.1), rgba(255, 150, 80, 0.05));
+    border: 1px solid rgba(255, 200, 100, 0.3);
+  }
+
+  .resume-btn {
+    margin-left: auto;
+    padding: 8px 16px;
+    background: linear-gradient(135deg, #00d4aa, #00b896);
+    border: none;
+    border-radius: 8px;
+    color: white;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &:hover {
+      background: linear-gradient(135deg, #00e4ba, #00c8a6);
+      transform: translateY(-1px);
+    }
+  }
+
+  .status-dot.paused {
+    background: #ffc864;
+    animation: none;
   }
 }
 
@@ -2415,7 +2584,6 @@ $badge-error: #f87171;
   width: 340px;
   border-left: 1px solid var(--sql-panel-border, $border-subtle);
   background: var(--sql-panel-bg);
-  backdrop-filter: blur(20px);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -2592,6 +2760,137 @@ $badge-error: #f87171;
   to {
     opacity: 0;
     transform: scale(0.98);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DOM 최적화 - 간소화된 컴팩트 스타일
+// ═══════════════════════════════════════════════════════════════
+.hidden-messages-indicator {
+  text-align: center;
+  padding: 12px;
+  margin-bottom: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--color-text);
+  }
+}
+
+.tool-params-compact {
+  display: block;
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: var(--chat-tool-bg);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.tool-result-display {
+  margin-top: 8px;
+  
+  .result-code {
+    margin: 0;
+    padding: 10px;
+    background: var(--chat-code-bg);
+    border-radius: 6px;
+    max-height: 300px;
+    overflow: auto;
+    font-size: 11px;
+    
+    code {
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--chat-code-text);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  }
+}
+
+.live-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.live-text-compact {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text);
+}
+
+.live-reasoning-text {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--color-text);
+  margin-bottom: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.live-sql-preview {
+  margin-top: 12px;
+  
+  .sql-code {
+    margin: 0;
+    padding: 12px;
+    background: var(--chat-code-bg);
+    border-radius: 8px;
+    overflow-x: auto;
+    
+    code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--chat-code-text);
+      white-space: pre-wrap;
+    }
+  }
+}
+
+.live-sql-compact {
+  padding: 8px 10px;
+  background: var(--chat-code-bg);
+  border-radius: 6px;
+  
+  code {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--chat-code-text);
+  }
+}
+
+.live-tool-compact {
+  font-size: 11px;
+  color: var(--chat-badge-tool);
+  padding: 4px 8px;
+  background: rgba(56, 189, 248, 0.1);
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.live-tool-params {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 6px;
+  
+  code {
+    background: rgba(0, 0, 0, 0.2);
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: block;
+    word-break: break-all;
   }
 }
 

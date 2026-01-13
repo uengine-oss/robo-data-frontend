@@ -79,8 +79,13 @@ export const useReactStore = defineStore('react', () => {
   const liveByIteration = ref<Record<number, LiveIterationState>>({})
   const debugStreamRawXmlTokens = ref<boolean>(false)
 
+  // 일시정지 상태
+  const isPaused = ref<boolean>(false)
+  const pausedSessionState = ref<string | null>(null)
+  const pauseFeedback = ref<string>('')
+
   // Computed
-  const isRunning = computed(() => status.value === 'running')
+  const isRunning = computed(() => status.value === 'running' && !isPaused.value)
   const isWaitingUser = computed(() => status.value === 'needs_user_input')
   const hasSteps = computed(() => steps.value.length > 0)
   const hasExecutionResult = computed(() => executionResult.value !== null)
@@ -113,6 +118,61 @@ export const useReactStore = defineStore('react', () => {
   function cancelOngoing() {
     if (abortController.value) {
       abortController.value.abort()
+      abortController.value = null
+    }
+    isPaused.value = false
+    pausedSessionState.value = null
+    pauseFeedback.value = ''
+  }
+
+  // 일시정지: 현재 스트림을 중단하고 상태 저장
+  function pause() {
+    if (abortController.value) {
+      abortController.value.abort()
+      abortController.value = null
+    }
+    isPaused.value = true
+    pausedSessionState.value = sessionState.value
+    status.value = 'running' // 여전히 running 상태로 유지 (UI에서 paused 표시)
+  }
+
+  // 재개: 피드백과 함께 계속 진행
+  async function resume(feedback?: string) {
+    isPaused.value = false
+    const resumeSessionState = pausedSessionState.value || sessionState.value
+    pausedSessionState.value = null
+    
+    const controller = new AbortController()
+    abortController.value = controller
+    
+    // 피드백이 있으면 user_response로 전달
+    const feedbackText = feedback?.trim() || pauseFeedback.value?.trim()
+    pauseFeedback.value = ''
+    
+    // 세션 상태가 있으면 이어서, 없으면 처음부터 (피드백 포함)
+    if (resumeSessionState) {
+      await consumeStream(
+        {
+          question: currentQuestion.value,
+          session_state: resumeSessionState,
+          user_response: feedbackText || undefined,
+        },
+        controller
+      )
+    } else {
+      // 세션 상태가 없으면 원래 질문 + 피드백으로 새로 시작
+      const enhancedQuestion = feedbackText 
+        ? `${currentQuestion.value}\n\n[사용자 피드백: ${feedbackText}]`
+        : currentQuestion.value
+      await consumeStream(
+        {
+          question: enhancedQuestion,
+        },
+        controller
+      )
+    }
+    
+    if (abortController.value === controller) {
       abortController.value = null
     }
   }
@@ -370,6 +430,7 @@ export const useReactStore = defineStore('react', () => {
       maxSqlSeconds?: number
       debugStreamRawXmlTokens?: boolean
       useCache?: boolean
+      schemaFilter?: string[]  // 검색 대상 스키마 제한 (예: ['dw']는 OLAP만 검색)
     }
   ) {
     cancelOngoing()
@@ -387,7 +448,8 @@ export const useReactStore = defineStore('react', () => {
         max_tool_calls: options?.maxToolCalls,
         max_sql_seconds: options?.maxSqlSeconds,
         debug_stream_xml_tokens: debugStreamRawXmlTokens.value,
-        use_cache: options?.useCache ?? true
+        use_cache: options?.useCache ?? true,
+        schema_filter: options?.schemaFilter
       },
       controller
     )
@@ -458,6 +520,9 @@ export const useReactStore = defineStore('react', () => {
     liveByIteration,
     debugStreamRawXmlTokens,
     setExploringOpen,
+    // 일시정지 상태
+    isPaused,
+    pauseFeedback,
     // Computed
     isRunning,
     isWaitingUser,
@@ -469,7 +534,9 @@ export const useReactStore = defineStore('react', () => {
     start,
     continueWithResponse,
     cancel,
-    clear
+    clear,
+    pause,
+    resume
   }
 })
 

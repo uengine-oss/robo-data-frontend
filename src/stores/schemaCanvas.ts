@@ -495,7 +495,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         // Neo4j 직접 조회 (robo-analyzer)
         const tables = await roboSchemaApi.getTables(sessionId.value, {
           projectName: projectName.value,
-          limit: 200
+          limit: 500
         })
         allTables.value = tables.map(t => ({
           name: t.name,
@@ -946,7 +946,8 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   // 테이블 데이터 조회 패널
   // =========================================================================
   
-  const TEXT2SQL_API_BASE = import.meta.env.VITE_TEXT2SQL_API_URL || 'http://localhost:8000/text2sql'
+  const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? '/api/gateway'
+  const TEXT2SQL_API_BASE = import.meta.env.VITE_TEXT2SQL_API_URL || `${API_GATEWAY_URL}/text2sql`
   
   /**
    * 테이블 데이터 조회 패널 열기 및 데이터 로드

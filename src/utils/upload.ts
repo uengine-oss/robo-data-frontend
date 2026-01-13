@@ -47,7 +47,12 @@ export function getNormalizedUploadPath(file: File, projectName: string): string
     return parts.join('/')
   }
 
-  // projectName을 앞에 추가 (ddl/ 포함 모든 경로에 적용)
+  // DDL 경로는 projectName을 추가하지 않음 (ANTLR 서버에서 ddl/로 시작해야 인식)
+  if (parts[0]?.toLowerCase() === 'ddl') {
+    return parts.join('/')
+  }
+
+  // 소스 파일만 projectName을 앞에 추가
   return [safeProject, ...parts].join('/')
 }
 
