@@ -52,7 +52,7 @@ interface PropertyItem {
 // ============================================================================
 
 /** 숨길 속성 키 목록 */
-const HIDDEN_KEYS = ['labels', 'user_id', 'project_name']
+const HIDDEN_KEYS = ['labels']
 
 /** 긴 값 기준 (자수) */
 const LONG_VALUE_THRESHOLD = 50

@@ -20,7 +20,6 @@ export type Strategy = 'dbms' | 'framework'
 /** 프로젝트 메타데이터 (프론트엔드용) */
 export interface ProjectMetadata {
   sourceType: SourceType
-  projectName: string
   /** ddl 폴더 하위 상대경로 목록 (예: 'tables/a.sql') */
   ddl: string[]
 }
@@ -31,7 +30,6 @@ export type NameCaseOption = 'original' | 'uppercase' | 'lowercase'
 export interface BackendRequestMetadata {
   strategy: Strategy
   target: SourceType
-  projectName: string
   nameCase?: NameCaseOption
 }
 
@@ -199,14 +197,12 @@ export interface StreamEvent {
 
 /** 파일 업로드 응답 */
 export interface FileUploadResponse {
-  projectName: string
   files: UploadedFile[]
   ddlFiles: UploadedFile[]
 }
 
 /** 파싱 응답 (단순 완료 상태만) */
 export interface ParseResponse {
-  projectName: string
   status?: 'complete'
 }
 

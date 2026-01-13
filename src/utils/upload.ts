@@ -2,8 +2,8 @@
  * 업로드 관련 유틸(단일 파일로 통일)
  *
  * 유지보수 원칙:
- * - “규칙/계산(도메인 로직)”만 여기에 둔다 (UI 상태/emit 등은 컴포넌트에 둔다)
- * - 업로드 경로는 항상 “projectName 최상위 + 상대경로(webkitRelativePath)” 규칙을 따른다
+ * - "규칙/계산(도메인 로직)"만 여기에 둔다 (UI 상태/emit 등은 컴포넌트에 둔다)
+ * - 업로드 경로는 상대경로(webkitRelativePath)를 기준으로 한다
  *
  * 구성:
  * 1) 경로 유틸
@@ -29,55 +29,18 @@ export function splitPath(path: string): string[] {
 }
 
 /**
- * 업로드 파일의 "상대경로"를 프로젝트 루트 기준으로 정규화합니다.
- *
- * - projectName을 최상위에 추가 (이미 있으면 추가 안 함)
- * - 원본 폴더 구조를 그대로 유지
- * - ddl/로 시작하는 경로도 projectName을 앞에 붙임 (서버에서 projectName/ 접두사를 제거 후 처리)
+ * 업로드 파일의 상대경로를 정규화합니다.
  */
-export function getNormalizedUploadPath(file: File, projectName: string): string {
+export function getNormalizedUploadPath(file: File): string {
   const raw = (file as any).webkitRelativePath || file.name
   const parts = splitPath(String(raw))
-
-  const safeProject = (projectName || '').trim()
-  if (!safeProject) return parts.join('/')
-
-  // 이미 projectName으로 시작하면 그대로 반환
-  if (parts[0] === safeProject) {
-    return parts.join('/')
-  }
-
-  // projectName을 앞에 추가 (ddl/ 포함 모든 경로에 적용)
-  return [safeProject, ...parts].join('/')
-}
-
-export function getNormalizedUploadPathWithoutProject(file: File, projectName: string): string {
-  const full = getNormalizedUploadPath(file, projectName)
-  const parts = splitPath(full)
-  const safeProject = (projectName || '').trim()
-  
-  // projectName을 제거 (모든 경로에서)
-  if (safeProject && parts[0] === safeProject) return parts.slice(1).join('/')
   return parts.join('/')
 }
+
 
 // =============================================================================
 // 2) 파일 선택/경로 매핑
 // =============================================================================
-
-/**
- * 선택한 File[]에서 "공통 최상위 폴더"가 하나로 수렴하면 그 값을 반환합니다.
- * (자동 구조 인식은 이것만 수행)
- */
-export function inferProjectNameFromPicked(picked: File[]): string {
-  const firstParts = new Set<string>()
-  for (const f of picked) {
-    const raw = (f as any).webkitRelativePath || f.name
-    const first = splitPath(String(raw))[0]
-    if (first) firstParts.add(first)
-  }
-  return firstParts.size === 1 ? Array.from(firstParts)[0] : ''
-}
 
 export function forceWebkitRelativePath(file: File, relPath: string): File {
   Object.defineProperty(file, 'webkitRelativePath', {
@@ -150,7 +113,7 @@ export type UploadNodeType = 'folder' | 'file'
 export interface UploadTreeNode {
   type: UploadNodeType
   name: string
-  /** projectName 제외 상대경로 (파일: 전체 경로, 폴더: 해당 폴더 경로) */
+  /** 상대경로 (파일: 전체 경로, 폴더: 해당 폴더 경로) */
   relPath: string
   children?: UploadTreeNode[]
   /** type === 'file' 일 때만 존재 */
@@ -160,18 +123,17 @@ export interface UploadTreeNode {
 }
 
 /**
- * 업로드 파일들을 "프로젝트 루트 기준 상대경로"로 정규화하여 트리로 구성합니다.
- * emptyFolders를 전달하면 파일이 없어도 해당 폴더를 트리에 유지합니다.
+ * 업로드 파일들을 상대경로로 정규화하여 트리로 구성합니다.
+ * @param files 파일 목록
+ * @param emptyFolders 빈 폴더 집합 (파일이 없어도 해당 폴더를 트리에 유지)
  */
 export function buildUploadTree(
   files: File[], 
-  projectName: string, 
   emptyFolders: Set<string> = new Set()
 ): UploadTreeNode {
-  const safeProject = (projectName || '').trim()
   const root: UploadTreeNode = {
     type: 'folder',
-    name: safeProject || '(project)',
+    name: 'Files',
     relPath: '',
     children: []
   }
@@ -197,13 +159,13 @@ export function buildUploadTree(
   }
 
   const sorted = [...files].sort((a, b) => {
-    const pa = getNormalizedUploadPathWithoutProject(a, safeProject)
-    const pb = getNormalizedUploadPathWithoutProject(b, safeProject)
+    const pa = getNormalizedUploadPath(a)
+    const pb = getNormalizedUploadPath(b)
     return pa.localeCompare(pb)
   })
 
   for (const file of sorted) {
-    const rel = getNormalizedUploadPathWithoutProject(file, safeProject)
+    const rel = getNormalizedUploadPath(file)
     const parts = splitPath(rel)
     if (parts.length === 0) continue
 
@@ -263,17 +225,13 @@ export function collectAllFolderPaths(node: UploadTreeNode): Set<string> {
 /**
  * 업로드된 파일들(UploadedFile[])을 트리 구조로 변환합니다.
  * fileName을 경로로 파싱하여 트리를 구성합니다.
- * 
- * 기존 buildUploadTree와 동일한 로직을 재사용하되, File 객체 대신 fileName/fileContent를 사용합니다.
  */
 export function buildUploadTreeFromUploadedFiles(
-  uploadedFiles: Array<{ fileName: string; fileContent?: string }>,
-  projectName: string
+  uploadedFiles: Array<{ fileName: string; fileContent?: string }>
 ): UploadTreeNode {
-  const safeProject = (projectName || '').trim()
   const root: UploadTreeNode = {
     type: 'folder',
-    name: safeProject || '(project)',
+    name: 'Files',
     relPath: '',
     children: []
   }
@@ -283,11 +241,7 @@ export function buildUploadTreeFromUploadedFiles(
   )
 
   for (const uploadedFile of sorted) {
-    // fileName에서 projectName 제거하여 상대경로 추출
-    let relPath = uploadedFile.fileName
-    if (safeProject && relPath.startsWith(safeProject + '/')) {
-      relPath = relPath.substring(safeProject.length + 1)
-    }
+    const relPath = uploadedFile.fileName
     
     const parts = splitPath(relPath)
     if (parts.length === 0) continue
@@ -333,38 +287,17 @@ export function buildUploadTreeFromUploadedFiles(
 }
 
 // =============================================================================
-// 4) DDL / 중복 제거(dedupe)
+// 4) 중복 제거(dedupe)
 // =============================================================================
 
 /**
- * 사용자가 DDL 패널로 넣은 파일들의 파일명 목록을 추출합니다.
- * - relPath가 'ddl/...' 형태인 파일만 대상
- * - 반환값은 'ddl/' 제거한 파일명만 (폴더 구조 무시, ddl/ 아래 모든 파일)
+ * 파일 목록을 상대경로 기준으로 고유화합니다.
  */
-export function getDdlPathsFromFiles(files: File[], projectName: string): string[] {
-  const safeProject = (projectName || '').trim()
-  const ddlPaths: string[] = []
-  for (const file of files) {
-    const rel = getNormalizedUploadPathWithoutProject(file, safeProject)
-    const parts = splitPath(rel)
-    if (parts.length === 0) continue
-    if (parts[0]?.toLowerCase() !== 'ddl') continue
-    // ddl/ 제거하고 파일명만 추출 (폴더 구조 무시)
-    const fileName = parts[parts.length - 1] // 마지막이 파일명
-    if (fileName) ddlPaths.push(fileName)
-  }
-  return Array.from(new Set(ddlPaths)).sort((a, b) => a.localeCompare(b))
-}
-
-/**
- * 파일 목록을 "정규화된 프로젝트 루트 기준 상대경로"로 고유화합니다.
- */
-export function uniqueFilesByRelPath(files: File[], projectName: string): File[] {
-  const safeProject = (projectName || '').trim()
+export function uniqueFilesByRelPath(files: File[]): File[] {
   const seen = new Set<string>()
   const out: File[] = []
   for (const f of files) {
-    const rel = getNormalizedUploadPathWithoutProject(f, safeProject)
+    const rel = getNormalizedUploadPath(f)
     if (seen.has(rel)) continue
     seen.add(rel)
     out.push(f)
@@ -417,7 +350,7 @@ export function resolveSelectedTargetFolder(
 }
 
 /**
- * sourceRelPath(프로젝트 제외) 파일을 targetFolderRelPath로 이동시킨 새 relPath를 계산합니다.
+ * 파일을 targetFolderRelPath로 이동시킨 새 relPath를 계산합니다.
  */
 export function moveRelPathToFolder(sourceRelPath: string, targetFolderRelPath: string): string {
   const sourceParts = splitPath(sourceRelPath)

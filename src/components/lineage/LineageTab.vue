@@ -8,9 +8,7 @@
  * 2. data-platform-olap의 ETL 설정 데이터
  */
 import { ref, computed, onMounted, watch } from 'vue'
-import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
-import { storeToRefs } from 'pinia'
 import LineageGraph from './LineageGraph.vue'
 import LineageDetailPanel from './LineageDetailPanel.vue'
 import { IconRefresh, IconUpload, IconSearch } from '@/components/icons'
@@ -20,9 +18,7 @@ const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? 'http://localhos
 const OLAP_API_BASE = `${API_GATEWAY_URL}/olap/api`
 
 // 스토어
-const projectStore = useProjectStore()
 const sessionStore = useSessionStore()
-const { projectName } = storeToRefs(projectStore)
 
 // 상태
 const isLoading = ref(false)
@@ -170,14 +166,13 @@ async function loadLineageData() {
       console.warn('OLAP 리니지 데이터 로드 실패 (무시됨):', olapErr)
     }
     
-    // 2. Neo4j 리니지 데이터 가져오기 (프로젝트가 선택된 경우)
-    if (projectName.value) {
-      try {
-        const headers = sessionStore.getHeaders()
-        const response = await fetch(
-          `/robo/lineage/?projectName=${encodeURIComponent(projectName.value)}`,
-          { headers }
-        )
+    // 2. Neo4j 리니지 데이터 가져오기
+    try {
+      const headers = sessionStore.getHeaders()
+      const response = await fetch(
+        `/robo/lineage/`,
+        { headers }
+      )
         
         if (response.ok) {
           const data = await response.json()
@@ -207,7 +202,6 @@ async function loadLineageData() {
       } catch (neo4jErr) {
         console.warn('Neo4j 리니지 데이터 로드 실패 (무시됨):', neo4jErr)
       }
-    }
     
     // 데이터 설정
     lineageData.value = {
@@ -232,7 +226,7 @@ async function loadLineageData() {
 
 // ETL 코드 분석
 async function analyzeEtlCode(sqlContent: string, fileName: string = '') {
-  if (!projectName.value || !sqlContent.trim()) return
+  if (!sqlContent.trim()) return
   
   isLoading.value = true
   error.value = null
@@ -246,7 +240,6 @@ async function analyzeEtlCode(sqlContent: string, fileName: string = '') {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        projectName: projectName.value,
         sqlContent,
         fileName,
         dbms: 'oracle'
@@ -272,11 +265,6 @@ async function analyzeEtlCode(sqlContent: string, fileName: string = '') {
 function handleNodeSelect(node: LineageNode | null) {
   selectedNode.value = node
 }
-
-// 프로젝트 변경 시 데이터 로드
-watch(projectName, () => {
-  loadLineageData()
-}, { immediate: true })
 
 onMounted(() => {
   loadLineageData()
@@ -309,9 +297,6 @@ async function handleFileUpload(event: Event) {
           <span class="title-icon">🔀</span>
           데이터 리니지
         </h2>
-        <span class="project-badge" v-if="projectName">
-          {{ projectName }}
-        </span>
       </div>
       
       <div class="header-actions">

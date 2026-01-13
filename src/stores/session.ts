@@ -1,20 +1,10 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
-import { v4 as uuidv4 } from 'uuid'
 
-const STORAGE_KEY_SESSION_ID = 'robo-analyzer-session-id'
 const STORAGE_KEY_API_KEY = 'robo-analyzer-api-key'
 const STORAGE_KEY_THEME = 'robo-analyzer-theme'
-const _STORAGE_KEY_ACTIVE_TAB = 'robo-analyzer-active-tab'
-void _STORAGE_KEY_ACTIVE_TAB // suppress unused warning
 
 export type Theme = 'dark' | 'light'
-
-// ============================================================================
-// 고정 세션 ID (로그인 미구현 시 사용)
-// 로그인 기능 구현 후 이 값을 제거하고 동적 생성으로 변경
-// ============================================================================
-const FIXED_SESSION_ID = 'a1ce4674-4deb-4647-b880-e10e6551284f'
 
 // 로컬스토리지에서 값 로드
 const loadFromStorage = (key: string, defaultValue: string): string => {
@@ -33,10 +23,6 @@ const removeFromStorage = (key: string): void => {
 }
 
 export const useSessionStore = defineStore('session', () => {
-  // 세션 ID - 고정값 사용 (로그인 미구현)
-  // TODO: 로그인 구현 시 loadFromStorage(STORAGE_KEY_SESSION_ID, uuidv4())로 변경
-  const sessionId = ref<string>(FIXED_SESSION_ID)
-  
   // OpenAI API Key (옵션) - 로컬스토리지에서 로드
   const apiKey = ref<string>(
     loadFromStorage(STORAGE_KEY_API_KEY, '')
@@ -82,11 +68,6 @@ export const useSessionStore = defineStore('session', () => {
   }
   const pendingSourceNavigation = ref<SourceNavigation | null>(null)
   
-  // 세션 ID 변경 시 로컬스토리지에 저장
-  watch(sessionId, (newId) => {
-    saveToStorage(STORAGE_KEY_SESSION_ID, newId)
-  }, { immediate: true })
-  
   // API Key 변경 시 로컬스토리지에 저장
   watch(apiKey, (newKey) => {
     saveToStorage(STORAGE_KEY_API_KEY, newKey)
@@ -99,20 +80,14 @@ export const useSessionStore = defineStore('session', () => {
   }, { immediate: true })
   
   // 새 세션 생성 (로컬스토리지도 초기화)
-  // TODO: 로그인 구현 시 uuidv4()로 변경
   const createNewSession = () => {
-    sessionId.value = FIXED_SESSION_ID
     apiKey.value = ''
     activeTab.value = 'upload'
-    // 로컬스토리지는 watch에서 자동 저장됨
   }
   
   // 세션 초기화 (로컬스토리지 완전 삭제)
-  // TODO: 로그인 구현 시 uuidv4()로 변경
   const clearSession = () => {
-    removeFromStorage(STORAGE_KEY_SESSION_ID)
     removeFromStorage(STORAGE_KEY_API_KEY)
-    sessionId.value = FIXED_SESSION_ID
     apiKey.value = ''
     activeTab.value = 'upload'
   }
@@ -224,7 +199,6 @@ export const useSessionStore = defineStore('session', () => {
   // 헤더 생성
   const getHeaders = (): Record<string, string> => {
     const headers: Record<string, string> = {
-      'Session-UUID': sessionId.value,
       'Accept-Language': 'ko'
     }
     
@@ -236,7 +210,6 @@ export const useSessionStore = defineStore('session', () => {
   }
   
   return {
-    sessionId,
     apiKey,
     activeTab,
     theme,

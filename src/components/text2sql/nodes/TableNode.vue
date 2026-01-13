@@ -3,7 +3,6 @@ import { Handle, Position } from '@vue-flow/core'
 import { computed, inject, ref, watch } from 'vue'
 import type { Text2SqlColumnInfo } from '@/types'
 import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
-import { useSessionStore } from '@/stores/session'
 import { useProjectStore } from '@/stores/project'
 import { roboSchemaApi } from '@/services/api'
 
@@ -41,7 +40,6 @@ const onLoadRelated = inject<(tableName: string) => void>('onLoadRelated')
 
 // 캔버스 스토어 (실시간 업데이트 감지용)
 const canvasStore = useSchemaCanvasStore()
-const sessionStore = useSessionStore()
 const projectStore = useProjectStore()
 
 // 노드 업데이트 애니메이션 상태
@@ -156,7 +154,6 @@ async function loadProcedureReferences() {
   isLoadingReferences.value = true
   try {
     const result = await roboSchemaApi.getTableReferences(
-      sessionStore.sessionId,
       props.data.tableName,
       { schema: props.data.schema }
     )
@@ -201,7 +198,6 @@ async function loadColumnReferences(columnName: string) {
   isLoadingColumnReferences.value = true
   try {
     const result = await roboSchemaApi.getTableReferences(
-      sessionStore.sessionId,
       props.data.tableName,
       { schema: props.data.schema, columnName }
     )

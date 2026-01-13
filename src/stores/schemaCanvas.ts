@@ -14,7 +14,6 @@ import type { Edge, Node } from '@vue-flow/core'
 import { text2sqlApi, roboSchemaApi } from '@/services/api'
 import type { Text2SqlTableInfo, Text2SqlColumnInfo } from '@/types'
 import { useSessionStore } from './session'
-import { useProjectStore } from './project'
 import ELK from 'elkjs/lib/elk.bundled.js'
 
 export type SchemaDataSource = 'robo' | 'text2sql'
@@ -40,11 +39,9 @@ export interface RelationshipData {
 }
 
 export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
-  // Session & Project stores
+  // Session stores
   const sessionStore = useSessionStore()
-  const projectStore = useProjectStore()
-  const { sessionId, apiKey: sessionApiKey } = storeToRefs(sessionStore)
-  const { projectName } = storeToRefs(projectStore)
+  const { apiKey: sessionApiKey } = storeToRefs(sessionStore)
   
   // Data source selection
   const dataSource = ref<SchemaDataSource>('robo')
@@ -493,8 +490,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     try {
       if (dataSource.value === 'robo') {
         // Neo4j 직접 조회 (robo-analyzer)
-        const tables = await roboSchemaApi.getTables(sessionId.value, {
-          projectName: projectName.value,
+        const tables = await roboSchemaApi.getTables({
           limit: 200
         })
         allTables.value = tables.map(t => ({
@@ -543,9 +539,8 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     
     try {
       const results = await roboSchemaApi.semanticSearch(
-        sessionId.value,
         query,
-        { projectName: projectName.value, limit: 10, apiKey }
+        { limit: 10, apiKey }
       )
       
       semanticSearchResults.value = results
@@ -576,9 +571,8 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       let columns: Text2SqlColumnInfo[]
       
       if (dataSource.value === 'robo') {
-        const roboColumns = await roboSchemaApi.getTableColumns(sessionId.value, tableName, {
-          schema,
-          projectName: projectName.value
+        const roboColumns = await roboSchemaApi.getTableColumns(tableName, {
+          schema
         })
         columns = roboColumns.map(c => ({
           name: c.name,
@@ -606,7 +600,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       let relationships: RelationshipData[]
       
       if (dataSource.value === 'robo') {
-        const response = await roboSchemaApi.getRelationships(sessionId.value, projectName.value)
+        const response = await roboSchemaApi.getRelationships()
         relationships = (response.relationships || []).map(r => ({
           from_table: r.from_table,
           from_schema: r.from_schema,
@@ -683,10 +677,9 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   async function loadRelatedTablesFromNeo4j(tableName: string) {
     try {
       console.log(`[SchemaCanvas] 🔍 Loading related tables for: ${tableName}`)
-      console.log(`[SchemaCanvas] Session ID: ${sessionId.value}`)
       
       // Neo4j API를 통해 연결된 테이블 조회
-      const result = await roboSchemaApi.getRelatedTables(sessionId.value, tableName)
+      const result = await roboSchemaApi.getRelatedTables(tableName)
       
       console.log(`[SchemaCanvas] API Response:`, result)
       
@@ -914,7 +907,6 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     // Statement 설명 로드
     try {
       const result = await roboSchemaApi.getProcedureStatements(
-        sessionId.value,
         procedureName,
         fileDirectory
       )
@@ -1241,7 +1233,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   async function addRelationship(relationship: Omit<RelationshipData, 'relationship_type'>) {
     try {
       if (dataSource.value === 'robo') {
-        await roboSchemaApi.addRelationship(sessionId.value, {
+        await roboSchemaApi.addRelationship({
           ...relationship,
           relationship_type: 'FK_TO_TABLE'
         })
@@ -1291,7 +1283,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       }
       
       if (dataSource.value === 'robo') {
-        await roboSchemaApi.addRelationship(sessionId.value, relData)
+        await roboSchemaApi.addRelationship(relData)
       } else {
         await text2sqlApi.addRelationship(relData)
       }
@@ -1312,7 +1304,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       }
       
       if (dataSource.value === 'robo') {
-        await roboSchemaApi.deleteRelationship(sessionId.value, params)
+        await roboSchemaApi.deleteRelationship(params)
       } else {
         await text2sqlApi.removeRelationship({
           ...params,

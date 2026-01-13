@@ -4,13 +4,10 @@ import UploadTree from './UploadTree.vue'
 import AddMenu from './AddMenu.vue'
 import type { SourceType } from '@/types'
 import type { DetectTypesResponse } from '@/services/api'
-import { buildUploadTree, collectAllFolderPaths, forceWebkitRelativePath, getNormalizedUploadPathWithoutProject, getParentFolderRelPath, inferProjectNameFromPicked, mapPickedFilesToTarget, moveRelPathToFolder, normalizeSlashes, resolveSelectedTargetFolder, splitPath, type UploadTreeNode, uniqueFilesByRelPath } from '@/utils/upload'
+import { buildUploadTree, collectAllFolderPaths, forceWebkitRelativePath, getNormalizedUploadPath, getParentFolderRelPath, mapPickedFilesToTarget, moveRelPathToFolder, normalizeSlashes, resolveSelectedTargetFolder, splitPath, type UploadTreeNode, uniqueFilesByRelPath } from '@/utils/upload'
 import { IconFolder, IconX, IconCheck, IconAlertTriangle, IconLoader } from '@/components/icons'
 
 interface Props {
-  initialMetadata: {
-    projectName: string
-  }
   initialFiles?: File[]
   /** 자동 감지된 파일 타입 정보 */
   detectedTypes?: DetectTypesResponse | null
@@ -21,13 +18,11 @@ interface Props {
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
-  confirm: [metadata: { projectName: string; sourceType: SourceType }]
+  confirm: [metadata: { sourceType: SourceType }]
   cancel: []
   'add-files': [files: File[], reanalyze: boolean]
   'files-updated': [files: File[]]
 }>()
-
-const projectName = ref(props.initialMetadata.projectName || '')
 const files = ref<File[]>([...(props.initialFiles || [])])
 const sourceType = ref<SourceType>('java')
 
@@ -118,13 +113,10 @@ watch(files, (newFiles) => {
 }, { deep: true })
 
 // 유효성 검사
-const isValid = computed(() => 
-  projectName.value.trim() && hasFiles.value
-)
+const isValid = computed(() => hasFiles.value)
 
 // 유효성 오류 메시지
 const validationError = computed(() => {
-  if (!projectName.value.trim()) return '프로젝트명을 입력해주세요'
   if (!hasFiles.value) return '파일을 추가해주세요'
   return ''
 })
@@ -158,15 +150,11 @@ const isDetecting = computed(() => props.isDetecting ?? false)
 // detectedTypes prop을 로컬에서 사용
 const detectedTypes = computed(() => props.detectedTypes ?? null)
 
-watch(() => props.initialMetadata, (val) => {
-  projectName.value = val.projectName || ''
-}, { deep: true })
-
 watch(() => props.initialFiles, (val) => {
   files.value = [...(val || [])]
 }, { deep: true })
 
-const tree = computed(() => buildUploadTree(files.value, projectName.value, emptyFolders.value))
+const tree = computed(() => buildUploadTree(files.value, emptyFolders.value))
 
 const ddlTree = computed(() => {
   const root = tree.value
@@ -228,23 +216,15 @@ const fileTree = computed(() => {
   }
 })
 const mergeFiles = (incoming: File[]) => {
-  const next = uniqueFilesByRelPath([...files.value, ...incoming], projectName.value)
+  const next = uniqueFilesByRelPath([...files.value, ...incoming])
   files.value = next
 }
 
 type PickKind = 'folder' | 'file'
 type PanelKind = 'file' | 'ddl'
 
-const ensureProjectName = (picked: File[]) => {
-  if (projectName.value.trim()) return
-  const inferred = inferProjectNameFromPicked(picked)
-  if (inferred) projectName.value = inferred
-}
-
 const applyPicked = (panel: PanelKind, kind: PickKind, picked: File[], input: HTMLInputElement) => {
   if (!picked.length) return
-
-  ensureProjectName(picked)
 
   // 각 패널은 자신의 선택 상태만 사용
   const selectedPath = panel === 'ddl' ? ddlSelectedRelPath.value : fileSelectedRelPath.value
@@ -266,7 +246,6 @@ const handleConfirm = () => {
     return
   }
   emit('confirm', {
-    projectName: projectName.value.trim(),
     sourceType: sourceType.value
   })
 }
@@ -356,7 +335,7 @@ const handleFileTreeRemove = (relPath: string) => {
   
   // 삭제 대상이 아닌 파일만 유지
   files.value = files.value.filter(f => {
-    const fileRelPath = getNormalizedUploadPathWithoutProject(f, projectName.value)
+    const fileRelPath = getNormalizedUploadPath(f)
     return !shouldRemoveFile(fileRelPath, relPath)
   })
   
@@ -391,7 +370,7 @@ const handleDdlTreeRemove = (relPath: string) => {
   if (!relPath) return
   
   files.value = files.value.filter(f => {
-    const fileRelPath = getNormalizedUploadPathWithoutProject(f, projectName.value)
+    const fileRelPath = getNormalizedUploadPath(f)
     return !shouldRemoveFile(fileRelPath, relPath)
   })
   
@@ -404,7 +383,7 @@ const moveFileRelPath = (sourceRelPath: string, targetFolderRelPath: string) => 
   if (sourceRelPath === target) return
 
   const next = files.value.map((f) => {
-    const p = getNormalizedUploadPathWithoutProject(f, projectName.value)
+    const p = getNormalizedUploadPath(f)
     if (p !== sourceRelPath) return f
     return forceWebkitRelativePath(f, target)
   })
@@ -426,18 +405,9 @@ const moveFileRelPath = (sourceRelPath: string, targetFolderRelPath: string) => 
       </div>
       
       <div class="modal-body">
-        <!-- 상단: 프로젝트명과 소스 타입 -->
+        <!-- 상단: 소스 타입 선택 -->
         <div class="top-row">
-          <div class="project-name-group">
-            <label class="form-label">프로젝트명 <span class="required">*</span></label>
-            <input 
-              v-model="projectName" 
-              class="input" 
-              :class="{ 'input--error': !projectName.trim() }"
-              placeholder="프로젝트명 입력"
-            />
-          </div>
-          <div class="source-type-group">
+          <div class="source-type-group source-type-full">
             <label class="form-label form-label--compact">
               소스 타입 <span class="required">*</span>
               <span v-if="isDetecting" class="detecting-badge">
@@ -605,21 +575,14 @@ const moveFileRelPath = (sourceRelPath: string, targetFolderRelPath: string) => 
   gap: var(--spacing-md);
 }
 
-.project-name-group {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  
-  .input {
-    font-size: 14px;
-    padding: 10px 12px;
-  }
-}
-
 .source-type-group {
   flex: 0 0 auto;
   width: 180px;
+  
+  &.source-type-full {
+    flex: 1;
+    width: auto;
+  }
   display: flex;
   flex-direction: column;
   gap: 4px;

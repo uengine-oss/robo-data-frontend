@@ -158,7 +158,6 @@ async function postFormData<T>(
     const response = await fetch(url, {
       method: 'POST',
       headers: { 
-        'Session-UUID': headers['Session-UUID'],
         ...(headers['OpenAI-Api-Key'] ? { 'OpenAI-Api-Key': headers['OpenAI-Api-Key'] } : {}),
         'Accept-Language': headers['Accept-Language'] || 'ko'
         // Content-Type은 명시하지 않음 (브라우저가 multipart/form-data로 자동 설정)
@@ -308,8 +307,7 @@ export const antlrApi = {
     
     for (const file of files) {
       // 서버가 폴더 구조를 그대로 저장/복원할 수 있도록 "파일명" 자리에 상대경로를 넣어 전송
-      // (프로젝트 최상위 폴더는 항상 metadata.projectName 으로 고정)
-      const path = getNormalizedUploadPath(file, metadata.projectName)
+      const path = getNormalizedUploadPath(file)
       formData.append('files', file, path)
     }
     
@@ -412,7 +410,6 @@ export const roboApi = {
    * 소스 파일 분석 → Neo4j 그래프 생성
    * 
    * Request Body:
-   *   projectName: 프로젝트명 (필수)
    *   strategy: "framework" | "dbms" (기본: framework)
    *   target: "java" | "oracle" | ... (기본: java)
    * 
@@ -434,9 +431,6 @@ export const roboApi = {
   /**
    * Neo4j에 기존 데이터 존재 여부 확인
    * 
-   * Request Headers:
-   *   Session-UUID: 세션 UUID (필수)
-   * 
    * Response: JSON { hasData: boolean, nodeCount: number }
    */
   async checkData(headers: Headers): Promise<{ hasData: boolean; nodeCount: number }> {
@@ -454,9 +448,6 @@ export const roboApi = {
   
   /**
    * Neo4j에서 기존 그래프 데이터 조회
-   * 
-   * Request Headers:
-   *   Session-UUID: 세션 UUID (필수)
    * 
    * Response: JSON { Nodes: [...], Relationships: [...] }
    */
@@ -478,9 +469,6 @@ export const roboApi = {
   
   /**
    * 사용자 데이터 전체 삭제 (임시 파일 + Neo4j 그래프)
-   * 
-   * Request Headers:
-   *   Session-UUID: 세션 UUID (필수)
    * 
    * Response: JSON
    */
@@ -561,7 +549,6 @@ export interface PipelinePhaseInfo {
 }
 
 export interface PipelineStatus {
-  sessionId: string
   currentPhase: string
   phaseName: string
   phaseOrder: number
@@ -629,7 +616,6 @@ export interface RoboSchemaTableInfo {
   description_source?: string  // 설명 출처: ddl, procedure, user
   analyzed_description?: string  // 프로시저 분석에서 도출된 설명
   column_count: number
-  project_name?: string
 }
 
 export interface RoboSchemaColumnInfo {
@@ -662,18 +648,14 @@ export const roboSchemaApi = {
    * 테이블 목록 조회 (Neo4j)
    */
   async getTables(
-    sessionId: string,
-    options?: { search?: string; schema?: string; projectName?: string; limit?: number }
+    options?: { search?: string; schema?: string; limit?: number }
   ): Promise<RoboSchemaTableInfo[]> {
     const params = new URLSearchParams()
     if (options?.search) params.append('search', options.search)
     if (options?.schema) params.append('schema', options.schema)
-    if (options?.projectName) params.append('project_name', options.projectName)
     if (options?.limit) params.append('limit', options.limit.toString())
     
-    const response = await fetch(`${ROBO_BASE_URL}/schema/tables?${params}`, {
-      headers: { 'Session-UUID': sessionId }
-    })
+    const response = await fetch(`${ROBO_BASE_URL}/schema/tables?${params}`)
     
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`)
@@ -685,17 +667,13 @@ export const roboSchemaApi = {
    * 테이블 컬럼 목록 조회 (Neo4j)
    */
   async getTableColumns(
-    sessionId: string,
     tableName: string,
-    options?: { schema?: string; projectName?: string }
+    options?: { schema?: string }
   ): Promise<RoboSchemaColumnInfo[]> {
     const params = new URLSearchParams()
     if (options?.schema) params.append('schema', options.schema)
-    if (options?.projectName) params.append('project_name', options.projectName)
     
-    const response = await fetch(`${ROBO_BASE_URL}/schema/tables/${tableName}/columns?${params}`, {
-      headers: { 'Session-UUID': sessionId }
-    })
+    const response = await fetch(`${ROBO_BASE_URL}/schema/tables/${tableName}/columns?${params}`)
     
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`)
@@ -706,16 +684,8 @@ export const roboSchemaApi = {
   /**
    * 테이블 관계 목록 조회 (Neo4j)
    */
-  async getRelationships(
-    sessionId: string,
-    projectName?: string
-  ): Promise<{ relationships: RoboSchemaRelationship[] }> {
-    const params = new URLSearchParams()
-    if (projectName) params.append('project_name', projectName)
-    
-    const response = await fetch(`${ROBO_BASE_URL}/schema/relationships?${params}`, {
-      headers: { 'Session-UUID': sessionId }
-    })
+  async getRelationships(): Promise<{ relationships: RoboSchemaRelationship[] }> {
+    const response = await fetch(`${ROBO_BASE_URL}/schema/relationships`)
     
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`)
@@ -727,7 +697,6 @@ export const roboSchemaApi = {
    * 특정 테이블과 연결된 모든 테이블 조회 (Neo4j Cypher)
    */
   async getRelatedTables(
-    sessionId: string,
     tableName: string
   ): Promise<{
     base_table: string
@@ -740,9 +709,7 @@ export const roboSchemaApi = {
       column_pairs?: Array<{ source: string; target: string }>
     }>
   }> {
-    const response = await fetch(`${ROBO_BASE_URL}/graph/related-tables/${encodeURIComponent(tableName)}`, {
-      headers: { 'Session-UUID': sessionId }
-    })
+    const response = await fetch(`${ROBO_BASE_URL}/graph/related-tables/${encodeURIComponent(tableName)}`)
     
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`)
@@ -754,7 +721,6 @@ export const roboSchemaApi = {
    * 테이블/컬럼이 참조된 프로시저 목록 조회
    */
   async getTableReferences(
-    sessionId: string,
     tableName: string,
     options?: { schema?: string; columnName?: string }
   ): Promise<{
@@ -773,9 +739,7 @@ export const roboSchemaApi = {
     if (options?.schema) params.append('schema', options.schema)
     if (options?.columnName) params.append('column_name', options.columnName)
     
-    const response = await fetch(`${ROBO_BASE_URL}/schema/tables/${encodeURIComponent(tableName)}/references?${params}`, {
-      headers: { 'Session-UUID': sessionId }
-    })
+    const response = await fetch(`${ROBO_BASE_URL}/schema/tables/${encodeURIComponent(tableName)}/references?${params}`)
     
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`)
@@ -787,7 +751,6 @@ export const roboSchemaApi = {
    * 프로시저의 모든 Statement와 AI 설명 조회
    */
   async getProcedureStatements(
-    sessionId: string,
     procedureName: string,
     fileDirectory?: string
   ): Promise<{
@@ -802,9 +765,7 @@ export const roboSchemaApi = {
     const params = new URLSearchParams()
     if (fileDirectory) params.append('file_directory', fileDirectory)
     
-    const response = await fetch(`${ROBO_BASE_URL}/schema/procedures/${encodeURIComponent(procedureName)}/statements?${params}`, {
-      headers: { 'Session-UUID': sessionId }
-    })
+    const response = await fetch(`${ROBO_BASE_URL}/schema/procedures/${encodeURIComponent(procedureName)}/statements?${params}`)
     
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`)
@@ -816,7 +777,6 @@ export const roboSchemaApi = {
    * 테이블 관계 추가 (Neo4j)
    */
   async addRelationship(
-    sessionId: string,
     relationship: {
       from_table: string
       from_schema?: string
@@ -831,8 +791,7 @@ export const roboSchemaApi = {
     const response = await fetch(`${ROBO_BASE_URL}/schema/relationships`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Session-UUID': sessionId
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(relationship)
     })
@@ -847,7 +806,6 @@ export const roboSchemaApi = {
    * 테이블 관계 삭제 (Neo4j)
    */
   async deleteRelationship(
-    sessionId: string,
     params: {
       from_table: string
       from_column: string
@@ -857,8 +815,7 @@ export const roboSchemaApi = {
   ): Promise<{ success: boolean; message: string }> {
     const searchParams = new URLSearchParams(params as Record<string, string>)
     const response = await fetch(`${ROBO_BASE_URL}/schema/relationships?${searchParams}`, {
-      method: 'DELETE',
-      headers: { 'Session-UUID': sessionId }
+      method: 'DELETE'
     })
     
     if (!response.ok) {
@@ -871,9 +828,8 @@ export const roboSchemaApi = {
    * 시멘틱 검색: 테이블 설명의 의미적 유사도 기반 검색
    */
   async semanticSearch(
-    sessionId: string,
     query: string,
-    options?: { projectName?: string; limit?: number; apiKey?: string }
+    options?: { limit?: number; apiKey?: string }
   ): Promise<Array<{
     name: string
     schema: string
@@ -881,8 +837,7 @@ export const roboSchemaApi = {
     similarity: number
   }>> {
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Session-UUID': sessionId
+      'Content-Type': 'application/json'
     }
     
     if (options?.apiKey) {
@@ -894,7 +849,6 @@ export const roboSchemaApi = {
       headers,
       body: JSON.stringify({
         query,
-        project_name: options?.projectName,
         limit: options?.limit || 10
       })
     })
@@ -1171,7 +1125,6 @@ export interface LineageGraphResponse {
 }
 
 export interface LineageAnalyzeRequest {
-  projectName: string
   sqlContent: string
   fileName?: string
   dbms?: string
@@ -1513,11 +1466,9 @@ export const lineageApi = {
    * 데이터 리니지 그래프 조회
    */
   async getLineageGraph(
-    headers: Headers,
-    projectName?: string
+    headers: Headers
   ): Promise<LineageGraphResponse> {
-    const params = projectName ? `?projectName=${encodeURIComponent(projectName)}` : ''
-    const response = await fetch(`${ROBO_BASE_URL}/lineage/${params}`, {
+    const response = await fetch(`${ROBO_BASE_URL}/lineage/`, {
       method: 'GET',
       headers
     })

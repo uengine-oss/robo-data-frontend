@@ -95,7 +95,6 @@ export const useProjectStore = defineStore('project', () => {
   // 상태 - 프로젝트 메타데이터
   // ==========================================================================
   
-  const projectName = ref('')
   const sourceType = ref<SourceType>('java')
   const ddl = ref<string[]>([])
   
@@ -121,7 +120,6 @@ export const useProjectStore = defineStore('project', () => {
   function saveToStorage() {
     try {
       const state = {
-        projectName: projectName.value,
         sourceType: sourceType.value,
         uploadedFiles: uploadedFiles.value,
         uploadedDdlFiles: uploadedDdlFiles.value
@@ -140,11 +138,10 @@ export const useProjectStore = defineStore('project', () => {
       const saved = localStorage.getItem(STORAGE_KEY)
       if (saved) {
         const state = JSON.parse(saved)
-        if (state.projectName) projectName.value = state.projectName
         if (state.sourceType) sourceType.value = state.sourceType
         if (state.uploadedFiles) uploadedFiles.value = state.uploadedFiles
         if (state.uploadedDdlFiles) uploadedDdlFiles.value = state.uploadedDdlFiles
-        console.log('[projectStore] 상태 복원됨:', state.projectName)
+        console.log('[projectStore] 상태 복원됨')
       }
     } catch (e) {
       console.warn('LocalStorage 복원 실패:', e)
@@ -218,19 +215,17 @@ export const useProjectStore = defineStore('project', () => {
   
   const metadata = computed<ProjectMetadata>(() => ({
     sourceType: sourceType.value,
-    projectName: projectName.value,
     ddl: ddl.value
   }))
   
   const analyzeMeta = computed<BackendRequestMetadata>(() => ({
     strategy: (sourceType.value === 'oracle' || sourceType.value === 'postgresql') ? 'dbms' : 'framework',
     target: sourceType.value,
-    projectName: projectName.value,
     nameCase: nameCaseOption.value
   }))
   
   const isValidConfig = computed(() => 
-    Boolean(projectName.value && (uploadedFiles.value.length > 0 || uploadedDdlFiles.value.length > 0))
+    Boolean(uploadedFiles.value.length > 0 || uploadedDdlFiles.value.length > 0)
   )
   
   // ==========================================================================
@@ -381,10 +376,6 @@ export const useProjectStore = defineStore('project', () => {
   // Actions - Setters
   // ==========================================================================
   
-  function setProjectName(name: string): void {
-    projectName.value = name
-  }
-  
   function setSourceType(type: SourceType): void {
     sourceType.value = type
   }
@@ -406,7 +397,6 @@ export const useProjectStore = defineStore('project', () => {
     
     const result = await antlrApi.uploadFiles(meta, files, sessionStore.getHeaders())
     
-    projectName.value = result.projectName
     sourceType.value = meta.target as SourceType
     uploadedFiles.value = result.files
     uploadedDdlFiles.value = result.ddlFiles
@@ -791,16 +781,10 @@ export const useProjectStore = defineStore('project', () => {
    */
   async function restartPipeline(): Promise<void> {
     console.log('[restartPipeline] 시작', { 
-      projectName: projectName.value, 
       sourceType: sourceType.value,
       filesCount: uploadedFiles.value.length,
       ddlCount: uploadedDdlFiles.value.length
     })
-    
-    if (!projectName.value) {
-      addMessage('error', '❌ 프로젝트 이름이 설정되지 않았습니다. 먼저 파일을 업로드해주세요.')
-      return
-    }
     
     if (uploadedFiles.value.length === 0 && uploadedDdlFiles.value.length === 0) {
       addMessage('error', '❌ 업로드된 파일이 없습니다.')
@@ -832,7 +816,7 @@ export const useProjectStore = defineStore('project', () => {
     clearMessages()
     
     try {
-      addMessage('message', `🔄 인제스천 재시작... (프로젝트: ${projectName.value}, 타입: ${sourceType.value})`)
+      addMessage('message', `🔄 인제스천 재시작... (타입: ${sourceType.value})`)
       
       // 파싱부터 재실행
       await doParse()
@@ -995,7 +979,6 @@ export const useProjectStore = defineStore('project', () => {
    */
   function reset(): void {
     // 메타데이터
-    projectName.value = ''
     ddl.value = []
     
     // 파일
@@ -1026,7 +1009,6 @@ export const useProjectStore = defineStore('project', () => {
   
   return {
     // State
-    projectName,
     sourceType,
     ddl,
     uploadedFiles,
@@ -1056,7 +1038,6 @@ export const useProjectStore = defineStore('project', () => {
     isValidConfig,
     
     // Actions - Setters
-    setProjectName,
     setSourceType,
     setDdl,
     

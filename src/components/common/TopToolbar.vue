@@ -15,8 +15,7 @@ import { getAppTitle } from '@/config/appSettings'
 const sessionStore = useSessionStore()
 const projectStore = useProjectStore()
 
-const { sessionId } = storeToRefs(sessionStore)
-const { projectName, isProcessing, currentStep } = storeToRefs(projectStore)
+const { isProcessing, currentStep } = storeToRefs(projectStore)
 
 const showSettings = ref(false)
 const searchQuery = ref('')
@@ -48,10 +47,6 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('appTitleChange', handleAppTitleChange)
 })
-
-const copySessionId = async () => {
-  await navigator.clipboard.writeText(sessionId.value)
-}
 
 const handleNodeLimitChange = (value: number) => {
   nodeLimit.value = value
@@ -167,13 +162,8 @@ const handleSearch = () => {
     <!-- 우측 영역: 프로젝트 상태 + 사용자 정보 -->
     <div class="header-right">
       <!-- 프로젝트 상태 -->
-      <div class="project-status" v-if="projectName || isProcessing">
-        <div class="project-badge" v-if="projectName">
-          <IconFolder :size="14" />
-          <span class="project-name">{{ projectName }}</span>
-        </div>
-        
-        <div class="progress-indicator" v-if="isProcessing">
+      <div class="project-status" v-if="isProcessing">
+        <div class="progress-indicator">
           <span class="spinner"></span>
           <span class="step-text">{{ currentStep }}</span>
         </div>
@@ -204,7 +194,7 @@ const handleSearch = () => {
       </button>
       
       <!-- 사용자 프로필 -->
-      <div class="user-profile" @click="copySessionId" title="세션 ID 복사">
+      <div class="user-profile">
         <div class="avatar">
           <span>U</span>
         </div>

@@ -7,8 +7,6 @@
  * - 노드 표시 제한 (MAX_DISPLAY_NODES)
  * - UML 다이어그램 깊이
  * - API Key
- * - Session 정보 (읽기 전용)
- * - 프로젝트명 (읽기 전용)
  * - 데이터 삭제
  */
 
@@ -21,12 +19,9 @@ import {
   IconX, 
   IconBarChart, 
   IconKey, 
-  IconClipboard, 
   IconAlertTriangle,
   IconRefresh,
   IconTrash,
-  IconCopy,
-  IconCheck,
   IconEdit
 } from '@/components/icons'
 import { getAppTitle, setAppTitle, DEFAULT_APP_TITLE } from '@/config/appSettings'
@@ -52,8 +47,8 @@ const emit = defineEmits<{
 const sessionStore = useSessionStore()
 const projectStore = useProjectStore()
 
-const { sessionId, apiKey: storeApiKey, theme: storeTheme } = storeToRefs(sessionStore)
-const { projectName, graphData } = storeToRefs(projectStore)
+const { apiKey: storeApiKey, theme: storeTheme } = storeToRefs(sessionStore)
+const { graphData } = storeToRefs(projectStore)
 
 // ============================================================================
 // 설정 상태
@@ -78,9 +73,6 @@ const tempAppTitle = ref(DEFAULT_APP_TITLE)
 /** 변경 여부 */
 const hasChanges = ref(false)
 
-/** 복사 완료 상태 */
-const copied = ref(false)
-
 // store의 apiKey와 동기화
 watch(storeApiKey, (value) => {
   if (value) {
@@ -89,7 +81,7 @@ watch(storeApiKey, (value) => {
 }, { immediate: true })
 
 /** 활성 설정 섹션 */
-const activeSection = ref<'general' | 'display' | 'api' | 'session' | 'danger'>('general')
+const activeSection = ref<'general' | 'display' | 'api' | 'danger'>('general')
 
 // ============================================================================
 // Computed
@@ -117,13 +109,6 @@ void _maskedApiKey // suppress unused warning
 
 function handleClose() {
   emit('close')
-}
-
-
-function handleCopySessionId() {
-  navigator.clipboard.writeText(sessionId.value)
-  copied.value = true
-  setTimeout(() => { copied.value = false }, 2000)
 }
 
 function handleNewSession() {
@@ -254,13 +239,6 @@ watch(() => props.isOpen, (isOpen) => {
               >
                 <IconKey :size="16" />
                 API 설정
-              </button>
-              <button 
-                :class="{ active: activeSection === 'session' }"
-                @click="activeSection = 'session'"
-              >
-                <IconClipboard :size="16" />
-                세션 정보
               </button>
               <button 
                 :class="{ active: activeSection === 'danger' }"
@@ -405,36 +383,6 @@ watch(() => props.isOpen, (isOpen) => {
                     </div>
                   </div>
                 </div>
-              </div>
-
-              <!-- 세션 정보 -->
-              <div v-if="activeSection === 'session'" class="settings-section">
-                <h3>세션 정보</h3>
-                
-                <div class="setting-item readonly">
-                  <div class="setting-label">
-                    <span class="label-text">Session ID</span>
-                    <span class="label-desc">현재 작업 세션의 고유 식별자입니다.</span>
-                  </div>
-                  <div class="setting-control">
-                    <code class="session-id">{{ sessionId }}</code>
-                    <button class="copy-btn" @click="handleCopySessionId" title="복사">
-                      <IconCheck v-if="copied" :size="14" class="check-icon" />
-                      <IconCopy v-else :size="14" />
-                    </button>
-                  </div>
-                </div>
-
-                <div class="setting-item readonly">
-                  <div class="setting-label">
-                    <span class="label-text">프로젝트명</span>
-                    <span class="label-desc">현재 로드된 프로젝트입니다.</span>
-                  </div>
-                  <div class="setting-control">
-                    <span class="project-name">{{ projectName || '없음' }}</span>
-                  </div>
-                </div>
-
               </div>
 
               <!-- 데이터 관리 -->
@@ -862,17 +810,10 @@ watch(() => props.isOpen, (isOpen) => {
 }
 
 // ============================================================================
-// 세션 ID / 프로젝트명
+// 기타 스타일
 // ============================================================================
 
-.session-id {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--color-text);
-  word-break: break-all;
-}
-
-.project-name {
+.info-text {
   font-size: 14px;
   font-weight: 500;
   color: var(--color-text);

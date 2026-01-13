@@ -5,7 +5,7 @@ import UploadTreeNodeItem from './UploadTreeNode.vue'
 
 interface Props {
   root: UploadTreeNode
-  /** relPath (projectName 제외) */
+  /** relPath (상대경로) */
   selectedRelPath?: string | null
   showHeader?: boolean
   enableDnD?: boolean

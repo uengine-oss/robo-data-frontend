@@ -22,7 +22,6 @@ const {
   uploadedFiles, 
   uploadedDdlFiles,
   isProcessing,
-  projectName,
   showDataConfirmModal,
   pendingNodeCount
 } = storeToRefs(projectStore)
@@ -45,20 +44,15 @@ watch(isProcessing, (processing) => {
 
 // 업로드된 파일을 트리 구조로 표시
 const uploadedFileTree = computed(() => 
-  buildUploadTreeFromUploadedFiles(uploadedFiles.value, projectName.value)
+  buildUploadTreeFromUploadedFiles(uploadedFiles.value)
 )
 const uploadedDdlTree = computed(() => 
-  buildUploadTreeFromUploadedFiles(uploadedDdlFiles.value, projectName.value)
+  buildUploadTreeFromUploadedFiles(uploadedDdlFiles.value)
 )
 const selectedRelPath = ref<string | null>(null)
 
 const showModal = ref(false)
 const pendingFiles = ref<File[]>([])
-const pendingMetadata = ref<{
-  projectName: string
-}>({
-  projectName: '',
-})
 
 // 자동 감지 결과
 const detectedTypes = ref<DetectTypesResponse | null>(null)
@@ -95,9 +89,6 @@ const hasUploadedFiles = computed(() =>
 // 드롭존 클릭 시 - 빈 상태로 모달 열기
 const handleOpenModal = () => {
   pendingFiles.value = []
-  pendingMetadata.value = {
-    projectName: '',
-  }
   showModal.value = true
 }
 
@@ -116,9 +107,7 @@ const ANALYZABLE_EXTENSIONS = ['.java', '.sql', '.pls', '.pck', '.pkb', '.pks', 
 
 // 파일 드롭 시 - 파일 분석 후 모달 열기 (자동 타입 감지 포함)
 const handleFilesDrop = async (files: File[]) => {
-  const metadata = analyzeFileStructure(files)
   pendingFiles.value = files
-  pendingMetadata.value = metadata
   detectedTypes.value = null
   
   // 모달 먼저 열기 (로딩 표시)
@@ -201,24 +190,9 @@ const handleFilesDrop = async (files: File[]) => {
   }
 }
 
-// 디렉토리 구조 분석
-const analyzeFileStructure = (files: File[]) => {
-  // 자동 구조 인식은 "최상위 공통 폴더 -> projectName"만 수행
-  const allFirstFolders = new Set<string>()
-  for (const file of files) {
-    const parts = (file.webkitRelativePath || file.name).split('/')
-    if (parts.length >= 2) allFirstFolders.add(parts[0])
-  }
-  const hasCommonRoot = allFirstFolders.size === 1
-  const projectName = hasCommonRoot ? Array.from(allFirstFolders)[0] : ''
-  return {
-    projectName
-  }
-}
-
 // 모달에서 파일 추가 시
 const handleAddFiles = (files: File[]) => {
-  const merged = uniqueFilesByRelPath([...pendingFiles.value, ...files], pendingMetadata.value.projectName)
+  const merged = uniqueFilesByRelPath([...pendingFiles.value, ...files])
   pendingFiles.value = merged
 }
 
@@ -228,7 +202,7 @@ const handleFilesUpdated = (updatedFiles: File[]) => {
 }
 
 // 업로드 확인
-const handleUploadConfirm = async (metadata: { projectName: string; sourceType: import('@/types').SourceType }) => {
+const handleUploadConfirm = async (metadata: { sourceType: import('@/types').SourceType }) => {
   showModal.value = false
   
   if (pendingFiles.value.length === 0) {
@@ -240,11 +214,7 @@ const handleUploadConfirm = async (metadata: { projectName: string; sourceType: 
   projectStore.setSourceType(metadata.sourceType)
   
   try {
-    const uploadMeta = {
-      ...projectStore.analyzeMeta,
-      projectName: metadata.projectName
-    }
-    await projectStore.uploadFiles(pendingFiles.value, uploadMeta)
+    await projectStore.uploadFiles(pendingFiles.value, projectStore.analyzeMeta)
   } catch (error) {
     alert(`업로드 실패: ${error}`)
   }
@@ -702,7 +672,6 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
     <!-- 업로드 모달 -->
     <UploadModal 
       v-if="showModal"
-      :initial-metadata="pendingMetadata"
       :initial-files="pendingFiles"
       :detected-types="detectedTypes"
       :is-detecting="isDetecting"

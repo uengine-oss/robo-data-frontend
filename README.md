@@ -298,17 +298,17 @@ Pinia 스토어는 Composition API 스타일로 작성됩니다:
 ```typescript
 export const useProjectStore = defineStore('project', () => {
   // 상태
-  const projectName = ref('')
+  const sourceType = ref<SourceType>('java')
   
   // Computed
   const isValidConfig = computed(() => ...)
   
   // Actions
-  function setProjectName(name: string) {
-    projectName.value = name
+  function setSourceType(type: SourceType) {
+    sourceType.value = type
   }
   
-  return { projectName, isValidConfig, setProjectName }
+  return { sourceType, isValidConfig, setSourceType }
 })
 ```
 
@@ -361,7 +361,7 @@ onMounted(() => { ... })
 
 **흐름**:
 1. 사용자가 파일을 드래그 앤 드롭 또는 클릭으로 선택
-2. `UploadModal`에서 프로젝트명 설정 및 파일 확인
+2. `UploadModal`에서 소스 타입 선택 및 파일 확인
 3. `projectStore.uploadFiles()` 호출
 4. `antlrApi.uploadFiles()`로 서버에 파일 업로드
 5. 업로드된 파일 목록을 트리 구조로 표시
@@ -507,7 +507,6 @@ const showText2SqlTab = computed(() =>
 
 **주요 상태**:
 ```typescript
-- projectName: string              // 프로젝트명
 - sourceType: SourceType            // 소스 타입 (java, python, oracle, postgresql)
 - convertTarget: ConvertTarget     // 변환 대상
 - uploadedFiles: UploadedFile[]    // 업로드된 파일 목록
@@ -529,18 +528,18 @@ const showText2SqlTab = computed(() =>
 
 ### Session Store (`stores/session.ts`)
 
-세션 및 사용자 설정을 관리합니다.
+사용자 설정 및 탭 상태를 관리합니다.
 
 **주요 상태**:
 ```typescript
-- sessionId: string    // 세션 UUID (localStorage 저장)
 - apiKey: string       // OpenAI API 키 (옵션)
 - activeTab: string    // 현재 활성 탭
+- theme: string        // 테마 (dark/light)
 ```
 
 **주요 액션**:
-- `createNewSession()`: 새 세션 생성
 - `setApiKey()`: API 키 설정
+- `setTheme()`: 테마 설정
 - `getHeaders()`: API 요청 헤더 생성
 
 ### Text2SQL Store (`stores/text2sql.ts`)
@@ -988,9 +987,8 @@ docs: README 업데이트
 ### 로컬 스토리지
 
 다음 설정은 로컬 스토리지에 저장됩니다:
-- `robo-analyzer-session-id`: 세션 ID
 - `robo-analyzer-api-key`: OpenAI API 키
-- `robo-analyzer-active-tab`: 활성 탭
+- `robo-analyzer-theme`: 테마 (dark/light)
 - `nodeLimit`: 노드 제한 수
 - `umlDepth`: UML 탐색 깊이
 

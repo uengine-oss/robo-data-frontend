@@ -76,11 +76,9 @@ const outboundConnections = computed(() => {
     .filter(c => c.node)
 })
 
-// 속성 필터링 (내부 속성 제외)
+// 속성 표시
 const displayProperties = computed(() => {
-  const exclude = ['user_id', 'project_name']
   return Object.entries(props.node.properties || {})
-    .filter(([key]) => !exclude.includes(key))
     .map(([key, value]) => ({ key, value }))
 })
 
