@@ -19,6 +19,7 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    host: '127.0.0.1',  // Gateway에서 접근 가능하도록 IPv4로 바인딩
     proxy: {
       // 모든 API Gateway 요청을 Spring Gateway(9000)로 프록시
       '/api/gateway': {

@@ -244,6 +244,41 @@ const sqlExecutionResult = ref<{
   rows: any[][]
 } | null>(null)
 
+// ProcessGPT 실행 결과 데이터
+const processGptResult = ref<{
+  success: boolean
+  process_instance_id?: string
+  process_name?: string
+  activity_name?: string
+  status?: string
+  form_values?: Record<string, any>
+  message?: string
+  raw_response?: string
+  error?: string
+} | null>(null)
+
+// 스트리밍 실행 로그
+interface StreamLog {
+  id: string
+  event: string
+  message: string
+  data?: any
+  timestamp: string
+}
+const streamingLogs = ref<StreamLog[]>([])
+const isStreaming = ref(false)
+const streamingFinalResponse = ref('')
+const streamingLogsContainer = ref<HTMLElement | null>(null)
+
+// 스트리밍 로그 자동 스크롤
+watch(streamingLogs, () => {
+  nextTick(() => {
+    if (streamingLogsContainer.value) {
+      streamingLogsContainer.value.scrollTop = streamingLogsContainer.value.scrollHeight
+    }
+  })
+}, { deep: true })
+
 // Vue Flow 노드 & 엣지
 const nodes = ref<any[]>([])
 const edges = ref<any[]>([])
@@ -644,6 +679,8 @@ const runSimulation = async () => {
   isSimulating.value = true
   showResultPanel.value = true
   simulationLogs.value = []
+  sqlExecutionResult.value = null
+  processGptResult.value = null
   
   const steps = ['sql', 'condition', 'action']
   
@@ -694,6 +731,134 @@ const getStepStartMessage = (step: string): string => {
     case 'condition': return '조건 평가 중...'
     case 'action': return '조치 실행 준비 중...'
     default: return '처리 중...'
+  }
+}
+
+// ProcessGPT 스트리밍 실행
+const executeProcessGPTStream = async (
+  processName: string, 
+  processId: string, 
+  formValues: Record<string, any>
+): Promise<{ success: boolean; message?: string; error?: string; rawResponse?: string }> => {
+  return new Promise((resolve) => {
+    const requestBody = JSON.stringify({
+      process_name: processName,
+      process_id: processId,
+      form_values: formValues,
+      dry_run: false
+    })
+    
+    // fetch를 사용한 SSE 처리 (EventSource는 POST를 지원하지 않음)
+    fetch('/api/gateway/agent-scheduler/profiles/processgpt/execute-stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: requestBody
+    }).then(async (response) => {
+      if (!response.ok) {
+        resolve({ success: false, error: `HTTP ${response.status}` })
+        return
+      }
+      
+      const reader = response.body?.getReader()
+      if (!reader) {
+        resolve({ success: false, error: 'No response body' })
+        return
+      }
+      
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let finalSuccess = false
+      let finalError = ''
+      let allData = ''
+      
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        
+        buffer += decoder.decode(value, { stream: true })
+        
+        // SSE 이벤트 파싱
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''  // 마지막 불완전한 라인은 버퍼에 유지
+        
+        let currentEvent = ''
+        let currentData = ''
+        
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.substring(7)
+          } else if (line.startsWith('data: ')) {
+            currentData = line.substring(6)
+            
+            if (currentEvent && currentData) {
+              try {
+                const data = JSON.parse(currentData)
+                allData += currentData + '\n'
+                
+                // token 이벤트는 별도 로그로 추가하지 않고 응답에만 누적
+                if (currentEvent === 'token') {
+                  if (data.content) {
+                    streamingFinalResponse.value += data.content
+                  }
+                } else {
+                  // 다른 이벤트는 로그로 추가
+                  const logEntry: StreamLog = {
+                    id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                    event: currentEvent,
+                    message: getEventMessage(currentEvent, data),
+                    data: data,
+                    timestamp: new Date().toISOString()
+                  }
+                  streamingLogs.value.push(logEntry)
+                }
+                
+                // 이벤트별 추가 처리
+                if (currentEvent === 'response' && data.content) {
+                  streamingFinalResponse.value += data.content
+                }
+                if (currentEvent === 'done') {
+                  finalSuccess = data.success !== false
+                }
+                if (currentEvent === 'error') {
+                  finalError = data.error || 'Unknown error'
+                  finalSuccess = false
+                }
+              } catch (e) {
+                console.warn('SSE 파싱 오류:', e)
+              }
+              
+              currentEvent = ''
+              currentData = ''
+            }
+          }
+        }
+      }
+      
+      resolve({
+        success: finalSuccess,
+        message: streamingFinalResponse.value,
+        error: finalError || undefined,
+        rawResponse: allData
+      })
+      
+    }).catch((error) => {
+      resolve({ success: false, error: error.message })
+    })
+  })
+}
+
+// SSE 이벤트를 사용자 친화적 메시지로 변환
+const getEventMessage = (event: string, data: any): string => {
+  switch (event) {
+    case 'start': return '🚀 에이전트 실행 시작'
+    case 'thinking': return '🤔 분석 중...'
+    case 'tool_call': return `🔧 도구 호출: ${data.tool || 'unknown'}`
+    case 'tool_result': return `✅ ${data.tool || 'Tool'} 완료`
+    case 'token': return data.content || ''
+    case 'response': return '💬 응답 생성'
+    case 'done': return '✨ 실행 완료'
+    case 'error': return `❌ 오류: ${data.error || 'Unknown'}`
+    default: return data.message || event
   }
 }
 
@@ -777,11 +942,84 @@ const simulateStep = async (step: string): Promise<any> => {
         duration_ms: 5
       }
     case 'action':
-      return {
-        success: true,
-        message: '프로세스 실행 대기 (시뮬레이션)',
-        data: { process: selectedProfile.value?.process_name || newAgentConfig.value.processName },
-        duration_ms: 10
+      // 실제 ProcessGPT API 호출 (스트리밍 모드)
+      const processName = selectedProfile.value?.process_name || newAgentConfig.value.processName
+      const processId = selectedProfile.value?.process_id || newAgentConfig.value.processId
+      
+      if (!processName && !processId) {
+        return {
+          success: false,
+          message: '프로세스가 설정되지 않았습니다.',
+          data: null,
+          duration_ms: 0
+        }
+      }
+      
+      try {
+        // 스트리밍 로그 초기화
+        streamingLogs.value = []
+        isStreaming.value = true
+        streamingFinalResponse.value = ''
+        
+        const startTime = Date.now()
+        
+        // 폼 값 준비
+        const formValues = {
+          triggered_by: 'watch-agent-simulation',
+          agent_name: selectedProfile.value?.name || newAgentConfig.value.name,
+          timestamp: new Date().toISOString(),
+          ...(sqlExecutionResult.value?.rows?.[0] ? 
+            Object.fromEntries(sqlExecutionResult.value.columns.map((col, i) => [col, sqlExecutionResult.value?.rows[0][i]])) 
+            : {})
+        }
+        
+        // SSE 스트리밍으로 ProcessGPT 실행
+        const streamResult = await executeProcessGPTStream(processName, processId, formValues)
+        const duration = Date.now() - startTime
+        
+        isStreaming.value = false
+        
+        // ProcessGPT 결과 저장
+        processGptResult.value = {
+          success: streamResult.success,
+          process_name: processName,
+          message: streamingFinalResponse.value || streamResult.message,
+          raw_response: streamResult.rawResponse
+        }
+        
+        if (streamResult.success) {
+          return {
+            success: true,
+            message: `✅ 프로세스 실행 완료: ${processName}`,
+            data: {
+              process: processName,
+              logs: streamingLogs.value
+            },
+            duration_ms: duration
+          }
+        } else {
+          processGptResult.value.error = streamResult.error
+          return {
+            success: false,
+            message: `❌ 프로세스 실행 실패: ${streamResult.error}`,
+            data: { error: streamResult.error },
+            duration_ms: duration
+          }
+        }
+      } catch (error: any) {
+        console.error('ProcessGPT 실행 오류:', error)
+        isStreaming.value = false
+        processGptResult.value = {
+          success: false,
+          error: error.message || String(error),
+          message: '프로세스 실행 중 오류 발생'
+        }
+        return {
+          success: false,
+          message: `❌ API 호출 오류: ${error.message}`,
+          data: { error: error.message },
+          duration_ms: 0
+        }
       }
     default:
       return { success: false, message: '알 수 없는 단계' }
@@ -1334,6 +1572,92 @@ watch([selectedProfile, isCreatingNew], () => {
           <!-- SQL 실행 결과 테이블 -->
           <div v-if="sqlExecutionResult" class="data-result-section">
             <ResultTable :data="sqlExecutionResult" />
+          </div>
+          
+          <!-- ProcessGPT 실행 결과 -->
+          <div v-if="processGptResult || isStreaming || streamingLogs.length > 0" class="processgpt-result-section">
+            <div class="section-header">
+              <span class="section-icon">🚀</span>
+              <h5>ProcessGPT 실행 결과</h5>
+              <span v-if="isStreaming" class="status-badge streaming">
+                <span class="streaming-dot"></span> 실행 중...
+              </span>
+              <span v-else-if="processGptResult" :class="['status-badge', processGptResult.success ? 'success' : 'error']">
+                {{ processGptResult.success ? '성공' : '실패' }}
+              </span>
+            </div>
+            
+            <!-- 스트리밍 로그 (실시간) -->
+            <div v-if="streamingLogs.length > 0" class="streaming-logs">
+              <div class="streaming-logs-header">
+                <span class="icon">📜</span>
+                <span>ReAct 에이전트 실행 로그</span>
+                <span class="log-count">{{ streamingLogs.length }}개 이벤트</span>
+              </div>
+              <div class="streaming-logs-container" ref="streamingLogsContainer">
+                <div 
+                  v-for="log in streamingLogs" 
+                  :key="log.id" 
+                  :class="['log-entry', `log-${log.event}`]"
+                >
+                  <span class="log-time">{{ new Date(log.timestamp).toLocaleTimeString() }}</span>
+                  <span :class="['log-event-badge', `event-${log.event}`]">{{ log.event }}</span>
+                  <span class="log-message">{{ log.message }}</span>
+                  <details v-if="log.data && (log.event === 'tool_call' || log.event === 'tool_result')" class="log-data">
+                    <summary>상세 보기</summary>
+                    <pre>{{ JSON.stringify(log.data, null, 2) }}</pre>
+                  </details>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 최종 응답 (스트리밍 중에도 실시간 표시) -->
+            <div v-if="streamingFinalResponse" class="final-response" :class="{ streaming: isStreaming }">
+              <div class="response-header">
+                💬 에이전트 응답
+                <span v-if="isStreaming" class="typing-indicator">▌</span>
+              </div>
+              <div class="response-content">{{ streamingFinalResponse }}</div>
+            </div>
+            
+            <div v-if="processGptResult" class="result-details">
+              <div v-if="processGptResult.process_instance_id" class="detail-row">
+                <span class="detail-label">프로세스 인스턴스 ID:</span>
+                <code class="detail-value">{{ processGptResult.process_instance_id }}</code>
+              </div>
+              
+              <div v-if="processGptResult.process_name" class="detail-row">
+                <span class="detail-label">프로세스:</span>
+                <span class="detail-value">{{ processGptResult.process_name }}</span>
+              </div>
+              
+              <div v-if="processGptResult.activity_name" class="detail-row">
+                <span class="detail-label">액티비티:</span>
+                <span class="detail-value">{{ processGptResult.activity_name }}</span>
+              </div>
+              
+              <div v-if="processGptResult.status" class="detail-row">
+                <span class="detail-label">상태:</span>
+                <span :class="['status-value', processGptResult.status?.toLowerCase()]">
+                  {{ processGptResult.status }}
+                </span>
+              </div>
+              
+              <div v-if="processGptResult.form_values" class="detail-row form-values">
+                <span class="detail-label">제출된 데이터:</span>
+                <pre class="detail-value code-block">{{ JSON.stringify(processGptResult.form_values, null, 2) }}</pre>
+              </div>
+              
+              <div v-if="processGptResult.error" class="detail-row error">
+                <span class="detail-label">오류:</span>
+                <span class="detail-value error-text">{{ processGptResult.error }}</span>
+              </div>
+              
+              <details v-if="processGptResult.raw_response" class="raw-response">
+                <summary>전체 응답 보기</summary>
+                <pre>{{ processGptResult.raw_response }}</pre>
+              </details>
+            </div>
           </div>
           
           <div v-if="simulationLogs.length === 0" class="empty-logs">
@@ -2252,6 +2576,329 @@ watch([selectedProfile, isCreatingNew], () => {
       padding: var(--spacing-lg);
       color: var(--color-text-muted);
       font-size: 13px;
+    }
+    
+    // ProcessGPT 실행 결과 섹션
+    .processgpt-result-section {
+      margin-top: var(--spacing-md);
+      padding: var(--spacing-md);
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.05), rgba(139, 92, 246, 0.05));
+      border: 1px solid rgba(99, 102, 241, 0.2);
+      border-radius: var(--radius-md);
+      
+      .section-header {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-sm);
+        margin-bottom: var(--spacing-md);
+        padding-bottom: var(--spacing-sm);
+        border-bottom: 1px solid var(--color-border);
+        
+        .section-icon {
+          font-size: 18px;
+        }
+        
+        h5 {
+          flex: 1;
+          font-size: 14px;
+          font-weight: 600;
+          color: var(--color-text-bright);
+          margin: 0;
+        }
+        
+        .status-badge {
+          padding: 2px 8px;
+          border-radius: 12px;
+          font-size: 11px;
+          font-weight: 600;
+          
+          &.success {
+            background: rgba(34, 197, 94, 0.15);
+            color: #22c55e;
+          }
+          
+          &.error {
+            background: rgba(239, 68, 68, 0.15);
+            color: #ef4444;
+          }
+          
+          &.streaming {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(99, 102, 241, 0.15);
+            color: #6366f1;
+            
+            .streaming-dot {
+              width: 6px;
+              height: 6px;
+              background: #6366f1;
+              border-radius: 50%;
+              animation: pulse 1.5s infinite;
+            }
+          }
+        }
+      }
+      
+      // 스트리밍 로그
+      .streaming-logs {
+        margin-bottom: var(--spacing-md);
+        
+        .streaming-logs-header {
+          display: flex;
+          align-items: center;
+          gap: var(--spacing-sm);
+          font-size: 12px;
+          font-weight: 600;
+          color: var(--color-text-bright);
+          margin-bottom: var(--spacing-sm);
+          
+          .icon {
+            font-size: 14px;
+          }
+          
+          .log-count {
+            margin-left: auto;
+            font-size: 11px;
+            color: var(--color-text-muted);
+            font-weight: 400;
+          }
+        }
+        
+        .streaming-logs-container {
+          max-height: 300px;
+          overflow-y: auto;
+          overflow-x: hidden;
+          background: var(--color-bg);
+          border-radius: var(--radius-sm);
+          padding: var(--spacing-sm);
+          
+          .log-entry {
+            display: grid;
+            grid-template-columns: 70px 85px 1fr;
+            align-items: start;
+            gap: 8px;
+            padding: 6px 4px;
+            font-size: 12px;
+            border-bottom: 1px solid var(--color-border);
+            animation: fadeIn 0.3s ease-in;
+            
+            &:last-child {
+              border-bottom: none;
+            }
+            
+            .log-time {
+              color: var(--color-text-muted);
+              font-family: 'Fira Code', monospace;
+              font-size: 10px;
+              white-space: nowrap;
+            }
+            
+            .log-event-badge {
+              padding: 2px 8px;
+              border-radius: 4px;
+              font-size: 9px;
+              font-weight: 600;
+              text-transform: uppercase;
+              text-align: center;
+              white-space: nowrap;
+              
+              &.event-start { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+              &.event-thinking { background: rgba(249, 115, 22, 0.2); color: #f97316; }
+              &.event-tool_call { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
+              &.event-tool_result { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+              &.event-token { background: rgba(107, 114, 128, 0.2); color: #6b7280; }
+              &.event-response { background: rgba(99, 102, 241, 0.2); color: #6366f1; }
+              &.event-done { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+              &.event-error { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+            }
+            
+            .log-message {
+              color: var(--color-text);
+              word-break: break-word;
+              line-height: 1.4;
+              min-width: 0;  // grid item이 overflow되지 않도록
+            }
+            
+            .log-data {
+              grid-column: 1 / -1;  // 전체 폭 사용
+              margin-top: 4px;
+              
+              summary {
+                cursor: pointer;
+                color: var(--color-text-muted);
+                font-size: 10px;
+                
+                &:hover {
+                  color: var(--color-primary);
+                }
+              }
+              
+              pre {
+                font-size: 10px;
+                background: rgba(0, 0, 0, 0.2);
+                padding: var(--spacing-sm);
+                border-radius: var(--radius-sm);
+                margin-top: 4px;
+                overflow-x: auto;
+                max-height: 150px;
+              }
+            }
+          }
+        }
+      }
+      
+      // 최종 응답
+      .final-response {
+        margin-bottom: var(--spacing-md);
+        padding: var(--spacing-md);
+        background: rgba(99, 102, 241, 0.1);
+        border-radius: var(--radius-sm);
+        border-left: 3px solid #6366f1;
+        
+        &.streaming {
+          border-left-color: #f59e0b;
+          background: rgba(245, 158, 11, 0.1);
+        }
+        
+        .response-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 12px;
+          font-weight: 600;
+          color: #6366f1;
+          margin-bottom: var(--spacing-sm);
+          
+          .typing-indicator {
+            animation: blink 0.8s infinite;
+            color: #f59e0b;
+          }
+        }
+        
+        .response-content {
+          font-size: 13px;
+          color: var(--color-text);
+          line-height: 1.6;
+          white-space: pre-wrap;
+        }
+      }
+      
+      @keyframes blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0; }
+      }
+      
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-4px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+      }
+      
+      .result-details {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-sm);
+        
+        .detail-row {
+          display: flex;
+          gap: var(--spacing-md);
+          font-size: 12px;
+          
+          &.form-values {
+            flex-direction: column;
+          }
+          
+          &.error {
+            .error-text {
+              color: #ef4444;
+            }
+          }
+          
+          .detail-label {
+            min-width: 140px;
+            color: var(--color-text-muted);
+            font-weight: 500;
+          }
+          
+          .detail-value {
+            flex: 1;
+            color: var(--color-text);
+            word-break: break-all;
+            
+            &.code-block {
+              font-family: 'Fira Code', monospace;
+              font-size: 11px;
+              background: var(--color-bg);
+              padding: var(--spacing-sm);
+              border-radius: var(--radius-sm);
+              overflow-x: auto;
+              white-space: pre-wrap;
+            }
+          }
+          
+          .status-value {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 500;
+            
+            &.submitted {
+              background: rgba(59, 130, 246, 0.15);
+              color: #3b82f6;
+            }
+            
+            &.completed {
+              background: rgba(34, 197, 94, 0.15);
+              color: #22c55e;
+            }
+            
+            &.pending {
+              background: rgba(234, 179, 8, 0.15);
+              color: #eab308;
+            }
+          }
+          
+          code {
+            font-family: 'Fira Code', monospace;
+            font-size: 11px;
+            padding: 2px 6px;
+            background: var(--color-bg);
+            border-radius: 4px;
+            color: var(--color-accent);
+          }
+        }
+        
+        .raw-response {
+          margin-top: var(--spacing-sm);
+          
+          summary {
+            font-size: 11px;
+            color: var(--color-text-muted);
+            cursor: pointer;
+            padding: 4px 8px;
+            
+            &:hover {
+              color: var(--color-text);
+            }
+          }
+          
+          pre {
+            margin-top: var(--spacing-sm);
+            font-family: 'Fira Code', monospace;
+            font-size: 10px;
+            background: var(--color-bg);
+            padding: var(--spacing-sm);
+            border-radius: var(--radius-sm);
+            overflow-x: auto;
+            max-height: 200px;
+            color: var(--color-text-muted);
+          }
+        }
+      }
     }
   }
 }

@@ -7,7 +7,7 @@
       </h3>
       <span class="execution-time">
         <IconPlay :size="12" />
-        실행 시간: {{ data.execution_time_ms }}ms
+        {{ data.execution_time_ms }}ms
       </span>
     </div>
     
@@ -19,31 +19,64 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(row, idx) in data.rows" :key="idx">
+          <tr v-for="(row, idx) in visibleRows" :key="idx">
             <td v-for="(cell, cidx) in row" :key="cidx">
               {{ formatCell(cell) }}
             </td>
           </tr>
         </tbody>
       </table>
+      
+      <!-- 더 많은 행이 있을 때 표시 -->
+      <div v-if="hasMoreRows" class="more-rows-indicator">
+        <button @click="showMore" class="show-more-btn">
+          {{ remainingRows }}개 더 보기...
+        </button>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { ref, computed } from 'vue'
 import type { ReactExecutionResult } from '@/types'
 import { IconTable, IconPlay } from '@/components/icons'
 
-defineProps<{
+const props = withDefaults(defineProps<{
   data: ReactExecutionResult
-}>()
+  maxRows?: number
+}>(), {
+  maxRows: 50  // 기본 최대 표시 행 수
+})
+
+const displayLimit = ref(props.maxRows)
+
+const visibleRows = computed(() => {
+  if (!props.data.rows) return []
+  return props.data.rows.slice(0, displayLimit.value)
+})
+
+const hasMoreRows = computed(() => {
+  return props.data.rows && props.data.rows.length > displayLimit.value
+})
+
+const remainingRows = computed(() => {
+  if (!props.data.rows) return 0
+  return Math.max(0, props.data.rows.length - displayLimit.value)
+})
+
+function showMore() {
+  displayLimit.value += props.maxRows
+}
 
 function formatCell(value: unknown): string {
   if (value === null || value === undefined) return '-'
   if (typeof value === 'number') {
     return value.toLocaleString()
   }
-  return String(value)
+  const str = String(value)
+  // 긴 문자열 축소
+  return str.length > 100 ? str.slice(0, 100) + '...' : str
 }
 </script>
 
@@ -117,5 +150,29 @@ td {
 
 tbody tr:hover {
   background: var(--color-bg-tertiary);
+}
+
+.more-rows-indicator {
+  padding: 12px;
+  text-align: center;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+
+.show-more-btn {
+  padding: 6px 16px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  
+  &:hover {
+    background: var(--color-bg-tertiary);
+    color: var(--color-text);
+    border-color: var(--color-accent);
+  }
 }
 </style>

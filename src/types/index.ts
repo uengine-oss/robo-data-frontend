@@ -309,6 +309,10 @@ export interface ReactRequest {
   prefer_language?: string
   /** 디버그용: raw XML 토큰 스트림(event=token)을 함께 받을지 */
   debug_stream_xml_tokens?: boolean
+  /** 동일 질문에 대해 캐시 사용 여부 */
+  use_cache?: boolean
+  /** 검색 대상 스키마 제한 (예: ['dw']는 OLAP 데이터만 검색) */
+  schema_filter?: string[]
 }
 
 /** ReAct Phase 데이터 */

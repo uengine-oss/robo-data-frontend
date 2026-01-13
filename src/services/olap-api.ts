@@ -274,3 +274,176 @@ export const dropDWSchema = async (schemaName: string = 'dw') => {
   })
 }
 
+
+// ============== Direct ETL Execution (No Airflow) ==============
+
+export const executeDirectETL = async (etlConfig: {
+  cube_name: string
+  fact_table: string
+  dimension_tables?: string[]
+  source_tables?: string[]
+  mappings?: any[]
+  dw_schema?: string
+  sync_mode?: string
+  incremental_column?: string | null
+}) => {
+  return fetchJson('/etl/execute-direct', {
+    method: 'POST',
+    body: JSON.stringify(etlConfig)
+  })
+}
+
+export const executeDirectETLByCube = async (cubeName: string) => {
+  return fetchJson(`/etl/execute-direct/${encodeURIComponent(cubeName)}`, {
+    method: 'POST'
+  })
+}
+
+export const generateETLScript = async (cubeName: string) => {
+  return fetchJson(`/etl/generate-script/${encodeURIComponent(cubeName)}`)
+}
+
+
+// ============== ETL Script Management ==============
+
+export const saveETLScript = async (cubeName: string, code: string, filename?: string) => {
+  return fetchJson(`/etl/script/save/${encodeURIComponent(cubeName)}`, {
+    method: 'POST',
+    body: JSON.stringify({ code, filename })
+  })
+}
+
+export const loadSavedScript = async (cubeName: string) => {
+  return fetchJson(`/etl/script/load/${encodeURIComponent(cubeName)}`)
+}
+
+export const executeSavedScript = async (cubeName: string, syncMode: 'full' | 'incremental' = 'full') => {
+  return fetchJson(`/etl/script/execute/${encodeURIComponent(cubeName)}`, {
+    method: 'POST',
+    body: JSON.stringify({ sync_mode: syncMode })
+  })
+}
+
+export const deleteSavedScript = async (cubeName: string) => {
+  return fetchJson(`/etl/script/${encodeURIComponent(cubeName)}`, {
+    method: 'DELETE'
+  })
+}
+
+/**
+ * Execute ETL script with automatic retry and streaming progress.
+ */
+export const executeScriptWithRetry = (
+  cubeName: string, 
+  syncMode: 'full' | 'incremental' = 'full',
+  maxRetries: number = 3,
+  onEvent: (event: {
+    type: 'progress' | 'log' | 'error' | 'regenerating' | 'agent_reasoning' | 'script_updated' | 'success' | 'complete' | 'warning';
+    message: string;
+    attempt?: number;
+    maxRetries?: number;
+    success?: boolean;
+    output?: string;
+  }) => void
+): { cancel: () => void } => {
+  const url = `${OLAP_API_BASE}/etl/script/execute-with-retry/${encodeURIComponent(cubeName)}?sync_mode=${syncMode}&max_retries=${maxRetries}`
+  
+  const eventSource = new EventSource(url)
+  
+  eventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      onEvent(data)
+      if (data.type === 'complete') {
+        eventSource.close()
+      }
+    } catch (e) {
+      console.error('Failed to parse SSE event:', e)
+    }
+  }
+  
+  eventSource.onerror = () => {
+    onEvent({ type: 'error', message: 'SSE 연결 오류' })
+    eventSource.close()
+  }
+  
+  return {
+    cancel: () => eventSource.close()
+  }
+}
+
+/**
+ * Create SSE event source for agent-based ETL script generation.
+ * Streams real-time progress updates from the ETL agent.
+ */
+export const createAgentEventSource = (
+  cubeName: string,
+  callbacks: {
+    onStart?: (data: any) => void;
+    onLog?: (data: any) => void;
+    onCode?: (data: any) => void;
+    onSql?: (data: any) => void;
+    onStatus?: (data: any) => void;
+    onDimensions?: (data: any) => void;
+    onTest?: (data: any) => void;
+    onComplete?: (data: any) => void;
+    onError?: (error: any) => void;
+  }
+): EventSource => {
+  const url = `${OLAP_API_BASE}/etl/generate-script-stream/${encodeURIComponent(cubeName)}`
+  const eventSource = new EventSource(url)
+  
+  eventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      
+      switch (data.type) {
+        case 'start':
+          callbacks.onStart?.(data)
+          break
+        case 'log':
+        case 'reasoning':
+          callbacks.onLog?.(data)
+          break
+        case 'code':
+        case 'script':
+          callbacks.onCode?.(data)
+          break
+        case 'sql':
+          callbacks.onSql?.(data)
+          break
+        case 'status':
+          callbacks.onStatus?.(data)
+          break
+        case 'dimensions':
+          callbacks.onDimensions?.(data)
+          break
+        case 'test':
+          callbacks.onTest?.(data)
+          break
+        case 'complete':
+          callbacks.onComplete?.(data)
+          eventSource.close()
+          break
+        case 'error':
+          callbacks.onError?.(data)
+          eventSource.close()
+          break
+        default:
+          // Handle unknown types as log
+          callbacks.onLog?.(data)
+      }
+    } catch (e) {
+      console.error('Failed to parse SSE event:', e)
+      callbacks.onError?.({ message: 'Failed to parse event' })
+    }
+  }
+  
+  eventSource.onerror = (error) => {
+    console.error('SSE error:', error)
+    callbacks.onError?.({ message: 'SSE connection error' })
+    eventSource.close()
+  }
+  
+  return eventSource
+}

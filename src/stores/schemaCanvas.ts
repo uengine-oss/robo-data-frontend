@@ -22,6 +22,7 @@ export interface TableNodeData {
   tableName: string
   schema: string
   description?: string
+  description_source?: 'ddl' | 'procedure' | 'user' | ''  // 설명 출처
   columns: Text2SqlColumnInfo[]
   columnCount: number
   isPrimary?: boolean  // 직접 선택/드래그한 테이블인지 여부
@@ -212,7 +213,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     field?: string
     changes?: Record<string, unknown>
   }) {
-    const { updateType, tableName, schema, field, changes } = event
+    const { updateType, tableName, field, changes } = event
     const nodeId = `table-${tableName}`
     const now = Date.now()
     
@@ -230,7 +231,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         if (isFullViewMode.value) {
           const newTable = allTables.value.find(t => t.name === tableName)
           if (newTable) {
-            await addTableToCanvasWithAnimation(newTable, schema)
+            await addTableToCanvasWithAnimation(newTable)
           }
         } else {
           // 부분 보기 모드: 현재 캔버스의 테이블과 FK 관계가 있는 테이블만 추가
@@ -252,7 +253,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
           if (hasRelationWithCanvas) {
             const newTable = allTables.value.find(t => t.name === tableName)
             if (newTable) {
-              await addTableToCanvasWithAnimation(newTable, schema)
+              await addTableToCanvasWithAnimation(newTable)
             }
           }
         }
@@ -263,22 +264,22 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     // 현재 캔버스에 없는 테이블 처리
     const node = nodes.value.find(n => n.id === nodeId)
     if (!node) {
-      // 전체 테이블 보기 모드에서는 테이블 자동 추가
-      if (isFullViewMode.value && (updateType === 'table_description' || updateType === 'column_description')) {
-        const tableInfo = allTables.value.find(t => t.name === tableName)
-        if (tableInfo) {
-          await addTableToCanvasWithAnimation(tableInfo, schema)
-          // 추가 후 다시 처리
-          setTimeout(() => handleCanvasUpdate(event), 100)
+        // 전체 테이블 보기 모드에서는 테이블 자동 추가
+        if (isFullViewMode.value && (updateType === 'table_description' || updateType === 'column_description')) {
+          const tableInfo = allTables.value.find(t => t.name === tableName)
+          if (tableInfo) {
+            await addTableToCanvasWithAnimation(tableInfo)
+            // 추가 후 다시 처리
+            setTimeout(() => handleCanvasUpdate(event), 100)
+          }
         }
-      }
       return
     }
     
     switch (updateType) {
       case 'table_description': {
         // 테이블 설명 업데이트
-        if (changes?.description) {
+        if (node.data && changes?.description) {
           node.data.description = changes.description as string
         }
         // 업데이트 애니메이션 트리거
@@ -288,7 +289,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       
       case 'column_description': {
         // 컬럼 설명 업데이트
-        if (field && changes?.description) {
+        if (node.data && field && changes?.description) {
           const column = node.data.columns.find(c => c.name === field)
           if (column) {
             column.description = changes.description as string
@@ -301,7 +302,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       
       case 'column_added': {
         // 새 컬럼 추가
-        if (field && changes) {
+        if (node.data && field && changes) {
           const existingCol = node.data.columns.find(c => c.name === field)
           if (!existingCol) {
             const newColumn = {
@@ -341,7 +342,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
             // 타겟 테이블을 찾아서 캔버스에 추가
             const targetTableInfo = allTables.value.find(t => t.name === targetTable)
             if (targetTableInfo) {
-              await addTableToCanvasWithAnimation(targetTableInfo, changes.schema as string)
+              await addTableToCanvasWithAnimation(targetTableInfo)
             }
           }
         }
@@ -365,7 +366,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   /**
    * 테이블을 캔버스에 애니메이션과 함께 추가
    */
-  async function addTableToCanvasWithAnimation(table: Text2SqlTableInfo, schema?: string) {
+  async function addTableToCanvasWithAnimation(table: Text2SqlTableInfo) {
     const nodeId = `table-${table.name}`
     
     // 이미 존재하면 무시
@@ -496,8 +497,10 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         allTables.value = tables.map(t => ({
           name: t.name,
           schema: t.table_schema,  // Backend returns table_schema
-          description: t.description,
-          description_source: t.description_source,  // 설명 출처
+          description: t.description || '',
+          description_source: (t.description_source && (t.description_source === 'ddl' || t.description_source === 'procedure' || t.description_source === 'user' || t.description_source === '')) 
+            ? t.description_source 
+            : undefined,  // 설명 출처 - 타입 안전하게 변환
           analyzed_description: t.analyzed_description,
           column_count: t.column_count
         }))
@@ -579,8 +582,10 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
           table_name: c.table_name,
           dtype: c.dtype,
           nullable: c.nullable,
-          description: c.description,
-          description_source: c.description_source,
+          description: c.description || '',
+          description_source: (c.description_source && (c.description_source === 'ddl' || c.description_source === 'procedure' || c.description_source === 'user' || c.description_source === '')) 
+            ? c.description_source 
+            : undefined,  // 설명 출처 - 타입 안전하게 변환
           analyzed_description: c.analyzed_description
         }))
       } else {
@@ -653,10 +658,10 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       data: {
         tableName: table.name,
         schema: table.schema || 'public',
-        description: table.description,
+        description: table.description || undefined,
         description_source: table.description_source,  // 설명 출처
         columns: columns,
-        columnCount: table.column_count,
+        columnCount: table.column_count || columns.length,
         isPrimary: isPrimary  // 직접 선택한 테이블 표시
       }
     }
@@ -727,7 +732,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
             tableInfo = {
               name: apiTableInfo.name,
               schema: apiTableInfo.schema || 'public',
-              description: apiTableInfo.description,
+              description: apiTableInfo.description || '',
               column_count: 0
             }
           }
@@ -938,7 +943,8 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   // 테이블 데이터 조회 패널
   // =========================================================================
   
-  const TEXT2SQL_API_BASE = import.meta.env.VITE_TEXT2SQL_API_URL || 'http://localhost:8000/text2sql'
+  const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? '/api/gateway'
+  const TEXT2SQL_API_BASE = import.meta.env.VITE_TEXT2SQL_API_URL || `${API_GATEWAY_URL}/text2sql`
   
   /**
    * 테이블 데이터 조회 패널 열기 및 데이터 로드
@@ -1176,7 +1182,6 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         // source에 따른 스타일 결정
         const isProcedure = rel.source === 'procedure' || rel.type === 'CO_REFERENCED'
         const isUser = rel.source === 'user'
-        const isDdl = !isProcedure && !isUser  // 기본값은 ddl
         
         // visibility 체크 - 해당 source 유형이 비활성화되어 있으면 스킵
         const sourceType = isProcedure ? 'procedure' : isUser ? 'user' : 'ddl'

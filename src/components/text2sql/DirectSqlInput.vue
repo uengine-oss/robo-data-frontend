@@ -129,7 +129,8 @@ defineEmits<{
   (e: 'change-mode', mode: 'react' | 'langchain' | 'direct'): void
 }>()
 
-const API_BASE = import.meta.env.VITE_TEXT2SQL_API_URL || 'http://localhost:8000/text2sql'
+const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? '/api/gateway'
+const API_BASE = import.meta.env.VITE_TEXT2SQL_API_URL || `${API_GATEWAY_URL}/text2sql`
 
 // State
 const sqlText = ref('')

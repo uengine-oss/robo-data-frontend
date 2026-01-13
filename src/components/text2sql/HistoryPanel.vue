@@ -82,9 +82,9 @@
                 <span>{{ expandedItems.has(item.id) ? '접기' : '세부사항' }}</span>
               </button>
               
-              <!-- OLAP 내보내기 버튼 (복잡한 쿼리용) -->
+              <!-- OLAP 내보내기 버튼 -->
               <button 
-                v-if="item.final_sql && isComplexQuery(item.final_sql)"
+                v-if="item.final_sql"
                 class="export-olap-btn"
                 @click.stop="exportToOlap(item)"
                 title="OLAP으로 내보내기 - DW 스키마 설계"

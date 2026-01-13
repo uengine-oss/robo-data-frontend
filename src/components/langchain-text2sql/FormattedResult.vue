@@ -125,7 +125,7 @@ function getComplexityLevel(score: number): string {
           </div>
         </template>
         
-        <!-- 테이블 블록 -->
+        <!-- 테이블 블록 - 최대 20행만 표시 -->
         <template v-else-if="item.type === 'table'">
           <div class="table-block">
             <div class="table-header">
@@ -142,21 +142,21 @@ function getComplexityLevel(score: number): string {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(row, rowIdx) in item.rows" :key="rowIdx">
+                  <tr v-for="(row, rowIdx) in item.rows.slice(0, 20)" :key="rowIdx">
                     <td class="row-num">{{ rowIdx + 1 }}</td>
                     <td 
                       v-for="(cell, cellIdx) in row" 
                       :key="cellIdx"
                       :class="'cell-' + getValueType(cell)"
                     >
-                      {{ getValueType(cell) === 'number' ? formatNumber(cell) : cell }}
+                      {{ getValueType(cell) === 'number' ? formatNumber(cell) : (cell?.length > 50 ? cell.slice(0, 50) + '...' : cell) }}
                     </td>
                   </tr>
                 </tbody>
               </table>
             </div>
-            <div v-if="item.rows.length < item.rowCount" class="more-rows">
-              ... and {{ item.rowCount - item.rows.length }} more rows
+            <div v-if="item.rows.length > 20 || item.rows.length < item.rowCount" class="more-rows">
+              ... and {{ Math.max(item.rowCount - 20, item.rowCount - item.rows.length) }} more rows
             </div>
           </div>
         </template>
