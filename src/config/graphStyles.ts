@@ -125,11 +125,6 @@ export const NODE_COLORS: Record<string, string> = {
   UserStory: '#22D3EE',
   AcceptanceCriteria: '#67E8F9',
   
-  // ========================================
-  // 변수 (회색 계열)
-  // ========================================
-  Variable: '#94A3B8',
-  
   // 기본값
   DEFAULT: '#5AA0E0'
 }

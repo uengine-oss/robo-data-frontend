@@ -6,14 +6,26 @@ import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
 import { useProjectStore } from '@/stores/project'
 import { roboSchemaApi } from '@/services/api'
 
+interface Behavior {
+  name: string
+  description?: string
+  behaviorType: 'rest_api' | 'javascript' | 'python' | 'dmn'
+  config: Record<string, any>
+  inputFields?: string[]
+  outputField?: string
+}
+
 interface TableNodeData {
   tableName: string
   schema: string
+  datasource?: string  // 데이터소스명 (예: robo_postgres)
   description?: string
   description_source?: 'ddl' | 'procedure' | 'user' | ''  // 설명 출처
   columns: Text2SqlColumnInfo[]
   columnCount: number
   isPrimary?: boolean  // 직접 선택/드래그한 테이블인지 여부
+  isObjectType?: boolean  // ObjectType인지 여부
+  behaviors?: Behavior[]  // Behavior 목록
 }
 
 // 프로시저 참조 정보 타입
@@ -413,8 +425,39 @@ function handleLoadRelated(e: Event) {
 
 function handleQueryData(e: Event) {
   e.stopPropagation()
-  // 테이블 데이터 조회 패널 열기
-  canvasStore.queryTableData(props.data.tableName, props.data.schema || 'public')
+  // 테이블 데이터 조회 패널 열기 (멀티 데이터소스 지원)
+  canvasStore.queryTableData(
+    props.data.tableName, 
+    props.data.schema || 'public', 
+    25,  // 기본 limit
+    props.data.datasource  // 데이터소스 전달
+  )
+}
+
+// Behavior 클릭 핸들러
+const onBehaviorClick = inject<(objectTypeName: string, behavior: Behavior) => void>('onBehaviorClick')
+// Behavior 편집 핸들러 (더블클릭)
+const onBehaviorEdit = inject<(objectTypeName: string, columns: string[], behavior: Behavior) => void>('onBehaviorEdit')
+// Behavior 실행 핸들러
+const onBehaviorRun = inject<(objectTypeName: string, behavior: Behavior, query: string) => void>('onBehaviorRun')
+
+// Behavior hover 상태
+const hoveredBehavior = ref<string | null>(null)
+
+function handleBehaviorClick(behavior: Behavior) {
+  onBehaviorClick?.(props.data.tableName, behavior)
+}
+
+function handleBehaviorDoubleClick(behavior: Behavior) {
+  // 컬럼 이름 목록 추출
+  const columns = (props.data.columns || []).map(c => c.name)
+  onBehaviorEdit?.(props.data.tableName, columns, behavior)
+}
+
+function handleBehaviorRun(behavior: Behavior) {
+  // ObjectType의 query를 사용하여 인스턴스 검색
+  const query = props.data.query || ''
+  onBehaviorRun?.(props.data.tableName, behavior, query)
 }
 
 function onColumnMouseEnter(colName: string) {
@@ -642,15 +685,28 @@ function onColumnMouseLeave() {
         @mouseenter="onColumnMouseEnter(col.name)"
         @mouseleave="onColumnMouseLeave"
       >
-        <!-- Target Handle (left side) - 각 컬럼에서 연결을 받을 수 있음 -->
+        <!-- Left Handles -->
         <Handle 
           :id="`pk-${col.name}`"
           type="target"
           :position="Position.Left"
           class="table-node__target-handle table-node__target-handle--left"
         />
+        <Handle 
+          :id="`fk-${col.name}-source-left`"
+          type="source"
+          :position="Position.Left"
+          class="table-node__source-handle table-node__source-handle--left"
+          :class="{ 'is-fk': isForeignKey(col.name) }"
+        />
         
-        <!-- Source Handle (right side) - 모든 컬럼에서 관계 시작 가능 -->
+        <!-- Right Handles -->
+        <Handle 
+          :id="`pk-${col.name}-right`"
+          type="target"
+          :position="Position.Right"
+          class="table-node__target-handle table-node__target-handle--right"
+        />
         <Handle 
           :id="`fk-${col.name}-source`"
           type="source"
@@ -707,6 +763,43 @@ function onColumnMouseLeave() {
         <span v-else class="table-node__toggle-icon">▲</span>
         <span v-if="!isExpanded">+{{ moreColumnsCount }} more columns</span>
         <span v-else>접기</span>
+      </div>
+    </div>
+    
+    <!-- Behaviors Section (ObjectType인 경우만 - 클래스 다이어그램 스타일) -->
+    <div v-if="data.isObjectType" class="table-node__behaviors-section">
+      <div class="table-node__behaviors-divider">
+        <span class="divider-label">Methods</span>
+      </div>
+      <div class="table-node__behaviors-list">
+        <div 
+          v-for="behavior in (data.behaviors || [])" 
+          :key="behavior.name"
+          class="table-node__behavior-item"
+          :title="behavior.description || behavior.name + ' (더블클릭하여 편집)'"
+          @dblclick.stop="handleBehaviorDoubleClick(behavior)"
+          @mouseenter="hoveredBehavior = behavior.name"
+          @mouseleave="hoveredBehavior = null"
+        >
+          <span class="table-node__behavior-visibility">+</span>
+          <span class="table-node__behavior-type">
+            {{ behavior.behaviorType === 'rest_api' ? '🌐' : behavior.behaviorType === 'dmn' ? '📊' : behavior.behaviorType === 'python' ? '🐍' : '📜' }}
+          </span>
+          <span class="table-node__behavior-name">{{ behavior.name }}()</span>
+          <span v-if="behavior.outputField" class="table-node__behavior-return">: {{ behavior.outputField }}</span>
+          <!-- 실행 버튼 (hover 시) -->
+          <button 
+            v-if="hoveredBehavior === behavior.name"
+            class="table-node__behavior-run-btn"
+            @click.stop="handleBehaviorRun(behavior)"
+            title="인스턴스를 선택하여 실행"
+          >
+            ▶ 실행
+          </button>
+        </div>
+        <div v-if="!data.behaviors || data.behaviors.length === 0" class="table-node__no-behaviors">
+          <span class="no-behaviors-hint">+ behavior 추가...</span>
+        </div>
       </div>
     </div>
     
@@ -1190,7 +1283,11 @@ function onColumnMouseLeave() {
   left: -5px !important;
 }
 
-/* Source Handle (right) - 관계 시작점 */
+.table-node__target-handle--right {
+  right: -5px !important;
+}
+
+/* Source Handle - 관계 시작점 */
 .table-node__source-handle {
   width: 10px !important;
   height: 10px !important;
@@ -1223,6 +1320,10 @@ function onColumnMouseLeave() {
 
 .table-node__source-handle--right {
   right: -5px !important;
+}
+
+.table-node__source-handle--left {
+  left: -5px !important;
 }
 
 /* Drag hint */
@@ -1466,5 +1567,107 @@ function onColumnMouseLeave() {
   50% {
     padding-left: 16px;
   }
+}
+
+/* Behaviors Section - 클래스 다이어그램 스타일 */
+.table-node__behaviors-section {
+  border-top: 2px solid var(--color-border, #555);
+}
+
+.table-node__behaviors-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 12px;
+  background: rgba(167, 139, 250, 0.08);
+  border-bottom: 1px dashed rgba(167, 139, 250, 0.3);
+}
+
+.table-node__behaviors-divider .divider-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #a78bfa;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.table-node__behaviors-list {
+  padding: 6px 0;
+  background: rgba(167, 139, 250, 0.03);
+}
+
+.table-node__behavior-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.table-node__behavior-item:hover {
+  background: rgba(167, 139, 250, 0.15);
+}
+
+.table-node__behavior-visibility {
+  color: #51cf66;
+  font-weight: bold;
+  font-size: 0.75rem;
+  width: 12px;
+}
+
+.table-node__behavior-type {
+  font-size: 0.7rem;
+}
+
+.table-node__behavior-name {
+  color: #a78bfa;
+  font-family: 'Fira Code', 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+}
+
+.table-node__behavior-return {
+  color: #4dabf7;
+  font-size: 0.7rem;
+  font-family: 'Fira Code', monospace;
+}
+
+.table-node__behavior-run-btn {
+  margin-left: auto;
+  padding: 2px 8px;
+  font-size: 0.65rem;
+  background: linear-gradient(135deg, #51cf66, #37b24d);
+  border: none;
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  
+  &:hover {
+    background: linear-gradient(135deg, #40c057, #2f9e44);
+    transform: scale(1.05);
+  }
+}
+
+.table-node__no-behaviors {
+  padding: 6px 12px;
+  text-align: center;
+}
+
+.no-behaviors-hint {
+  font-size: 0.7rem;
+  color: var(--color-text-muted, #868e96);
+  font-style: italic;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+.no-behaviors-hint:hover {
+  opacity: 1;
+  color: #a78bfa;
 }
 </style>

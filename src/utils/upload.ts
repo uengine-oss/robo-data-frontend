@@ -45,7 +45,8 @@ export function getNormalizedUploadPath(file: File): string {
 export function forceWebkitRelativePath(file: File, relPath: string): File {
   Object.defineProperty(file, 'webkitRelativePath', {
     value: relPath,
-    writable: false
+    writable: true,
+    configurable: true  // 재정의 가능하도록 설정
   })
   return file
 }

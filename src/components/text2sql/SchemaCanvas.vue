@@ -6,10 +6,36 @@ import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import TableNode from './nodes/TableNode.vue'
 import TableDetailPanel from './TableDetailPanel.vue'
-import CardinalityModal, { type ConnectionInfo, type Cardinality } from './CardinalityModal.vue'
+import CardinalityModal, { type ConnectionInfo, type Cardinality, type MatchStrategy } from './CardinalityModal.vue'
+import EditRelationshipDialog from './EditRelationshipDialog.vue'
 import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
 import type { Text2SqlTableInfo } from '@/types'
-import { IconTable, IconSearch, IconRefresh, IconTrash, IconZoomIn, IconZoomOut, IconMaximize, IconLink, IconFolder, IconChevronRight } from '@/components/icons'
+import { IconTable, IconSearch, IconRefresh, IconTrash, IconZoomIn, IconZoomOut, IconMaximize, IconLink, IconFolder, IconChevronRight, IconDatabase } from '@/components/icons'
+
+// Props
+const props = withDefaults(defineProps<{
+  hideTablePanel?: boolean  // 왼쪽 테이블 패널 숨기기 (ObjectTypeModeler에서 사용)
+  hideLegend?: boolean      // FK 관계 범례 숨기기 (ObjectTypeModeler에서 사용)
+}>(), {
+  hideTablePanel: false,
+  hideLegend: false
+})
+
+// Behavior 인터페이스
+interface Behavior {
+  name: string
+  description?: string
+  behaviorType: 'rest_api' | 'javascript' | 'python' | 'dmn'
+  config: Record<string, any>
+  inputFields?: string[]
+  outputField?: string
+}
+
+// Emits
+const emit = defineEmits<{
+  (e: 'empty-drop', data: { sourceType: string; sourceColumn: string }): void
+  (e: 'open-behavior-dialog', data: { mode: 'create' | 'edit', objectTypeName: string, columns: string[], behavior?: Behavior }): void
+}>()
 
 const store = useSchemaCanvasStore()
 const isDragOver = ref(false)
@@ -100,31 +126,156 @@ function copyToClipboard(text: string) {
   })
 }
 
+// ========== Behavior 실행 모드 관련 ==========
+
+// Behavior 실행 결과 팝업 상태
+const showBehaviorResultPopup = ref(false)
+const behaviorResultData = ref<any>(null)
+const behaviorResultError = ref<string | null>(null)
+const executingRowIndex = ref<number | null>(null)
+
+// React Agent 관련 상태
+const showOriginalCode = ref(false)
+const selectedAttemptIndex = ref(0)
+
+// 표시할 코드 (원본 vs 수정됨)
+const displayedCode = computed(() => {
+  if (!behaviorResultData.value) return ''
+  if (showOriginalCode.value && behaviorResultData.value.originalCode) {
+    return behaviorResultData.value.originalCode
+  }
+  return behaviorResultData.value.code || ''
+})
+
+// Behavior 모드 종료
+function cancelBehaviorMode() {
+  store.cancelBehaviorMode()
+  showBehaviorResultPopup.value = false
+  behaviorResultData.value = null
+  behaviorResultError.value = null
+  executingRowIndex.value = null
+  showOriginalCode.value = false
+  selectedAttemptIndex.value = 0
+}
+
+// 행 데이터를 객체로 변환
+function rowToObject(row: any[], columns: string[]): Record<string, any> {
+  const obj: Record<string, any> = {}
+  columns.forEach((col, idx) => {
+    obj[col] = row[idx]
+  })
+  return obj
+}
+
+// 단일 행에 대해 behavior 실행
+async function executeBehaviorForRow(rowIdx: number) {
+  const behavior = store.tableDataPanel.activeBehavior
+  if (!behavior) return
+  
+  const row = store.tableDataPanel.rows[rowIdx]
+  const instanceData = rowToObject(row, store.tableDataPanel.columns)
+  
+  executingRowIndex.value = rowIdx
+  store.tableDataPanel.isExecutingBehavior = true
+  behaviorResultError.value = null
+  
+  try {
+    const url = `/api/gateway/ontology/object-types/${encodeURIComponent(behavior.objectTypeName)}/behaviors/${encodeURIComponent(behavior.name)}/execute`
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instanceData: instanceData })
+    })
+    
+    if (!response.ok) {
+      const errData = await response.json()
+      // detail이 배열인 경우 (Pydantic validation error) 처리
+      let errorMsg = 'Behavior 실행 실패'
+      if (errData.detail) {
+        if (Array.isArray(errData.detail)) {
+          errorMsg = errData.detail.map((e: any) => e.msg || JSON.stringify(e)).join(', ')
+        } else if (typeof errData.detail === 'string') {
+          errorMsg = errData.detail
+        } else {
+          errorMsg = JSON.stringify(errData.detail)
+        }
+      }
+      throw new Error(errorMsg)
+    }
+    
+    const result = await response.json()
+    behaviorResultData.value = result
+    showBehaviorResultPopup.value = true
+    
+    console.log(`[Behavior] Row ${rowIdx} 실행 완료:`, result)
+  } catch (err) {
+    console.error(`[Behavior] Row ${rowIdx} 실행 오류:`, err)
+    behaviorResultError.value = err instanceof Error ? err.message : '실행 오류'
+    behaviorResultData.value = null
+    showBehaviorResultPopup.value = true
+  } finally {
+    store.tableDataPanel.isExecutingBehavior = false
+    executingRowIndex.value = null
+  }
+}
+
+// 결과 팝업 닫기
+function closeBehaviorResultPopup() {
+  showBehaviorResultPopup.value = false
+  behaviorResultData.value = null
+  behaviorResultError.value = null
+  showOriginalCode.value = false
+  selectedAttemptIndex.value = 0
+}
+
+// 데이터소스 폴더 확장 상태
+const expandedDatasources = ref<Record<string, boolean>>({
+  robo_postgres: true  // 기본적으로 첫 번째 데이터소스는 펼쳐서 표시
+})
+
 // 스키마 폴더 확장 상태
 const expandedSchemas = ref<Record<string, boolean>>({
-  public: true  // 기본적으로 public 스키마는 펼쳐서 표시
+  public: true,  // 기본적으로 public 스키마는 펼쳐서 표시
+  ins: true      // ins 스키마도 펼쳐서 표시
 })
 
 // SQL 쿼리 표시 토글
 const showSqlQuery = ref(false)
 
+function toggleDatasource(ds: string) {
+  expandedDatasources.value[ds] = !expandedDatasources.value[ds]
+}
+
 function toggleSchema(schema: string) {
   expandedSchemas.value[schema] = !expandedSchemas.value[schema]
+}
+
+// 데이터소스 내 스키마 수 계산
+function getSchemasInDatasource(ds: string): string[] {
+  const schemas = store.tablesByDatasource[ds]
+  return schemas ? Object.keys(schemas).sort() : []
+}
+
+// 데이터소스 내 총 테이블 수 계산
+function getTableCountInDatasource(ds: string): number {
+  const schemas = store.tablesByDatasource[ds]
+  if (!schemas) return 0
+  return Object.values(schemas).reduce((sum, tables) => sum + tables.length, 0)
 }
 
 // Cardinality Modal State
 const isCardinalityModalOpen = ref(false)
 const pendingConnection = ref<ConnectionInfo | null>(null)
 
-// Edge Delete Modal State
-const isEdgeDeleteModalOpen = ref(false)
-const pendingDeleteEdge = ref<{
+// Edge Edit Dialog State
+const isEditRelationshipDialogOpen = ref(false)
+const editingRelationship = ref<{
   id: string
-  fromTable: string
-  fromColumn: string
-  toTable: string
-  toColumn: string
-  label: string
+  sourceType: string
+  targetType: string
+  sourceColumn: string
+  targetColumn: string
 } | null>(null)
 
 const { fitView, zoomIn, zoomOut } = useVueFlow()
@@ -224,7 +375,7 @@ async function handleDrop(event: DragEvent) {
   if (!data) return
   
   try {
-    const { table } = JSON.parse(data)
+    const parsed = JSON.parse(data)
     
     // Get drop position relative to canvas
     const bounds = (event.target as HTMLElement).getBoundingClientRect()
@@ -233,7 +384,31 @@ async function handleDrop(event: DragEvent) {
       y: event.clientY - bounds.top
     }
     
-    await store.addTableToCanvas(table, position)
+    // ObjectType인 경우 (직접 데이터 형식)
+    if (parsed._isObjectType || parsed.isObjectType || parsed.schema === 'ObjectType') {
+      const tableInfo = {
+        name: parsed.name,
+        schema: parsed.schema || 'ObjectType',
+        description: parsed.description || '',
+        column_count: parsed.column_count || 0
+      }
+      await store.addTableToCanvas(tableInfo, position, {
+        autoLoadRelated: false,
+        isPrimary: true,
+        columns: parsed._columns || parsed.columns || [],
+        isObjectType: true,
+        behaviors: parsed.behaviors || []
+      })
+    } 
+    // 기존 테이블 드래그 형식 (table 래핑)
+    else if (parsed.table) {
+      await store.addTableToCanvas(parsed.table, position)
+    }
+    // 직접 테이블 정보 형식
+    else if (parsed.name) {
+      await store.addTableToCanvas(parsed, position)
+    }
+    
     setTimeout(() => fitView({ padding: 0.3 }), 150)
   } catch (error) {
     console.error('Failed to handle drop:', error)
@@ -293,11 +468,17 @@ async function addSemanticResultToCanvas(result: { name: string; schema: string;
 }
 
 function onNodesChange(changes: NodeChange[]) {
+  let positionChanged = false
   changes.forEach(change => {
     if (change.type === 'position' && 'id' in change && change.position) {
       store.updateNodePosition(change.id, change.position)
+      positionChanged = true
     }
   })
+  // 노드 위치가 변경되면 엣지 핸들 방향 재계산 (debounced)
+  if (positionChanged) {
+    store.debouncedUpdateEdges()
+  }
 }
 
 function onNodeClick(event: { node: { id: string } }) {
@@ -312,88 +493,89 @@ function onPaneClick() {
   store.clearSelection()
 }
 
-// Edge double click - 삭제 확인 다이얼로그 표시
+// Edge double click - 관계 편집 다이얼로그 표시
 function onEdgeDoubleClick(event: { edge: { id: string; label?: string; source: string; target: string; sourceHandle?: string; targetHandle?: string } }) {
   const edge = event.edge
   
   // 엣지 정보 파싱
-  const fromTable = edge.source.replace('table-', '')
-  const toTable = edge.target.replace('table-', '')
+  const sourceType = edge.source.replace('table-', '')
+  const targetType = edge.target.replace('table-', '')
   
   // sourceHandle에서 컬럼명 추출 (fk-COLUMN_NAME-source 형식)
-  let fromColumn = ''
+  let sourceColumn = ''
   if (edge.sourceHandle) {
     const match = edge.sourceHandle.match(/^fk-(.+)-source$/)
     if (match) {
-      fromColumn = match[1]
+      sourceColumn = match[1]
     }
   }
   
   // targetHandle에서 컬럼명 추출 (pk-COLUMN_NAME 형식)
-  let toColumn = ''
+  let targetColumn = ''
   if (edge.targetHandle) {
     const match = edge.targetHandle.match(/^pk-(.+?)(-right)?$/)
     if (match) {
-      toColumn = match[1]
+      targetColumn = match[1]
     }
   }
   
   // 라벨에서 컬럼 정보 추출 시도 (COLUMN → COLUMN 형식)
-  if ((!fromColumn || !toColumn) && edge.label) {
+  if ((!sourceColumn || !targetColumn) && edge.label) {
     const labelStr = typeof edge.label === 'string' ? edge.label : ''
     const labelMatch = labelStr.match(/^(.+?)\s*→\s*(.+)$/)
     if (labelMatch) {
-      if (!fromColumn) fromColumn = labelMatch[1].trim()
-      if (!toColumn) toColumn = labelMatch[2].trim()
+      if (!sourceColumn) sourceColumn = labelMatch[1].trim()
+      if (!targetColumn) targetColumn = labelMatch[2].trim()
     }
   }
   
-  pendingDeleteEdge.value = {
-    id: edge.id,
-    fromTable,
-    fromColumn,
-    toTable,
-    toColumn,
-    label: typeof edge.label === 'string' ? edge.label : `${fromTable} → ${toTable}`
+  // 컬럼 정보가 없으면 에러
+  if (!sourceColumn || !targetColumn) {
+    console.warn('[SchemaCanvas] 컬럼 정보를 찾을 수 없습니다:', edge)
+    return
   }
-  isEdgeDeleteModalOpen.value = true
-}
-
-// 엣지 삭제 확인
-async function confirmDeleteEdge() {
-  if (!pendingDeleteEdge.value) return
   
-  try {
-    const { fromTable, fromColumn, toTable, toColumn } = pendingDeleteEdge.value
-    
-    // API 호출하여 관계 삭제
-    await store.removeRelationship({
-      from_table: fromTable,
-      from_schema: 'public',  // 기본 스키마
-      from_column: fromColumn,
-      to_table: toTable,
-      to_schema: 'public',
-      to_column: toColumn,
-      relationship_type: 'FK_TO_TABLE'
-    })
-    
-    // 캔버스에서 엣지 제거
-    store.edges = store.edges.filter(e => e.id !== pendingDeleteEdge.value?.id)
-    
-    console.log(`[SchemaCanvas] Edge deleted: ${fromTable}.${fromColumn} → ${toTable}.${toColumn}`)
-  } catch (error) {
-    console.error('[SchemaCanvas] Failed to delete edge:', error)
-    alert('관계 삭제에 실패했습니다.')
-  } finally {
-    isEdgeDeleteModalOpen.value = false
-    pendingDeleteEdge.value = null
+  editingRelationship.value = {
+    id: edge.id,
+    sourceType,
+    targetType,
+    sourceColumn,
+    targetColumn
   }
+  isEditRelationshipDialogOpen.value = true
 }
 
-// 엣지 삭제 취소
-function cancelDeleteEdge() {
-  isEdgeDeleteModalOpen.value = false
-  pendingDeleteEdge.value = null
+// 관계 편집 완료
+async function handleRelationshipUpdated() {
+  isEditRelationshipDialogOpen.value = false
+  const rel = editingRelationship.value
+  editingRelationship.value = null
+  
+  if (rel) {
+    // 관계 정보를 다시 로드하여 메모리에 반영
+    await store.updateRelationshipInfo(
+      rel.sourceType,
+      rel.targetType,
+      rel.sourceColumn,
+      rel.targetColumn
+    )
+  }
+  
+  // 관계 정보 업데이트 후 캔버스 새로고침
+  store.updateEdgesFromRelationships()
+}
+
+// 관계 삭제 완료
+function handleRelationshipDeleted() {
+  isEditRelationshipDialogOpen.value = false
+  const rel = editingRelationship.value
+  if (rel) {
+    // 캔버스에서 엣지 제거
+    store.edges = store.edges.filter(e => e.id !== rel.id)
+  }
+  editingRelationship.value = null
+  // 관계 정보 업데이트
+  store.updateEdgesFromRelationships()
 }
 
 // Handle edge connection - show cardinality modal
@@ -431,12 +613,12 @@ function onConnect(connection: Connection) {
 }
 
 // Handle cardinality modal confirmation
-async function handleCardinalityConfirm(cardinality: Cardinality, description: string) {
+async function handleCardinalityConfirm(cardinality: Cardinality, description: string, matchStrategy: MatchStrategy = 'EXACT_MATCH') {
   if (!pendingConnection.value) return
   
   const { fromTable, fromColumn, toTable, toColumn } = pendingConnection.value
   
-  // Create description with cardinality
+  // Create description with cardinality and matchStrategy
   const fullDescription = description 
     ? `[${cardinality}] ${description}`
     : `[${cardinality}] ${fromTable}.${fromColumn} → ${toTable}.${toColumn}`
@@ -451,7 +633,8 @@ async function handleCardinalityConfirm(cardinality: Cardinality, description: s
       to_schema: 'public',
       to_column: toColumn,
       description: fullDescription,
-      cardinality
+      cardinality,
+      matchStrategy  // Correlation 전략 추가
     })
     
     isCardinalityModalOpen.value = false
@@ -469,12 +652,45 @@ function handleCardinalityModalClose() {
   pendingConnection.value = null
 }
 
-function onConnectStart() {
+// 연결 시작 시 소스 정보 저장 (허공 드롭 감지용)
+const connectingSource = ref<{ nodeId: string; handleId: string } | null>(null)
+
+function onConnectStart(event: { nodeId: string; handleId: string | null }) {
   isConnecting.value = true
+  if (event.nodeId && event.handleId) {
+    connectingSource.value = { nodeId: event.nodeId, handleId: event.handleId }
+  }
 }
 
-function onConnectEnd() {
+function onConnectEnd(event: MouseEvent) {
   isConnecting.value = false
+  
+  // 허공에 드롭되었는지 확인 (hideTablePanel이 true인 경우 = ObjectTypeModeler)
+  if (props.hideTablePanel && connectingSource.value) {
+    // 드롭 위치에 노드가 있는지 확인
+    const dropTarget = document.elementFromPoint(event.clientX, event.clientY)
+    const isDropOnNode = dropTarget?.closest('.vue-flow__node')
+    const isDropOnHandle = dropTarget?.closest('.vue-flow__handle')
+    
+    // 노드나 핸들 위에 드롭되지 않았으면 허공 드롭
+    if (!isDropOnNode && !isDropOnHandle) {
+      const sourceNodeId = connectingSource.value.nodeId
+      const sourceHandleId = connectingSource.value.handleId
+      
+      // nodeId에서 테이블명 추출 (table-{tableName} 형식)
+      const sourceType = sourceNodeId.replace('table-', '')
+      
+      // handleId에서 컬럼명 추출 ({tableName}-{columnName}-source/target 형식)
+      const handleParts = sourceHandleId.split('-')
+      // 마지막 요소(source/target)를 제외하고 테이블명 이후의 부분이 컬럼명
+      const sourceColumn = handleParts.slice(1, -1).join('-')
+      
+      console.log('[SchemaCanvas] 허공 드롭 감지:', { sourceType, sourceColumn })
+      emit('empty-drop', { sourceType, sourceColumn })
+    }
+  }
+  
+  connectingSource.value = null
 }
 
 async function handleAddTopTables() {
@@ -504,9 +720,9 @@ async function handleRefresh() {
 </script>
 
 <template>
-  <div class="schema-canvas">
-    <!-- Left Panel: Table List -->
-    <aside class="left-panel">
+  <div class="schema-canvas" :class="{ 'hide-table-panel': props.hideTablePanel }">
+    <!-- Left Panel: Table List (숨김 가능) -->
+    <aside v-if="!props.hideTablePanel" class="left-panel">
       <div class="panel-header">
         <div class="panel-title">
           <IconTable :size="16" />
@@ -651,47 +867,72 @@ async function handleRefresh() {
           <span class="section-count">{{ store.tablesNotOnCanvas.length }}</span>
         </div>
         <div class="schema-tree">
-          <!-- 스키마별 폴더 -->
+          <!-- 3레벨: 데이터소스 > 스키마 > 테이블 -->
           <div 
-            v-for="schema in store.schemas" 
-            :key="schema"
-            class="schema-folder"
+            v-for="ds in store.datasources" 
+            :key="ds"
+            class="datasource-folder"
           >
-            <!-- 스키마 헤더 (클릭 시 토글) -->
+            <!-- 데이터소스 헤더 (1레벨) -->
             <div 
-              class="schema-header"
-              :class="{ 'schema-header--expanded': expandedSchemas[schema] }"
-              @click="toggleSchema(schema)"
+              class="datasource-header"
+              :class="{ 'datasource-header--expanded': expandedDatasources[ds] }"
+              @click="toggleDatasource(ds)"
             >
               <IconChevronRight 
                 :size="12" 
-                class="schema-chevron"
-                :class="{ 'schema-chevron--expanded': expandedSchemas[schema] }"
+                class="datasource-chevron"
+                :class="{ 'datasource-chevron--expanded': expandedDatasources[ds] }"
               />
-              <IconFolder :size="14" class="schema-icon" />
-              <span class="schema-name">{{ schema }}</span>
-              <span class="schema-count">{{ store.tablesBySchema[schema]?.length || 0 }}</span>
+              <IconDatabase :size="14" class="datasource-icon" />
+              <span class="datasource-name">{{ ds }}</span>
+              <span class="datasource-count">{{ getTableCountInDatasource(ds) }}</span>
             </div>
             
-            <!-- 스키마 내 테이블 목록 -->
-            <div v-if="expandedSchemas[schema]" class="schema-tables">
+            <!-- 데이터소스 내 스키마들 (2레벨) -->
+            <div v-if="expandedDatasources[ds]" class="datasource-schemas">
               <div 
-                v-for="table in store.tablesBySchema[schema] || []" 
-                :key="table.name"
-                class="table-item"
-                draggable="true"
-                @dragstart="(e) => startDragTable(e, table)"
-                @dblclick="handleTableDoubleClick(table)"
+                v-for="schema in getSchemasInDatasource(ds)" 
+                :key="`${ds}-${schema}`"
+                class="schema-folder"
               >
-                <IconTable :size="14" class="table-item__icon" />
-                <div class="table-item__info">
-                  <span class="table-item__name">{{ table.name }}</span>
-                  <span class="table-item__cols">{{ table.column_count }} cols</span>
-                  <span v-if="table.description" class="table-item__desc" :title="table.description">
-                    {{ table.description.slice(0, 30) }}{{ table.description.length > 30 ? '...' : '' }}
-                  </span>
+                <!-- 스키마 헤더 (클릭 시 토글) -->
+                <div 
+                  class="schema-header"
+                  :class="{ 'schema-header--expanded': expandedSchemas[schema] }"
+                  @click="toggleSchema(schema)"
+                >
+                  <IconChevronRight 
+                    :size="12" 
+                    class="schema-chevron"
+                    :class="{ 'schema-chevron--expanded': expandedSchemas[schema] }"
+                  />
+                  <IconFolder :size="14" class="schema-icon" />
+                  <span class="schema-name">{{ schema }}</span>
+                  <span class="schema-count">{{ store.tablesByDatasource[ds]?.[schema]?.length || 0 }}</span>
                 </div>
-                <div class="table-item__drag-hint">⋮⋮</div>
+                
+                <!-- 스키마 내 테이블 목록 (3레벨) -->
+                <div v-if="expandedSchemas[schema]" class="schema-tables">
+                  <div 
+                    v-for="table in store.tablesByDatasource[ds]?.[schema] || []" 
+                    :key="table.name"
+                    class="table-item"
+                    draggable="true"
+                    @dragstart="(e) => startDragTable(e, table)"
+                    @dblclick="handleTableDoubleClick(table)"
+                  >
+                    <IconTable :size="14" class="table-item__icon" />
+                    <div class="table-item__info">
+                      <span class="table-item__name">{{ table.name }}</span>
+                      <span class="table-item__cols">{{ table.column_count }} cols</span>
+                      <span v-if="table.description" class="table-item__desc" :title="table.description">
+                        {{ table.description.slice(0, 30) }}{{ table.description.length > 30 ? '...' : '' }}
+                      </span>
+                    </div>
+                    <div class="table-item__drag-hint">⋮⋮</div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -897,9 +1138,9 @@ async function handleRefresh() {
         </button>
       </div>
       
-      <!-- Legend -->
-      <div class="canvas-legend">
-        <div class="legend-title">FK 관계 범례</div>
+      <!-- Legend (숨김 가능) -->
+      <div v-if="!props.hideLegend" class="canvas-legend">
+        <div class="legend-title">메타데이터 출처</div>
         
         <!-- DDL 기반 FK (실선, 초록색) -->
         <label class="legend-item legend-item--checkbox">
@@ -910,7 +1151,7 @@ async function handleRefresh() {
             class="legend-checkbox"
           />
           <span class="legend-line legend-line--ddl"></span>
-          <span class="legend-label">DDL 정의 FK</span>
+          <span class="legend-label">DDL 정의</span>
         </label>
         
         <!-- 프로시저 분석 FK (점선, 하늘색) -->
@@ -922,7 +1163,7 @@ async function handleRefresh() {
             class="legend-checkbox"
           />
           <span class="legend-line legend-line--procedure"></span>
-          <span class="legend-label">프로시저 분석 FK</span>
+          <span class="legend-label">코드 (프로시저) 분석</span>
         </label>
         
         <!-- 사용자 추가 FK (실선, 주황색) -->
@@ -934,7 +1175,7 @@ async function handleRefresh() {
             class="legend-checkbox"
           />
           <span class="legend-line legend-line--user"></span>
-          <span class="legend-label">사용자 추가 FK</span>
+          <span class="legend-label">사용자 입력</span>
         </label>
         
         <div class="legend-divider"></div>
@@ -948,7 +1189,7 @@ async function handleRefresh() {
     </main>
     
     <!-- Right Panel: Table Details -->
-    <TableDetailPanel />
+    <TableDetailPanel @open-behavior-dialog="(data) => emit('open-behavior-dialog', data)" />
     
     <!-- Right Panel: Source Code Viewer -->
     <Transition name="slide-right">
@@ -1003,39 +1244,19 @@ async function handleRefresh() {
       @confirm="handleCardinalityConfirm"
     />
     
-    <!-- Edge Delete Confirmation Modal -->
-    <Teleport to="body">
-      <div v-if="isEdgeDeleteModalOpen" class="edge-delete-modal-overlay" @click.self="cancelDeleteEdge">
-        <div class="edge-delete-modal">
-          <div class="edge-delete-modal__header">
-            <span class="edge-delete-modal__icon">🗑️</span>
-            <h3>릴레이션 삭제</h3>
-          </div>
-          <div class="edge-delete-modal__body">
-            <p>다음 릴레이션을 삭제하시겠습니까?</p>
-            <div class="edge-delete-modal__info">
-              <div class="edge-delete-modal__table">
-                <span class="edge-delete-modal__label">From:</span>
-                <span class="edge-delete-modal__value">{{ pendingDeleteEdge?.fromTable }}.{{ pendingDeleteEdge?.fromColumn }}</span>
-              </div>
-              <div class="edge-delete-modal__arrow">→</div>
-              <div class="edge-delete-modal__table">
-                <span class="edge-delete-modal__label">To:</span>
-                <span class="edge-delete-modal__value">{{ pendingDeleteEdge?.toTable }}.{{ pendingDeleteEdge?.toColumn }}</span>
-              </div>
-            </div>
-          </div>
-          <div class="edge-delete-modal__actions">
-            <button class="edge-delete-modal__btn edge-delete-modal__btn--cancel" @click="cancelDeleteEdge">
-              취소
-            </button>
-            <button class="edge-delete-modal__btn edge-delete-modal__btn--delete" @click="confirmDeleteEdge">
-              삭제
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
+    <!-- 관계 편집 다이얼로그 -->
+    <EditRelationshipDialog
+      v-if="editingRelationship"
+      :visible="isEditRelationshipDialogOpen"
+      mode="edit"
+      :source-type="editingRelationship.sourceType"
+      :target-type="editingRelationship.targetType"
+      :source-column="editingRelationship.sourceColumn"
+      :target-column="editingRelationship.targetColumn"
+      @close="isEditRelationshipDialogOpen = false; editingRelationship = null"
+      @updated="handleRelationshipUpdated"
+      @deleted="handleRelationshipDeleted"
+    />
     
     <!-- 하단 테이블 데이터 조회 패널 -->
     <Transition name="slide-up">
@@ -1106,15 +1327,42 @@ async function handleRefresh() {
           
           <!-- 데이터 테이블 -->
           <div v-else-if="store.tableDataPanel.columns.length > 0" class="data-table-wrapper">
-            <table class="data-table">
+            <!-- Behavior 모드 헤더 -->
+            <div v-if="store.tableDataPanel.behaviorMode" class="behavior-mode-header">
+              <span class="behavior-badge">
+                🎯 {{ store.tableDataPanel.activeBehavior?.name }} 실행 모드
+              </span>
+              <div class="behavior-actions">
+                <span class="row-count">{{ store.tableDataPanel.rows.length }}건 조회됨</span>
+                <button class="cancel-mode-btn" @click="cancelBehaviorMode">
+                  모드 종료
+                </button>
+              </div>
+            </div>
+            
+            <table class="data-table" :class="{ 'behavior-mode': store.tableDataPanel.behaviorMode }">
               <thead>
                 <tr>
                   <th v-for="col in store.tableDataPanel.columns" :key="col">{{ col }}</th>
+                  <!-- Behavior 모드: 실행 버튼 헤더 -->
+                  <th v-if="store.tableDataPanel.behaviorMode" class="action-col">실행</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="(row, idx) in store.tableDataPanel.rows" :key="idx">
                   <td v-for="(cell, cidx) in row" :key="cidx">{{ formatCell(cell) }}</td>
+                  <!-- Behavior 모드: 실행 버튼 -->
+                  <td v-if="store.tableDataPanel.behaviorMode" class="action-col">
+                    <button 
+                      class="row-execute-btn"
+                      :disabled="store.tableDataPanel.isExecutingBehavior"
+                      @click="executeBehaviorForRow(idx)"
+                      :title="`이 행으로 ${store.tableDataPanel.activeBehavior?.name} 실행`"
+                    >
+                      <span v-if="executingRowIndex === idx">⏳</span>
+                      <span v-else>▶</span>
+                    </button>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -1123,6 +1371,143 @@ async function handleRefresh() {
           <!-- 데이터 없음 -->
           <div v-else class="empty-state">
             <span>조회된 데이터가 없습니다.</span>
+          </div>
+        </div>
+      </div>
+    </Transition>
+    
+    <!-- Behavior 실행 결과 팝업 (인터랙티브 + React Agent) -->
+    <Transition name="fade">
+      <div v-if="showBehaviorResultPopup" class="behavior-result-overlay" @click.self="closeBehaviorResultPopup">
+        <div class="behavior-result-popup behavior-result-popup--large">
+          <div class="popup-header">
+            <h3>
+              <span v-if="behaviorResultData?.success">✅</span>
+              <span v-else>❌</span>
+              {{ store.tableDataPanel.activeBehavior?.name }} 실행 결과
+              <span v-if="behaviorResultData?.autoFixed" class="auto-fixed-badge">🤖 AI 자동 수정됨</span>
+            </h3>
+            <button class="close-btn" @click="closeBehaviorResultPopup">✕</button>
+          </div>
+          
+          <!-- React Agent 시도 타임라인 -->
+          <div v-if="behaviorResultData?.attempts && behaviorResultData.attempts.length > 1" class="attempts-timeline">
+            <div class="timeline-header">
+              <span class="timeline-title">🔄 React Agent 실행 과정</span>
+              <span class="timeline-summary">{{ behaviorResultData.attempts.length }}회 시도</span>
+            </div>
+            <div class="timeline-steps">
+              <div 
+                v-for="(attempt, idx) in behaviorResultData.attempts" 
+                :key="idx"
+                class="timeline-step"
+                :class="{
+                  'timeline-step--success': attempt.status === 'success',
+                  'timeline-step--error': attempt.status === 'error',
+                  'timeline-step--active': selectedAttemptIndex === idx
+                }"
+                @click="selectedAttemptIndex = idx"
+              >
+                <div class="step-number">{{ attempt.attempt }}</div>
+                <div class="step-info">
+                  <div class="step-status">
+                    <span v-if="attempt.status === 'success'">✅ 성공</span>
+                    <span v-else-if="attempt.status === 'error'">❌ 실패</span>
+                    <span v-else>⏳ 대기</span>
+                  </div>
+                  <div v-if="attempt.error" class="step-error">{{ attempt.error.errorType }}: {{ attempt.error.error }}</div>
+                </div>
+                <div v-if="idx < behaviorResultData.attempts.length - 1" class="step-arrow">
+                  <span v-if="attempt.status === 'error'">🤖→</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="popup-content popup-content--split">
+            <!-- 좌측: 소스 코드 -->
+            <div class="code-section">
+              <div class="section-header">
+                <span class="section-title">📝 소스 코드</span>
+                <div class="code-tabs" v-if="behaviorResultData?.originalCode && behaviorResultData?.autoFixed">
+                  <button 
+                    class="code-tab"
+                    :class="{ 'code-tab--active': !showOriginalCode }"
+                    @click="showOriginalCode = false"
+                  >수정된 코드</button>
+                  <button 
+                    class="code-tab"
+                    :class="{ 'code-tab--active': showOriginalCode }"
+                    @click="showOriginalCode = true"
+                  >원본 코드</button>
+                </div>
+                <span v-if="behaviorResultData?.errorLine && !showOriginalCode" class="error-line-badge">
+                  에러: {{ behaviorResultData.errorLine }}번 라인
+                </span>
+              </div>
+              <div class="code-viewer">
+                <div 
+                  v-for="(line, idx) in (displayedCode || '').split('\n')" 
+                  :key="idx"
+                  class="code-line"
+                  :class="{ 'code-line--error': !showOriginalCode && behaviorResultData?.errorLine === idx + 1 }"
+                >
+                  <span class="line-number">{{ idx + 1 }}</span>
+                  <span class="line-content">{{ line }}</span>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 우측: 결과/에러 정보 -->
+            <div class="result-section">
+              <!-- 입력 데이터 -->
+              <div class="result-block">
+                <div class="section-header">
+                  <span class="section-title">📥 입력 데이터</span>
+                </div>
+                <pre class="result-pre result-pre--input">{{ JSON.stringify(behaviorResultData?.inputData, null, 2) }}</pre>
+              </div>
+              
+              <!-- 에러인 경우 -->
+              <div v-if="behaviorResultData && !behaviorResultData.success" class="result-block result-block--error">
+                <div class="section-header">
+                  <span class="section-title">⚠️ 에러 정보</span>
+                </div>
+                <div class="error-info">
+                  <div class="error-type">{{ behaviorResultData.errorType }}: {{ behaviorResultData.error }}</div>
+                  <div v-if="behaviorResultData.errorLineContent" class="error-line-content">
+                    <span class="label">에러 라인:</span>
+                    <code>{{ behaviorResultData.errorLineContent }}</code>
+                  </div>
+                  <details class="traceback-details">
+                    <summary>전체 Traceback 보기</summary>
+                    <pre class="traceback-pre">{{ behaviorResultData.traceback }}</pre>
+                  </details>
+                </div>
+              </div>
+              
+              <!-- 성공인 경우 -->
+              <div v-else-if="behaviorResultData?.success" class="result-block result-block--success">
+                <div class="section-header">
+                  <span class="section-title">📤 실행 결과</span>
+                </div>
+                <pre class="result-pre result-pre--output">{{ JSON.stringify(behaviorResultData.result, null, 2) }}</pre>
+              </div>
+              
+              <!-- 프론트엔드 에러 (API 호출 실패 등) -->
+              <div v-else-if="behaviorResultError" class="result-block result-block--error">
+                <div class="section-header">
+                  <span class="section-title">⚠️ 에러</span>
+                </div>
+                <div class="error-info">
+                  <div class="error-type">{{ behaviorResultError }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="popup-footer">
+            <span v-if="behaviorResultData?.message" class="footer-message">{{ behaviorResultData.message }}</span>
+            <button class="close-popup-btn" @click="closeBehaviorResultPopup">닫기</button>
           </div>
         </div>
       </div>
@@ -1261,6 +1646,18 @@ async function handleRefresh() {
   width: 100%;
   background: var(--color-bg);
   overflow: hidden;
+}
+
+/* 왼쪽 패널 숨김 모드 */
+.schema-canvas.hide-table-panel {
+  .canvas-area {
+    width: 100%;
+    flex: 1;
+  }
+  
+  .table-data-panel {
+    left: 0;
+  }
 }
 
 /* Left Panel */
@@ -1644,7 +2041,7 @@ async function handleRefresh() {
 }
 
 // ============================================================================
-// 스키마 트리 스타일
+// 스키마 트리 스타일 (3레벨: 데이터소스 > 스키마 > 테이블)
 // ============================================================================
 
 .schema-tree {
@@ -1652,6 +2049,73 @@ async function handleRefresh() {
   flex-direction: column;
 }
 
+// 데이터소스 (1레벨)
+.datasource-folder {
+  display: flex;
+  flex-direction: column;
+}
+
+.datasource-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.15s;
+  user-select: none;
+  background: rgba(56, 189, 248, 0.05);
+  
+  &:hover {
+    background: rgba(56, 189, 248, 0.12);
+  }
+  
+  &--expanded {
+    .datasource-icon {
+      color: #38bdf8;
+    }
+  }
+}
+
+.datasource-chevron {
+  color: var(--color-text-muted);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+
+  &--expanded {
+    transform: rotate(90deg);
+  }
+}
+
+.datasource-icon {
+  color: #38bdf8;
+  flex-shrink: 0;
+}
+
+.datasource-name {
+  flex: 1;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #38bdf8;
+}
+
+.datasource-count {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  background: rgba(56, 189, 248, 0.15);
+  border-radius: 8px;
+  color: #38bdf8;
+  min-width: 20px;
+  text-align: center;
+}
+
+.datasource-schemas {
+  padding-left: 12px;
+  border-left: 1px solid rgba(56, 189, 248, 0.15);
+  margin-left: 8px;
+}
+
+// 스키마 (2레벨)
 .schema-folder {
   display: flex;
   flex-direction: column;
@@ -2562,12 +3026,81 @@ async function handleRefresh() {
   }
 }
 
+// Behavior 실행 모드 헤더
+.behavior-mode-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, rgba(81, 207, 102, 0.15), rgba(55, 178, 77, 0.1));
+  border-bottom: 1px solid rgba(81, 207, 102, 0.3);
+  
+  .behavior-badge {
+    font-weight: 600;
+    color: #51cf66;
+    font-size: 0.9rem;
+  }
+  
+  .behavior-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    
+    .row-count {
+      font-size: 0.85rem;
+      color: var(--color-text-muted);
+    }
+    
+    .cancel-mode-btn {
+      padding: 6px 12px;
+      background: transparent;
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      color: var(--color-text-light);
+      font-size: 0.85rem;
+      cursor: pointer;
+      
+      &:hover {
+        background: var(--color-bg-tertiary);
+      }
+    }
+  }
+}
+
 .data-table-wrapper {
   overflow: auto;
   height: 100%;
 }
 
 .data-table {
+  // Behavior 모드 스타일
+  &.behavior-mode {
+    .action-col {
+      width: 60px;
+      text-align: center;
+    }
+    
+    .row-execute-btn {
+      padding: 4px 12px;
+      background: linear-gradient(135deg, #51cf66, #37b24d);
+      border: none;
+      border-radius: 4px;
+      color: white;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      
+      &:hover:not(:disabled) {
+        background: linear-gradient(135deg, #40c057, #2f9e44);
+        transform: scale(1.05);
+      }
+      
+      &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+    }
+  }
   width: 100%;
   border-collapse: collapse;
   font-size: 0.8rem;
@@ -2622,6 +3155,523 @@ async function handleRefresh() {
   to {
     transform: rotate(360deg);
   }
+}
+
+// Behavior 결과 팝업 (인터랙티브)
+.behavior-result-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.behavior-result-popup {
+  background: var(--color-bg-secondary, #25262b);
+  border-radius: 12px;
+  border: 1px solid var(--color-border, #373a40);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  
+  &--large {
+    width: 90vw;
+    max-width: 1200px;
+    height: 80vh;
+    max-height: 800px;
+  }
+  
+  .popup-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--color-border, #373a40);
+    background: var(--color-bg-tertiary, #1e1f23);
+    border-radius: 12px 12px 0 0;
+    
+    h3 {
+      margin: 0;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--color-text, #c1c2c5);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .close-btn {
+      background: transparent;
+      border: none;
+      color: var(--color-text-muted, #909296);
+      font-size: 1.2rem;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      
+      &:hover {
+        background: var(--color-bg, #1a1b26);
+        color: var(--color-text, #c1c2c5);
+      }
+    }
+  }
+  
+  .popup-content {
+    flex: 1;
+    overflow: hidden;
+    
+    &--split {
+      display: flex;
+      gap: 1px;
+      background: var(--color-border, #373a40);
+    }
+  }
+  
+  .code-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-bg-secondary, #25262b);
+    overflow: hidden;
+    
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: var(--color-bg-tertiary, #1e1f23);
+      border-bottom: 1px solid var(--color-border, #373a40);
+      
+      .section-title {
+        font-weight: 600;
+        font-size: 0.85rem;
+        color: var(--color-text-light, #909296);
+      }
+      
+      .error-line-badge {
+        padding: 4px 10px;
+        background: rgba(250, 82, 82, 0.2);
+        border: 1px solid rgba(250, 82, 82, 0.5);
+        border-radius: 4px;
+        font-size: 0.75rem;
+        color: #fa5252;
+        font-weight: 600;
+      }
+    }
+    
+    .code-viewer {
+      flex: 1;
+      overflow: auto;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 0.8rem;
+      
+      .code-line {
+        display: flex;
+        padding: 2px 0;
+        
+        &:hover {
+          background: rgba(56, 189, 248, 0.05);
+        }
+        
+        &--error {
+          background: rgba(250, 82, 82, 0.15) !important;
+          
+          .line-content {
+            color: #fa5252;
+          }
+        }
+        
+        .line-number {
+          min-width: 50px;
+          padding: 0 12px;
+          text-align: right;
+          color: var(--color-text-muted, #5c5f66);
+          user-select: none;
+          border-right: 1px solid var(--color-border, #373a40);
+          margin-right: 12px;
+        }
+        
+        .line-content {
+          flex: 1;
+          color: var(--color-text, #c1c2c5);
+          white-space: pre;
+        }
+      }
+    }
+  }
+  
+  .result-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-bg-secondary, #25262b);
+    overflow: hidden;
+    
+    .result-block {
+      display: flex;
+      flex-direction: column;
+      border-bottom: 1px solid var(--color-border, #373a40);
+      
+      &:last-child {
+        flex: 1;
+        border-bottom: none;
+      }
+      
+      &--error {
+        .section-title {
+          color: #fa5252;
+        }
+      }
+      
+      &--success {
+        .section-title {
+          color: #51cf66;
+        }
+      }
+      
+      .section-header {
+        display: flex;
+        align-items: center;
+        padding: 10px 16px;
+        background: var(--color-bg-tertiary, #1e1f23);
+        
+        .section-title {
+          font-weight: 600;
+          font-size: 0.85rem;
+        }
+      }
+      
+      .result-pre {
+        flex: 1;
+        margin: 0;
+        padding: 12px 16px;
+        font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        font-size: 0.8rem;
+        overflow: auto;
+        background: var(--color-bg, #1a1b26);
+        
+        &--input {
+          color: #38bdf8;
+          max-height: 120px;
+        }
+        
+        &--output {
+          color: #51cf66;
+        }
+      }
+      
+      .error-info {
+        padding: 12px 16px;
+        
+        .error-type {
+          font-weight: 600;
+          color: #fa5252;
+          margin-bottom: 10px;
+        }
+        
+        .error-line-content {
+          margin-bottom: 10px;
+          
+          .label {
+            color: var(--color-text-muted);
+            margin-right: 8px;
+          }
+          
+          code {
+            padding: 4px 8px;
+            background: rgba(250, 82, 82, 0.1);
+            border-radius: 4px;
+            color: #fa5252;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 0.85rem;
+          }
+        }
+        
+        .traceback-details {
+          margin-top: 10px;
+          
+          summary {
+            cursor: pointer;
+            color: var(--color-text-muted);
+            font-size: 0.85rem;
+            
+            &:hover {
+              color: var(--color-text);
+            }
+          }
+          
+          .traceback-pre {
+            margin-top: 8px;
+            padding: 12px;
+            background: var(--color-bg, #1a1b26);
+            border-radius: 6px;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 0.75rem;
+            color: #909296;
+            overflow: auto;
+            max-height: 200px;
+            white-space: pre-wrap;
+            word-break: break-word;
+          }
+        }
+      }
+    }
+  }
+  
+  .popup-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-top: 1px solid var(--color-border, #373a40);
+    background: var(--color-bg-tertiary, #1e1f23);
+    border-radius: 0 0 12px 12px;
+    
+    .footer-message {
+      font-size: 0.85rem;
+      color: var(--color-text-muted);
+    }
+    
+    .close-popup-btn {
+      padding: 8px 24px;
+      background: var(--color-bg, #1a1b26);
+      border: 1px solid var(--color-border, #373a40);
+      border-radius: 6px;
+      color: var(--color-text, #c1c2c5);
+      font-size: 0.9rem;
+      cursor: pointer;
+      margin-left: auto;
+      
+      &:hover {
+        background: var(--color-bg-secondary, #25262b);
+      }
+    }
+  }
+  
+  // React Agent 시도 타임라인
+  .attempts-timeline {
+    border-bottom: 1px solid var(--color-border, #373a40);
+    background: var(--color-bg, #1a1b26);
+    padding: 12px 20px;
+    
+    .timeline-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+      
+      .timeline-title {
+        font-weight: 600;
+        font-size: 0.85rem;
+        color: var(--color-text-light);
+      }
+      
+      .timeline-summary {
+        font-size: 0.75rem;
+        color: var(--color-text-muted);
+        padding: 2px 8px;
+        background: var(--color-bg-tertiary);
+        border-radius: 10px;
+      }
+    }
+    
+    .timeline-steps {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      
+      .timeline-step {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: var(--color-bg-secondary);
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s;
+        
+        &:hover {
+          background: var(--color-bg-tertiary);
+        }
+        
+        &--active {
+          border-color: #38bdf8;
+          background: rgba(56, 189, 248, 0.1);
+        }
+        
+        &--success {
+          border-color: rgba(81, 207, 102, 0.5);
+          
+          .step-number {
+            background: rgba(81, 207, 102, 0.2);
+            color: #51cf66;
+          }
+        }
+        
+        &--error {
+          border-color: rgba(250, 82, 82, 0.5);
+          
+          .step-number {
+            background: rgba(250, 82, 82, 0.2);
+            color: #fa5252;
+          }
+        }
+        
+        .step-number {
+          width: 24px;
+          height: 24px;
+          border-radius: 50%;
+          background: var(--color-bg-tertiary);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 0.75rem;
+          font-weight: 600;
+          color: var(--color-text);
+        }
+        
+        .step-info {
+          .step-status {
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--color-text);
+          }
+          
+          .step-error {
+            font-size: 0.7rem;
+            color: var(--color-text-muted);
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+        }
+        
+        .step-arrow {
+          font-size: 0.9rem;
+          color: #f59e0b;
+        }
+      }
+    }
+  }
+  
+  // AI 자동 수정 배지
+  .auto-fixed-badge {
+    margin-left: 12px;
+    padding: 4px 10px;
+    background: rgba(56, 189, 248, 0.15);
+    border: 1px solid rgba(56, 189, 248, 0.4);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    color: #38bdf8;
+    font-weight: 500;
+  }
+  
+  // 코드 탭
+  .code-tabs {
+    display: flex;
+    gap: 4px;
+    margin-right: auto;
+    margin-left: 12px;
+    
+    .code-tab {
+      padding: 4px 10px;
+      background: transparent;
+      border: 1px solid var(--color-border);
+      border-radius: 4px;
+      color: var(--color-text-muted);
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      
+      &:hover {
+        background: var(--color-bg-tertiary);
+        color: var(--color-text);
+      }
+      
+      &--active {
+        background: var(--color-bg-tertiary);
+        border-color: #38bdf8;
+        color: #38bdf8;
+      }
+    }
+  }
+}
+
+// 레거시 호환 (기존 스타일 유지)
+.behavior-result-popup:not(.behavior-result-popup--large) {
+  min-width: 400px;
+  max-width: 600px;
+  max-height: 70vh;
+  
+  .popup-content {
+    padding: 20px;
+    
+    .error-result {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--color-error, #fa5252);
+      
+      .error-icon {
+        font-size: 1.5rem;
+      }
+    }
+    
+    .success-result {
+      pre {
+        margin: 0;
+        padding: 16px;
+        background: var(--color-bg, #1a1b26);
+        border-radius: 8px;
+        border: 1px solid var(--color-border, #373a40);
+        font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        font-size: 0.85rem;
+        color: #51cf66;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+    }
+  }
+  
+  .popup-footer {
+    padding: 12px 20px;
+    border-top: 1px solid var(--color-border, #373a40);
+    display: flex;
+    justify-content: flex-end;
+    
+    .close-popup-btn {
+      padding: 8px 20px;
+      background: var(--color-bg-tertiary, #373a40);
+      border: 1px solid var(--color-border, #373a40);
+      border-radius: 6px;
+      color: var(--color-text, #c1c2c5);
+      font-size: 0.9rem;
+      cursor: pointer;
+      
+      &:hover {
+        background: var(--color-bg, #1a1b26);
+      }
+    }
+  }
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>
 

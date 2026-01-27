@@ -96,6 +96,60 @@
       <span class="placeholder-desc">준비 중입니다</span>
     </div>
 
+    <!-- 보안 탭 -->
+    <div class="security-content" v-if="activeTab === 'security'">
+      <div v-if="!tableName" class="empty-state">
+        <IconSecurity class="empty-icon" />
+        <p>테이블을 선택하세요</p>
+      </div>
+      <template v-else>
+        <div class="security-header">
+          <h4>{{ tableName }} 접근 권한</h4>
+        </div>
+        
+        <!-- Access List -->
+        <div class="access-list">
+          <div v-for="(access, idx) in securityAccessList" :key="idx" class="access-item">
+            <span class="access-target">
+              {{ access.target_type === 'user' ? '👤' : '🎭' }}
+              {{ access.target_name }}
+            </span>
+            <span class="access-level" :class="'level-' + access.level">
+              {{ getLevelLabel(access.level) }}
+            </span>
+            <button class="btn-remove" @click="removeSecurityAccess(idx)">×</button>
+          </div>
+          <div v-if="securityAccessList.length === 0" class="no-access">
+            권한 설정 없음 (기본 정책 적용)
+          </div>
+        </div>
+        
+        <!-- Add Form -->
+        <div class="add-access-form">
+          <select v-model="newAccess.target_type">
+            <option value="role">역할</option>
+            <option value="user">사용자</option>
+          </select>
+          <select v-model="newAccess.target_name">
+            <option value="">선택</option>
+            <template v-if="newAccess.target_type === 'role'">
+              <option v-for="r in availableRoles" :key="r" :value="r">{{ r }}</option>
+            </template>
+            <template v-else>
+              <option v-for="u in availableUsers" :key="u" :value="u">{{ u }}</option>
+            </template>
+          </select>
+          <select v-model="newAccess.level">
+            <option value="read">읽기</option>
+            <option value="write">쓰기</option>
+            <option value="admin">관리자</option>
+            <option value="none">차단</option>
+          </select>
+          <button class="btn-add" @click="addSecurityAccess">+</button>
+        </div>
+      </template>
+    </div>
+
     <!-- 사용자 정의 속성 탭 (placeholder) -->
     <div class="placeholder-content" v-if="activeTab === 'custom'">
       <IconSettings class="placeholder-icon" />
@@ -115,6 +169,7 @@ import IconCheck from '@/components/icons/IconCheck.vue'
 import IconSettings from '@/components/icons/IconSettings.vue'
 import IconGrid from '@/components/icons/IconGrid.vue'
 import IconClipboard from '@/components/icons/IconClipboard.vue'
+import IconSecurity from '@/components/icons/IconSecurity.vue'
 
 const props = defineProps<{
   columns: Text2SqlColumnInfo[]
@@ -137,8 +192,38 @@ const tabs: Tab[] = [
   { id: 'schema', label: '스키마', icon: markRaw(IconGrid) },
   { id: 'lineage', label: '계보', icon: markRaw(IconLayers) },
   { id: 'quality', label: '데이터 품질', icon: markRaw(IconClipboard) },
+  { id: 'security', label: '보안', icon: markRaw(IconSecurity) },
   { id: 'custom', label: '사용자 정의 속성', icon: markRaw(IconSettings) }
 ]
+
+// Security Tab state
+const securityAccessList = ref<Array<{
+  target_type: 'user' | 'role'
+  target_name: string
+  level: 'none' | 'read' | 'write' | 'admin'
+}>>([])
+const availableRoles = ['admin', 'analyst', 'readonly']
+const availableUsers = ['admin@localhost', 'test@localhost', 'readonly@localhost']
+const newAccess = ref({
+  target_type: 'role' as 'user' | 'role',
+  target_name: '',
+  level: 'read' as 'none' | 'read' | 'write' | 'admin'
+})
+
+function addSecurityAccess() {
+  if (!newAccess.value.target_name) return
+  securityAccessList.value.push({ ...newAccess.value })
+  newAccess.value.target_name = ''
+}
+
+function removeSecurityAccess(index: number) {
+  securityAccessList.value.splice(index, 1)
+}
+
+function getLevelLabel(level: string) {
+  const labels: Record<string, string> = { admin: '관리자', write: '읽기/쓰기', read: '읽기 전용', none: '접근 불가' }
+  return labels[level] || level
+}
 
 const activeTab = ref('schema')
 const searchQuery = ref('')
@@ -464,6 +549,138 @@ watch(() => props.tableName, () => {
 
 .column-list::-webkit-scrollbar-thumb:hover {
   background: #d1d5db;
+}
+
+/* Security Tab Styles */
+.security-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.security-header {
+  margin-bottom: 1rem;
+}
+
+.security-header h4 {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.access-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.access-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  background: #f9fafb;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+}
+
+.access-target {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.access-level {
+  padding: 0.25rem 0.625rem;
+  border-radius: 12px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.access-level.level-admin {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+}
+
+.access-level.level-write {
+  background: rgba(234, 179, 8, 0.1);
+  color: #ca8a04;
+}
+
+.access-level.level-read {
+  background: rgba(34, 197, 94, 0.1);
+  color: #16a34a;
+}
+
+.access-level.level-none {
+  background: rgba(156, 163, 175, 0.1);
+  color: #6b7280;
+}
+
+.btn-remove {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.btn-remove:hover {
+  color: #ef4444;
+}
+
+.no-access {
+  padding: 1rem;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 0.8125rem;
+  background: #f9fafb;
+  border-radius: 6px;
+}
+
+.add-access-form {
+  display: flex;
+  gap: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e5e7eb;
+}
+
+.add-access-form select {
+  flex: 1;
+  padding: 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  background: white;
+}
+
+.add-access-form select:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+.btn-add {
+  padding: 0.5rem 0.75rem;
+  border: none;
+  background: #2563eb;
+  color: white;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-add:hover {
+  background: #1d4ed8;
 }
 </style>
 

@@ -19,15 +19,21 @@ import {
   IconAlertConfig,
   IconEventDetection,
   IconWatchAgent,
-  IconChevronDown
+  IconChevronDown,
+  IconOntology,
+  IconSearch,
+  IconWhatIf,
+  IconSecurity
 } from '@/components/icons'
 import type { Component } from 'vue'
 
 const sessionStore = useSessionStore()
 const { activeTab } = storeToRefs(sessionStore)
 
-// Observability 메뉴 확장 상태
-const isObservabilityExpanded = ref(false)
+// 메뉴 확장 상태
+const isPhysicalLayerExpanded = ref(true)  // 피지컬 레이어 기본 펼침
+const isDomainLayerExpanded = ref(false)
+const isDynamicLayerExpanded = ref(false)
 
 interface NavItem {
   id: string
@@ -42,20 +48,42 @@ interface NavGroup {
   children: NavItem[]
 }
 
-const navItems: NavItem[] = [
-  { id: 'upload', label: '소스', icon: IconFolder },
-  { id: 'graph', label: '메타데이터', icon: IconDatabase },
-  { id: 'text2sql', label: '자연어 질의', icon: IconMessageSquare },
-  { id: 'lineage', label: '데이터 리니지', icon: IconLineage },
-  { id: 'glossary', label: '용어 관리', icon: IconBook },
-  { id: 'olap', label: 'OLAP 분석', icon: IconBarChart }
-]
+// 피지컬 레이어 그룹 (코드 + 데이터 소스 + 스키마 관리 + 자연어 질의 + Security Guard)
+const physicalLayerGroup: NavGroup = {
+  id: 'physical-layer',
+  label: '피지컬 레이어',
+  icon: IconDatabase,
+  children: [
+    { id: 'upload', label: '코드', icon: IconFolder },
+    { id: 'datasources', label: '데이터 소스', icon: IconDatabase },
+    { id: 'graph', label: '스키마 관리', icon: IconDatabase },
+    { id: 'text2sql', label: '자연어 질의', icon: IconMessageSquare },
+    { id: 'security-guard', label: '보안관리자', icon: IconSecurity }
+  ]
+}
 
-const observabilityGroup: NavGroup = {
-  id: 'observability',
-  label: '관찰 가능성',
+// 도메인 레이어 그룹 (도메인 스키마 + 온톨로지 관리 + 오브젝트 탐색기 + 자연어 질의)
+// 참고: '문서에서 스키마 추출' (id: 'ontology')은 숨김 처리
+const domainLayerGroup: NavGroup = {
+  id: 'domain-layer',
+  label: '도메인 레이어',
+  icon: IconOntology,
+  children: [
+    { id: 'schema-modeling', label: '도메인 스키마', icon: IconDatabase },
+    { id: 'multi-layer-ontology', label: '온톨로지 관리', icon: IconLineage },
+    { id: 'object-explorer', label: '오브젝트 탐색기', icon: IconSearch },
+    // { id: 'ontology', label: '문서에서 스키마 추출', icon: IconOntology },  // 임시 숨김
+    { id: 'domain-text2sql', label: '자연어 질의', icon: IconMessageSquare }
+  ]
+}
+
+// 다이나믹 레이어 그룹 (What-If 시뮬레이터 + 관찰 가능성)
+const dynamicLayerGroup: NavGroup = {
+  id: 'dynamic-layer',
+  label: '다이나믹 레이어',
   icon: IconObservability,
   children: [
+    { id: 'whatif', label: 'What-If 시뮬레이터', icon: IconWhatIf },
     { id: 'data-quality', label: '데이터 품질', icon: IconDataQuality },
     { id: 'incident-manager', label: '사고 관리자', icon: IconIncident },
     { id: 'alerts', label: '알림들', icon: IconAlertConfig },
@@ -64,46 +92,63 @@ const observabilityGroup: NavGroup = {
   ]
 }
 
+// 하단 메뉴 (분석/도구) - What-If 제거됨
+const bottomNavItems: NavItem[] = [
+  { id: 'lineage', label: '데이터 리니지', icon: IconLineage },
+  { id: 'glossary', label: '용어 관리', icon: IconBook },
+  { id: 'olap', label: 'OLAP 분석', icon: IconBarChart }
+]
+
 const setActiveTab = (tabId: string) => {
   sessionStore.setActiveTab(tabId)
 }
 
-const toggleObservability = () => {
-  isObservabilityExpanded.value = !isObservabilityExpanded.value
+// 피지컬 레이어 그룹 토글
+const togglePhysicalLayer = () => {
+  isPhysicalLayerExpanded.value = !isPhysicalLayerExpanded.value
 }
 
-const isObservabilityActive = () => {
-  return observabilityGroup.children.some(child => activeTab.value === child.id)
+const isPhysicalLayerActive = () => {
+  return physicalLayerGroup.children.some(child => activeTab.value === child.id)
+}
+
+// 도메인 레이어 그룹 토글
+const toggleDomainLayer = () => {
+  isDomainLayerExpanded.value = !isDomainLayerExpanded.value
+}
+
+const isDomainLayerActive = () => {
+  return domainLayerGroup.children.some(child => activeTab.value === child.id)
+}
+
+// 다이나믹 레이어 그룹 토글
+const toggleDynamicLayer = () => {
+  isDynamicLayerExpanded.value = !isDynamicLayerExpanded.value
+}
+
+const isDynamicLayerActive = () => {
+  return dynamicLayerGroup.children.some(child => activeTab.value === child.id)
 }
 </script>
 
 <template>
   <nav class="side-nav">
     <div class="nav-items">
-      <!-- 기본 네비게이션 아이템 -->
-      <button v-for="item in navItems" :key="item.id" class="nav-item" :class="{ active: activeTab === item.id }"
-        @click="setActiveTab(item.id)" :title="item.label">
-        <span class="nav-icon">
-          <component :is="item.icon" :size="20" />
-        </span>
-        <span class="nav-label">{{ item.label }}</span>
-      </button>
-
-      <!-- Observability 그룹 (확장 가능) -->
-      <div class="nav-group" :class="{ expanded: isObservabilityExpanded, active: isObservabilityActive() }">
-        <button class="nav-item nav-group-header" :class="{ active: isObservabilityActive() }"
-          @click="toggleObservability" :title="observabilityGroup.label">
+      <!-- 피지컬 레이어 그룹 (코드 + 데이터 소스 + 스키마 관리 + 자연어 질의) -->
+      <div class="nav-group" :class="{ expanded: isPhysicalLayerExpanded, active: isPhysicalLayerActive() }">
+        <button class="nav-item nav-group-header" :class="{ active: isPhysicalLayerActive() }"
+          @click="togglePhysicalLayer" :title="physicalLayerGroup.label">
           <span class="nav-icon">
-            <component :is="observabilityGroup.icon" :size="20" />
+            <component :is="physicalLayerGroup.icon" :size="20" />
           </span>
-          <span class="nav-label">{{ observabilityGroup.label }}</span>
-          <span class="nav-chevron" :class="{ rotated: isObservabilityExpanded }">
+          <span class="nav-label">{{ physicalLayerGroup.label }}</span>
+          <span class="nav-chevron" :class="{ rotated: isPhysicalLayerExpanded }">
             <IconChevronDown :size="14" />
           </span>
         </button>
 
-        <div class="nav-group-children" v-show="isObservabilityExpanded">
-          <button v-for="child in observabilityGroup.children" :key="child.id" class="nav-item nav-child"
+        <div class="nav-group-children" v-show="isPhysicalLayerExpanded">
+          <button v-for="child in physicalLayerGroup.children" :key="child.id" class="nav-item nav-child"
             :class="{ active: activeTab === child.id }" @click="setActiveTab(child.id)" :title="child.label">
             <span class="nav-icon">
               <component :is="child.icon" :size="18" />
@@ -112,6 +157,66 @@ const isObservabilityActive = () => {
           </button>
         </div>
       </div>
+
+      <!-- 도메인 레이어 그룹 (확장 가능) -->
+      <div class="nav-group" :class="{ expanded: isDomainLayerExpanded, active: isDomainLayerActive() }">
+        <button class="nav-item nav-group-header" :class="{ active: isDomainLayerActive() }"
+          @click="toggleDomainLayer" :title="domainLayerGroup.label">
+          <span class="nav-icon">
+            <component :is="domainLayerGroup.icon" :size="20" />
+          </span>
+          <span class="nav-label">{{ domainLayerGroup.label }}</span>
+          <span class="nav-chevron" :class="{ rotated: isDomainLayerExpanded }">
+            <IconChevronDown :size="14" />
+          </span>
+        </button>
+
+        <div class="nav-group-children" v-show="isDomainLayerExpanded">
+          <button v-for="child in domainLayerGroup.children" :key="child.id" class="nav-item nav-child"
+            :class="{ active: activeTab === child.id }" @click="setActiveTab(child.id)" :title="child.label">
+            <span class="nav-icon">
+              <component :is="child.icon" :size="18" />
+            </span>
+            <span class="nav-label">{{ child.label }}</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 다이나믹 레이어 그룹 (확장 가능) -->
+      <div class="nav-group" :class="{ expanded: isDynamicLayerExpanded, active: isDynamicLayerActive() }">
+        <button class="nav-item nav-group-header" :class="{ active: isDynamicLayerActive() }"
+          @click="toggleDynamicLayer" :title="dynamicLayerGroup.label">
+          <span class="nav-icon">
+            <component :is="dynamicLayerGroup.icon" :size="20" />
+          </span>
+          <span class="nav-label">{{ dynamicLayerGroup.label }}</span>
+          <span class="nav-chevron" :class="{ rotated: isDynamicLayerExpanded }">
+            <IconChevronDown :size="14" />
+          </span>
+        </button>
+
+        <div class="nav-group-children" v-show="isDynamicLayerExpanded">
+          <button v-for="child in dynamicLayerGroup.children" :key="child.id" class="nav-item nav-child"
+            :class="{ active: activeTab === child.id }" @click="setActiveTab(child.id)" :title="child.label">
+            <span class="nav-icon">
+              <component :is="child.icon" :size="18" />
+            </span>
+            <span class="nav-label">{{ child.label }}</span>
+          </button>
+        </div>
+      </div>
+      
+      <!-- 구분선 -->
+      <div class="nav-divider"></div>
+      
+      <!-- 하단 메뉴: 분석/도구 -->
+      <button v-for="item in bottomNavItems" :key="item.id" class="nav-item" :class="{ active: activeTab === item.id }"
+        @click="setActiveTab(item.id)" :title="item.label">
+        <span class="nav-icon">
+          <component :is="item.icon" :size="20" />
+        </span>
+        <span class="nav-label">{{ item.label }}</span>
+      </button>
     </div>
   </nav>
 </template>
@@ -270,6 +375,13 @@ const isObservabilityActive = () => {
   gap: 2px;
   padding: 4px;
   padding-top: 0;
+}
+
+.nav-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 8px 12px;
+  opacity: 0.5;
 }
 
 .nav-child {

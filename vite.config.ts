@@ -25,7 +25,7 @@ export default defineConfig({
       '/api/gateway': {
         target: 'http://localhost:9000',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/gateway/, ''),
+        // rewrite 제거 - Spring Gateway가 /api/gateway 접두사 포함 경로를 처리
         // SSE 스트리밍 지원
         configure: (proxy) => {
           proxy.on('proxyReq', (proxyReq, req) => {

@@ -15,7 +15,8 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build for production (skip TypeScript check for faster builds)
+# Build for production with increased memory
+ENV NODE_OPTIONS="--max-old-space-size=8192"
 RUN npm run build:docker
 
 # Production stage with nginx

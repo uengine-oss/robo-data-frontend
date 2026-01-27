@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onMounted } from 'vue'
+import type { ComputedRef } from 'vue'
 import UploadTree from './UploadTree.vue'
 import AddMenu from './AddMenu.vue'
 import type { SourceType } from '@/types'
 import type { DetectTypesResponse } from '@/services/api'
 import { buildUploadTree, collectAllFolderPaths, forceWebkitRelativePath, getNormalizedUploadPath, getParentFolderRelPath, mapPickedFilesToTarget, moveRelPathToFolder, normalizeSlashes, resolveSelectedTargetFolder, splitPath, type UploadTreeNode, uniqueFilesByRelPath } from '@/utils/upload'
 import { IconFolder, IconX, IconCheck, IconAlertTriangle, IconLoader } from '@/components/icons'
+import { useDatasourcesStore, type DataSource } from '@/stores/datasources'
 
 interface Props {
   initialFiles?: File[]
@@ -18,13 +20,37 @@ interface Props {
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
-  confirm: [metadata: { sourceType: SourceType }]
+  confirm: [metadata: { sourceType: SourceType; datasource?: DataSource | null }]
   cancel: []
   'add-files': [files: File[], reanalyze: boolean]
   'files-updated': [files: File[]]
 }>()
 const files = ref<File[]>([...(props.initialFiles || [])])
 const sourceType = ref<SourceType>('java')
+
+// 데이터 소스 스토어
+const datasourcesStore = useDatasourcesStore()
+const selectedDatasource = ref<DataSource | null>(null)
+const showDatasourceSelector = ref(false)
+const showAddDatasourceModal = ref(false)
+const newDatasourceType = ref<any>(null)
+const newDatasourceForm = ref<Record<string, any>>({})
+const newDatasourceName = ref('')
+const isCreatingDatasource = ref(false)
+
+// 데이터 소스 아이콘
+const datasourceIcons: Record<string, string> = {
+  mysql: '🐬',
+  postgresql: '🐘',
+  postgres: '🐘',
+  neo4j: '🔵',
+  mongodb: '🍃',
+}
+
+// 데이터 소스 목록 로드
+onMounted(async () => {
+  await datasourcesStore.fetchDatasources()
+})
 
 // 자동 감지 결과 표시용
 const autoDetectedType = ref<SourceType | null>(null)
@@ -47,6 +73,109 @@ watch(() => props.detectedTypes, (detected) => {
     }
   }
 }, { immediate: true })
+
+// 데이터 소스 추가 모달 열기
+async function openAddDatasourceModal() {
+  showDatasourceSelector.value = false
+  showAddDatasourceModal.value = true
+  newDatasourceType.value = null
+  newDatasourceForm.value = {}
+  newDatasourceName.value = ''
+  
+  // 타입이 없으면 로드
+  if (datasourcesStore.datasourceTypes.length === 0) {
+    await datasourcesStore.fetchTypes()
+  }
+}
+
+// 기본 데이터 소스 타입 (API 연결 안될 때 사용)
+const defaultDatasourceTypes = [
+  {
+    type: 'postgres',
+    display_name: 'PostgreSQL',
+    fields: [
+      { name: 'host', label: 'Host', type: 'text', required: true, default: 'localhost' },
+      { name: 'port', label: 'Port', type: 'number', required: true, default: 5432 },
+      { name: 'user', label: 'Username', type: 'text', required: true },
+      { name: 'password', label: 'Password', type: 'password', required: true },
+      { name: 'database', label: 'Database', type: 'text', required: true }
+    ]
+  },
+  {
+    type: 'mysql',
+    display_name: 'MySQL',
+    fields: [
+      { name: 'host', label: 'Host', type: 'text', required: true, default: 'localhost' },
+      { name: 'port', label: 'Port', type: 'number', required: true, default: 3306 },
+      { name: 'user', label: 'Username', type: 'text', required: true },
+      { name: 'password', label: 'Password', type: 'password', required: true },
+      { name: 'database', label: 'Database', type: 'text', required: true }
+    ]
+  },
+  {
+    type: 'neo4j',
+    display_name: 'Neo4j',
+    fields: [
+      { name: 'host', label: 'Host', type: 'text', required: true, default: 'localhost' },
+      { name: 'port', label: 'Port', type: 'number', required: true, default: 7687 },
+      { name: 'user', label: 'Username', type: 'text', required: true, default: 'neo4j' },
+      { name: 'password', label: 'Password', type: 'password', required: true }
+    ]
+  },
+  {
+    type: 'mongodb',
+    display_name: 'MongoDB',
+    fields: [
+      { name: 'host', label: 'Host', type: 'text', required: true, default: 'localhost' },
+      { name: 'port', label: 'Port', type: 'number', required: true, default: 27017 },
+      { name: 'user', label: 'Username', type: 'text', required: false },
+      { name: 'password', label: 'Password', type: 'password', required: false },
+      { name: 'database', label: 'Database', type: 'text', required: true }
+    ]
+  }
+]
+
+// 사용할 데이터 소스 타입 목록
+const availableDatasourceTypes = computed(() => {
+  return datasourcesStore.datasourceTypes.length > 0 
+    ? datasourcesStore.datasourceTypes 
+    : defaultDatasourceTypes
+})
+
+// 데이터 소스 타입 선택
+function selectDatasourceType(type: any) {
+  newDatasourceType.value = type
+  newDatasourceForm.value = {}
+  // 기본값 설정
+  type.fields?.forEach((field: any) => {
+    if (field.default !== undefined) {
+      newDatasourceForm.value[field.name] = field.default
+    }
+  })
+}
+
+// 데이터 소스 생성
+async function createNewDatasource() {
+  if (!newDatasourceType.value || !newDatasourceName.value) return
+  
+  isCreatingDatasource.value = true
+  const success = await datasourcesStore.createDatasource(
+    newDatasourceName.value,
+    newDatasourceType.value.type,
+    newDatasourceForm.value
+  )
+  isCreatingDatasource.value = false
+  
+  if (success) {
+    // 새로 생성된 데이터 소스 선택
+    await datasourcesStore.fetchDatasources()
+    const newDs = datasourcesStore.datasources.find(ds => ds.name === newDatasourceName.value)
+    if (newDs) {
+      selectedDatasource.value = newDs
+    }
+    showAddDatasourceModal.value = false
+  }
+}
 
 const folderInput = ref<HTMLInputElement>()
 const fileInput = ref<HTMLInputElement>()
@@ -246,7 +375,8 @@ const handleConfirm = () => {
     return
   }
   emit('confirm', {
-    sourceType: sourceType.value
+    sourceType: sourceType.value,
+    datasource: selectedDatasource.value
   })
 }
 
@@ -405,9 +535,68 @@ const moveFileRelPath = (sourceRelPath: string, targetFolderRelPath: string) => 
       </div>
       
       <div class="modal-body">
-        <!-- 상단: 소스 타입 선택 -->
+        <!-- 상단: 데이터 소스 + 소스 타입 선택 -->
         <div class="top-row">
-          <div class="source-type-group source-type-full">
+          <!-- 타겟 데이터 소스 선택 -->
+          <div class="source-type-group">
+            <label class="form-label form-label--compact">
+              타겟 데이터 소스
+            </label>
+            <div class="datasource-selector">
+              <button 
+                v-if="!selectedDatasource" 
+                class="datasource-btn datasource-btn--empty"
+                @click="showDatasourceSelector = true"
+              >
+                <span class="ds-icon">🔌</span>
+                <span class="ds-text">데이터 소스 선택</span>
+                <span class="ds-chevron">▼</span>
+              </button>
+              <button 
+                v-else 
+                class="datasource-btn"
+                @click="showDatasourceSelector = true"
+              >
+                <span class="ds-icon">{{ datasourceIcons[selectedDatasource.engine] || '📦' }}</span>
+                <span class="ds-text">{{ selectedDatasource.display_name || selectedDatasource.name }}</span>
+                <span class="ds-chevron">▼</span>
+              </button>
+              
+              <!-- 데이터 소스 드롭다운 -->
+              <div v-if="showDatasourceSelector" class="datasource-dropdown">
+                <div class="dropdown-header">
+                  <span>데이터 소스 선택</span>
+                  <button class="dropdown-close" @click="showDatasourceSelector = false">✕</button>
+                </div>
+                <div class="dropdown-list">
+                  <button
+                    v-for="ds in datasourcesStore.sortedDatasources"
+                    :key="ds.name"
+                    class="dropdown-item"
+                    :class="{ selected: selectedDatasource?.name === ds.name }"
+                    @click="selectedDatasource = ds; showDatasourceSelector = false"
+                  >
+                    <span class="item-icon">{{ datasourceIcons[ds.engine] || '📦' }}</span>
+                    <div class="item-info">
+                      <span class="item-name">{{ ds.display_name || ds.name }}</span>
+                      <span class="item-engine">{{ ds.engine }}</span>
+                    </div>
+                  </button>
+                  <div v-if="!datasourcesStore.hasDatasources" class="dropdown-empty">
+                    등록된 데이터 소스가 없습니다
+                  </div>
+                </div>
+                <div class="dropdown-footer">
+                  <a href="#" class="add-datasource-link" @click.prevent="openAddDatasourceModal">
+                    + 새 데이터 소스 추가
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- 소스 타입 선택 -->
+          <div class="source-type-group">
             <label class="form-label form-label--compact">
               소스 타입 <span class="required">*</span>
               <span v-if="isDetecting" class="detecting-badge">
@@ -511,6 +700,66 @@ const moveFileRelPath = (sourceRelPath: string, targetFolderRelPath: string) => 
       </div>
     </div>
   </div>
+  
+  <!-- 데이터 소스 추가 모달 -->
+  <Teleport to="body">
+    <div v-if="showAddDatasourceModal" class="ds-modal-overlay" @click.self="showAddDatasourceModal = false">
+      <div class="ds-modal">
+        <div class="ds-modal-header">
+          <h3>{{ newDatasourceType ? `${newDatasourceType.display_name} 연결 추가` : '데이터 소스 추가' }}</h3>
+          <button class="ds-close-btn" @click="showAddDatasourceModal = false">✕</button>
+        </div>
+        
+        <div class="ds-modal-body">
+          <!-- 타입 선택 -->
+          <div v-if="!newDatasourceType" class="ds-type-selection">
+            <p class="ds-hint">데이터 소스 유형을 선택하세요:</p>
+            <div class="ds-type-grid">
+              <button
+                v-for="type in availableDatasourceTypes"
+                :key="type.type"
+                @click="selectDatasourceType(type)"
+                class="ds-type-card"
+              >
+                <span class="ds-type-icon">{{ datasourceIcons[type.type] || '📦' }}</span>
+                <p class="ds-type-name">{{ type.display_name }}</p>
+              </button>
+            </div>
+          </div>
+          
+          <!-- 연결 폼 -->
+          <div v-else class="ds-form">
+            <button @click="newDatasourceType = null" class="ds-back-btn">← 유형 선택으로</button>
+            
+            <form @submit.prevent="createNewDatasource">
+              <div class="ds-form-group">
+                <label>연결 이름 *</label>
+                <input v-model="newDatasourceName" type="text" placeholder="my_database" required />
+              </div>
+              
+              <div v-for="field in newDatasourceType.fields" :key="field.name" class="ds-form-group">
+                <label>{{ field.label }} {{ field.required ? '*' : '' }}</label>
+                <input
+                  v-model="newDatasourceForm[field.name]"
+                  :type="field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text'"
+                  :placeholder="field.default?.toString() || ''"
+                  :required="field.required"
+                />
+              </div>
+              
+              <div v-if="datasourcesStore.error" class="ds-error">
+                ⚠️ {{ datasourcesStore.error }}
+              </div>
+              
+              <button type="submit" class="ds-submit-btn" :disabled="isCreatingDatasource || !newDatasourceName">
+                {{ isCreatingDatasource ? '생성 중...' : '연결 생성' }}
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style lang="scss" scoped>
@@ -576,16 +825,12 @@ const moveFileRelPath = (sourceRelPath: string, targetFolderRelPath: string) => 
 }
 
 .source-type-group {
-  flex: 0 0 auto;
-  width: 180px;
-  
-  &.source-type-full {
-    flex: 1;
-    width: auto;
-  }
+  flex: 1;
+  min-width: 180px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  position: relative;
   
   .form-label {
     display: flex;
@@ -848,6 +1093,348 @@ const moveFileRelPath = (sourceRelPath: string, targetFolderRelPath: string) => 
   
   &:focus {
     box-shadow: 0 0 0 2px rgba(250, 82, 82, 0.2);
+  }
+}
+
+// ============================================================================
+// 데이터 소스 선택자 스타일
+// ============================================================================
+
+.datasource-selector {
+  position: relative;
+}
+
+.datasource-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  color: var(--color-text);
+  
+  &:hover {
+    border-color: var(--color-accent);
+  }
+  
+  &--empty {
+    color: var(--color-text-muted);
+  }
+}
+
+.ds-icon {
+  font-size: 1.1rem;
+}
+
+.ds-text {
+  flex: 1;
+  text-align: left;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ds-chevron {
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.datasource-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  overflow: hidden;
+  animation: slideDown var(--transition-fast);
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dropdown-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-light);
+}
+
+.dropdown-close {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  
+  &:hover {
+    color: var(--color-text);
+  }
+}
+
+.dropdown-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  text-align: left;
+  
+  &:hover {
+    background: var(--color-bg-tertiary);
+  }
+  
+  &.selected {
+    background: rgba(34, 139, 230, 0.1);
+  }
+}
+
+.item-icon {
+  font-size: 1.25rem;
+}
+
+.item-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.item-name {
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.item-engine {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.dropdown-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.dropdown-footer {
+  padding: 8px 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.add-datasource-link {
+  display: block;
+  text-align: center;
+  color: var(--color-accent);
+  font-size: 12px;
+  text-decoration: none;
+  
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+// ============================================================================
+// 데이터 소스 추가 모달 스타일
+// ============================================================================
+
+.ds-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+  padding: 1rem;
+}
+
+.ds-modal {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 500px;
+  max-height: 80vh;
+  overflow: hidden;
+  animation: slideUp var(--transition-normal);
+}
+
+.ds-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--color-border);
+  
+  h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+  }
+}
+
+.ds-close-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 8px;
+  
+  &:hover {
+    color: var(--color-text);
+  }
+}
+
+.ds-modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  max-height: 60vh;
+}
+
+.ds-hint {
+  color: var(--color-text-muted);
+  margin: 0 0 16px 0;
+  font-size: 13px;
+}
+
+.ds-type-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.ds-type-card {
+  padding: 16px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+  
+  &:hover {
+    border-color: var(--color-accent);
+    transform: translateY(-2px);
+  }
+}
+
+.ds-type-icon {
+  font-size: 2rem;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.ds-type-name {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ds-back-btn {
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  cursor: pointer;
+  margin-bottom: 16px;
+  padding: 0;
+  font-size: 13px;
+  
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.ds-form form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ds-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  
+  label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-text-light);
+  }
+  
+  input {
+    padding: 10px 12px;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    color: var(--color-text);
+    font-size: 13px;
+    
+    &:focus {
+      outline: none;
+      border-color: var(--color-accent);
+    }
+  }
+}
+
+.ds-error {
+  padding: 10px 12px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 8px;
+  color: #f87171;
+  font-size: 12px;
+}
+
+.ds-submit-btn {
+  margin-top: 8px;
+  padding: 12px 16px;
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  
+  &:hover:not(:disabled) {
+    background: var(--color-accent-hover, #5457e5);
+  }
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 }
 </style>

@@ -87,10 +87,11 @@
           <div class="summary-header">
             <span class="ai-icon">🤖</span>
             <span>AI 분석</span>
+            <span v-if="isStreamingSummary" class="streaming-indicator">●</span>
           </div>
           <div class="summary-content">
-            <TypeWriter v-if="isStreamingSummary" :text="aiSummary" :speed="15" />
-            <p v-else>{{ aiSummary }}</p>
+            <!-- 스트리밍 중에는 직접 표시 (이미 토큰 단위 스트리밍) -->
+            <p class="streaming-text" :class="{ streaming: isStreamingSummary }">{{ aiSummary }}</p>
           </div>
         </div>
 
@@ -122,7 +123,6 @@
 import { ref, computed } from 'vue'
 import { IconPlay } from '@/components/icons'
 import ResultTable from './ResultTable.vue'
-import TypeWriter from './TypeWriter.vue'
 import type { ReactExecutionResult } from '@/types'
 
 defineEmits<{
@@ -552,6 +552,11 @@ $error: #f87171;
       text-transform: uppercase;
       letter-spacing: 0.05em;
     }
+    
+    .streaming-indicator {
+      animation: pulse 1s ease-in-out infinite;
+      color: $primary;
+    }
   }
   
   .summary-content {
@@ -561,7 +566,28 @@ $error: #f87171;
       font-size: 14px;
       line-height: 1.7;
     }
+    
+    .streaming-text {
+      white-space: pre-wrap;
+      
+      &.streaming::after {
+        content: '▌';
+        animation: blink 0.7s infinite;
+        color: $primary;
+        margin-left: 2px;
+      }
+    }
   }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
 }
 
 .empty-state {

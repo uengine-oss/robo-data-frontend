@@ -218,10 +218,14 @@ export const useProjectStore = defineStore('project', () => {
     ddl: ddl.value
   }))
   
+  // 데이터 소스 이름
+  const datasourceName = ref<string | null>(null)
+  
   const analyzeMeta = computed<BackendRequestMetadata>(() => ({
     strategy: (sourceType.value === 'oracle' || sourceType.value === 'postgresql') ? 'dbms' : 'framework',
     target: sourceType.value,
-    nameCase: nameCaseOption.value
+    nameCase: nameCaseOption.value,
+    datasourceName: datasourceName.value
   }))
   
   const isValidConfig = computed(() => 
@@ -378,6 +382,10 @@ export const useProjectStore = defineStore('project', () => {
   
   function setSourceType(type: SourceType): void {
     sourceType.value = type
+  }
+  
+  function setDatasourceName(name: string | null): void {
+    datasourceName.value = name
   }
   
   function setDdl(d: string[]): void {
@@ -1065,6 +1073,7 @@ export const useProjectStore = defineStore('project', () => {
     
     // Actions - Setters
     setSourceType,
+    setDatasourceName,
     setDdl,
     
     // Actions - Messages

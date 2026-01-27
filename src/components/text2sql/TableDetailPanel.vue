@@ -1,10 +1,84 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch, inject } from 'vue'
 import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
 import type { Text2SqlColumnInfo } from '@/types'
 import { IconX, IconEdit, IconTrash, IconPlus } from '@/components/icons'
 
 const store = useSchemaCanvasStore()
+
+// Behavior 관련
+interface Behavior {
+  name: string
+  description?: string
+  behaviorType: 'rest_api' | 'javascript' | 'python' | 'dmn'
+  config: Record<string, any>
+  inputFields?: string[]
+  outputField?: string
+}
+
+const emit = defineEmits<{
+  (e: 'openBehaviorDialog', data: { mode: 'create' | 'edit', objectTypeName: string, columns: string[], behavior?: Behavior }): void
+}>()
+
+// ObjectType 여부 확인
+const isObjectType = computed(() => {
+  const t = store.selectedTable
+  return t && (t as any).isObjectType === true
+})
+
+// Behavior 목록
+const behaviors = computed<Behavior[]>(() => {
+  const t = store.selectedTable
+  if (!t) return []
+  return (t as any).behaviors || []
+})
+
+// Behavior 추가 다이얼로그 열기
+function openAddBehaviorDialog() {
+  const t = store.selectedTable
+  if (!t) return
+  
+  emit('openBehaviorDialog', {
+    mode: 'create',
+    objectTypeName: t.name,
+    columns: store.selectedTableColumns.map(c => c.name)
+  })
+}
+
+// Behavior 편집 다이얼로그 열기
+function openEditBehaviorDialog(behavior: Behavior) {
+  const t = store.selectedTable
+  if (!t) return
+  
+  emit('openBehaviorDialog', {
+    mode: 'edit',
+    objectTypeName: t.name,
+    columns: store.selectedTableColumns.map(c => c.name),
+    behavior
+  })
+}
+
+// Behavior 타입 아이콘
+function getBehaviorTypeIcon(type: string): string {
+  const icons: Record<string, string> = {
+    rest_api: '🌐',
+    dmn: '📊',
+    python: '🐍',
+    javascript: '📜'
+  }
+  return icons[type] || '⚡'
+}
+
+// Behavior 타입 레이블
+function getBehaviorTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    rest_api: 'REST API',
+    dmn: 'DMN 규칙',
+    python: 'Python',
+    javascript: 'JavaScript'
+  }
+  return labels[type] || type
+}
 
 // Edit states
 const isEditingDescription = ref(false)
@@ -433,6 +507,46 @@ function getDescriptionSourceLabel(source?: string): string {
             
             <div v-if="tableRelationships.length === 0" class="empty-state">
               이 테이블과 연결된 릴레이션이 없습니다
+            </div>
+          </div>
+        </section>
+        
+        <!-- Behaviors Section (ObjectType only) -->
+        <section v-if="isObjectType" class="detail-section behaviors-section">
+          <div class="detail-section__header">
+            <h3>⚡ Behaviors ({{ behaviors.length }})</h3>
+            <button 
+              class="btn btn--primary btn--sm"
+              @click="openAddBehaviorDialog"
+            >
+              <IconPlus :size="12" /> 추가
+            </button>
+          </div>
+          
+          <div class="behaviors-list">
+            <div 
+              v-for="behavior in behaviors" 
+              :key="behavior.name"
+              class="behavior-item"
+              @click="openEditBehaviorDialog(behavior)"
+            >
+              <div class="behavior-item__header">
+                <span class="behavior-item__icon">{{ getBehaviorTypeIcon(behavior.behaviorType) }}</span>
+                <span class="behavior-item__name">{{ behavior.name }}</span>
+                <span class="behavior-item__type">{{ getBehaviorTypeLabel(behavior.behaviorType) }}</span>
+              </div>
+              <div v-if="behavior.description" class="behavior-item__desc">
+                {{ behavior.description }}
+              </div>
+              <div v-if="behavior.inputFields && behavior.inputFields.length > 0" class="behavior-item__fields">
+                입력: {{ behavior.inputFields.join(', ') }}
+                <template v-if="behavior.outputField"> → {{ behavior.outputField }}</template>
+              </div>
+            </div>
+            
+            <div v-if="behaviors.length === 0" class="empty-state">
+              <p>정의된 Behavior가 없습니다</p>
+              <p class="empty-hint">Behavior를 추가하여 이 ObjectType의 동작을 정의하세요</p>
             </div>
           </div>
         </section>
@@ -926,6 +1040,80 @@ function getDescriptionSourceLabel(source?: string): string {
 /* 컬럼 아이템 position 추가 */
 .column-item {
   position: relative;
+}
+
+/* Behaviors Section */
+.behaviors-section {
+  .detail-section__header h3 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+}
+
+.behaviors-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.behavior-item {
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  
+  &:hover {
+    border-color: var(--color-accent);
+    background: rgba(0, 212, 170, 0.05);
+  }
+}
+
+.behavior-item__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.behavior-item__icon {
+  font-size: 1rem;
+}
+
+.behavior-item__name {
+  flex: 1;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text-bright);
+}
+
+.behavior-item__type {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.behavior-item__desc {
+  margin-top: 6px;
+  font-size: 0.8rem;
+  color: var(--color-text-light);
+  line-height: 1.4;
+}
+
+.behavior-item__fields {
+  margin-top: 6px;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  font-family: monospace;
+}
+
+.empty-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin-top: 4px;
 }
 </style>
 

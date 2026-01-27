@@ -10,6 +10,7 @@ export interface ConnectionInfo {
 }
 
 export type Cardinality = '1:1' | '1:N' | 'N:1' | 'N:N'
+export type MatchStrategy = 'EXACT_MATCH' | 'CONTAINS' | 'STARTS_WITH' | 'ENDS_WITH'
 
 const props = defineProps<{
   isOpen: boolean
@@ -18,10 +19,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
-  (e: 'confirm', cardinality: Cardinality, description: string): void
+  (e: 'confirm', cardinality: Cardinality, description: string, matchStrategy: MatchStrategy): void
 }>()
 
 const selectedCardinality = ref<Cardinality>('N:1')
+const selectedMatchStrategy = ref<MatchStrategy>('EXACT_MATCH')
 const description = ref('')
 
 const cardinalityOptions: { value: Cardinality; label: string; icon: string; desc: string }[] = [
@@ -55,8 +57,16 @@ const selectedOption = computed(() =>
   cardinalityOptions.find(opt => opt.value === selectedCardinality.value)
 )
 
+// MatchStrategy (Correlation 전략) 옵션
+const matchStrategyOptions: { value: MatchStrategy; label: string; description: string }[] = [
+  { value: 'EXACT_MATCH', label: '정확히 일치 (=)', description: 'target.col = source.col' },
+  { value: 'CONTAINS', label: '포함', description: 'target.col LIKE %source.col%' },
+  { value: 'STARTS_WITH', label: '시작 문자열', description: 'target.col LIKE source.col%' },
+  { value: 'ENDS_WITH', label: '끝 문자열', description: 'target.col LIKE %source.col' }
+]
+
 function handleConfirm() {
-  emit('confirm', selectedCardinality.value, description.value)
+  emit('confirm', selectedCardinality.value, description.value, selectedMatchStrategy.value)
   resetForm()
 }
 
@@ -67,11 +77,16 @@ function handleClose() {
 
 function resetForm() {
   selectedCardinality.value = 'N:1'
+  selectedMatchStrategy.value = 'EXACT_MATCH'
   description.value = ''
 }
 
 function selectCardinality(value: Cardinality) {
   selectedCardinality.value = value
+}
+
+function selectMatchStrategy(value: MatchStrategy) {
+  selectedMatchStrategy.value = value
 }
 </script>
 
@@ -174,6 +189,23 @@ function selectCardinality(value: Cardinality) {
               <span class="to-indicator">
                 {{ selectedCardinality === '1:1' || selectedCardinality === 'N:1' ? '1' : 'N' }}
               </span>
+            </div>
+            
+            <!-- Match Strategy (Correlation 전략) -->
+            <div class="match-strategy-section">
+              <div class="section-label">Correlation 전략</div>
+              <div class="match-strategy-grid">
+                <button 
+                  v-for="option in matchStrategyOptions"
+                  :key="option.value"
+                  class="match-strategy-option"
+                  :class="{ 'is-selected': selectedMatchStrategy === option.value }"
+                  @click="selectMatchStrategy(option.value)"
+                >
+                  <span class="strategy-label">{{ option.label }}</span>
+                  <span class="strategy-desc">{{ option.description }}</span>
+                </button>
+              </div>
             </div>
             
             <!-- Description Input -->
@@ -461,6 +493,53 @@ function selectCardinality(value: Cardinality) {
 
 .separator {
   color: var(--color-text-muted);
+}
+
+/* Match Strategy Section */
+.match-strategy-section {
+  margin-bottom: 16px;
+}
+
+.match-strategy-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.match-strategy-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--color-bg-tertiary, #373a40);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  
+  &:hover {
+    background: var(--color-bg, #25262b);
+    border-color: var(--color-accent-light, #4dabf7);
+  }
+  
+  &.is-selected {
+    background: rgba(0, 212, 170, 0.15);
+    border-color: #00d4aa;
+  }
+  
+  .strategy-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--color-text-bright);
+  }
+  
+  .strategy-desc {
+    font-size: 0.7rem;
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+  }
 }
 
 /* Description Field */

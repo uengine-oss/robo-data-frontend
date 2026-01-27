@@ -21,11 +21,14 @@ export type SchemaDataSource = 'robo' | 'text2sql'
 export interface TableNodeData {
   tableName: string
   schema: string
+  datasource?: string  // 데이터소스명 (예: robo_postgres)
   description?: string
   description_source?: 'ddl' | 'procedure' | 'user' | ''  // 설명 출처
   columns: Text2SqlColumnInfo[]
   columnCount: number
   isPrimary?: boolean  // 직접 선택/드래그한 테이블인지 여부
+  isObjectType?: boolean  // ObjectType인지 여부
+  behaviors?: any[]  // Behavior 목록
 }
 
 export interface RelationshipData {
@@ -37,6 +40,7 @@ export interface RelationshipData {
   to_column: string
   description?: string
   relationship_type: string
+  name?: string  // 관계 이름 (Neo4j FK_TO_TABLE relation의 name 속성)
 }
 
 export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
@@ -53,18 +57,24 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   
   // 노드가 변경될 때 엣지 자동 업데이트 (debounced)
   let edgeUpdateTimeout: ReturnType<typeof setTimeout> | null = null
+  
+  // debounced 엣지 업데이트 함수 (노드 이동 시 사용)
+  function debouncedUpdateEdges() {
+    if (edgeUpdateTimeout) {
+      clearTimeout(edgeUpdateTimeout)
+    }
+    edgeUpdateTimeout = setTimeout(() => {
+      updateEdgesFromRelationships()
+      edgeUpdateTimeout = null
+    }, 150)  // 노드 드래그 시 더 빠른 응답을 위해 150ms
+  }
+  
   watch(
     () => nodes.value.length,
     (newLen, oldLen) => {
       if (newLen !== oldLen && newLen > 0) {
         // 여러 테이블이 동시에 추가될 때 한 번만 호출하도록 debounce
-        if (edgeUpdateTimeout) {
-          clearTimeout(edgeUpdateTimeout)
-        }
-        edgeUpdateTimeout = setTimeout(() => {
-          updateEdgesFromRelationships()
-          edgeUpdateTimeout = null
-        }, 300)
+        debouncedUpdateEdges()
       }
     }
   )
@@ -73,18 +83,148 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   const allTables = ref<Text2SqlTableInfo[]>([])
   const tableColumnsCache = ref<Record<string, Text2SqlColumnInfo[]>>({})
   
-  // Relationships
-  const userRelationships = ref<RelationshipData[]>([])
-  
-  // Neo4j에서 가져온 FK_TO_TABLE 관계 (column_pairs 포함)
-  interface Neo4jRelationship {
-    from_table: string
-    to_table: string
-    type: string
-    source?: 'ddl' | 'procedure' | 'user'  // FK 관계 출처
-    column_pairs: Array<{ source: string; target: string }>
-  }
-  const neo4jRelationships = ref<Neo4jRelationship[]>([])
+    // Relationships
+    const userRelationships = ref<RelationshipData[]>([])
+    
+    // Neo4j에서 가져온 FK_TO_TABLE 관계 (column_pairs 포함)
+    interface Neo4jRelationship {
+      from_table: string
+      to_table: string
+      type: string
+      source?: 'ddl' | 'procedure' | 'user'  // FK 관계 출처
+      column_pairs: Array<{ source: string; target: string; name?: string }>  // 각 컬럼 페어별 관계 이름
+      name?: string  // 관계 이름 (전체 관계에 대한 이름)
+    }
+    const neo4jRelationships = ref<Neo4jRelationship[]>([])
+    
+    // 관계 정보 업데이트 함수
+    async function updateRelationshipInfo(
+      sourceType: string,
+      targetType: string,
+      sourceColumn: string,
+      targetColumn: string
+    ) {
+      try {
+        const params = new URLSearchParams({
+          sourceType,
+          targetType,
+          sourceColumn,
+          targetColumn
+        })
+        
+        const response = await fetch(`/api/gateway/ontology/relationships?${params}`)
+        if (response.ok) {
+          const updatedRel = await response.json()
+          
+          // neo4jRelationships에서 해당 관계 찾아서 업데이트
+          const neo4jRel = neo4jRelationships.value.find(
+            r => r.from_table === sourceType && 
+                 r.to_table === targetType &&
+                 r.column_pairs?.some(p => p.source === sourceColumn && p.target === targetColumn)
+          )
+          
+          if (neo4jRel) {
+            const pair = neo4jRel.column_pairs.find(
+              p => p.source === sourceColumn && p.target === targetColumn
+            )
+            if (pair) {
+              pair.name = updatedRel.name
+            } else {
+              // pair가 없으면 추가
+              if (!neo4jRel.column_pairs) {
+                neo4jRel.column_pairs = []
+              }
+              neo4jRel.column_pairs.push({
+                source: sourceColumn,
+                target: targetColumn,
+                name: updatedRel.name
+              })
+            }
+          } else {
+            // neo4jRelationships에 없으면 새로 추가
+            neo4jRelationships.value.push({
+              from_table: sourceType,
+              to_table: targetType,
+              type: 'FK_TO_TABLE',
+              source: 'user',
+              column_pairs: [{
+                source: sourceColumn,
+                target: targetColumn,
+                name: updatedRel.name
+              }]
+            })
+          }
+          
+          // userRelationships에서도 업데이트
+          const userRel = userRelationships.value.find(
+            r => r.from_table === sourceType && 
+                 r.to_table === targetType &&
+                 r.from_column === sourceColumn &&
+                 r.to_column === targetColumn
+          )
+          
+          if (userRel) {
+            userRel.name = updatedRel.name
+            userRel.description = updatedRel.description || userRel.description
+          }
+          
+          // 관련 테이블의 관계를 다시 로드하여 최신 정보 반영
+          try {
+            // sourceType과 targetType 모두에 대해 관계 다시 로드
+            const sourceResult = await roboSchemaApi.getRelatedTables(sourceType)
+            const targetResult = await roboSchemaApi.getRelatedTables(targetType)
+            
+            // 두 결과를 병합하여 neo4jRelationships 업데이트
+            const allRels = [...sourceResult.relationships, ...targetResult.relationships]
+            for (const rel of allRels) {
+              if (rel.type === 'FK_TO_TABLE') {
+                const existingIdx = neo4jRelationships.value.findIndex(
+                  r => r.from_table === rel.from_table && 
+                       r.to_table === rel.to_table && 
+                       r.type === rel.type
+                )
+                
+                if (existingIdx >= 0) {
+                  // 기존 관계의 column_pairs 업데이트 (name 포함)
+                  const existingRel = neo4jRelationships.value[existingIdx]
+                  if (rel.column_pairs && rel.column_pairs.length > 0) {
+                    // 각 column_pair를 업데이트하거나 추가
+                    for (const newPair of rel.column_pairs) {
+                      const existingPair = existingRel.column_pairs?.find(
+                        p => p.source === newPair.source && p.target === newPair.target
+                      )
+                      if (existingPair) {
+                        // 기존 pair 업데이트 (name 포함)
+                        existingPair.name = newPair.name
+                      } else {
+                        // 새 pair 추가
+                        if (!existingRel.column_pairs) {
+                          existingRel.column_pairs = []
+                        }
+                        existingRel.column_pairs.push(newPair)
+                      }
+                    }
+                  }
+                } else {
+                  // 새 관계 추가
+                  neo4jRelationships.value.push({
+                    from_table: rel.from_table,
+                    to_table: rel.to_table,
+                    type: rel.type,
+                    source: rel.source,
+                    column_pairs: rel.column_pairs || []
+                  })
+                }
+              }
+            }
+          } catch (reloadErr) {
+            console.warn('[SchemaCanvas] 관계 다시 로드 실패 (무시):', reloadErr)
+          }
+        }
+      } catch (err) {
+        console.error('[SchemaCanvas] 관계 정보 업데이트 실패:', err)
+      }
+    }
   
   // UI state
   const selectedNodeId = ref<string | null>(null)
@@ -137,6 +277,10 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     error: string | null
     limit: number
     executedSql?: string  // 실행된 SQL (UI에 표시용)
+    // Behavior 실행 모드 관련
+    behaviorMode: boolean
+    activeBehavior: { name: string; objectTypeName: string; behaviorType: string } | null
+    isExecutingBehavior: boolean
   }
   const tableDataPanel = ref<TableDataPanelState>({
     isOpen: false,
@@ -149,7 +293,10 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     isLoading: false,
     error: null,
     limit: 25,
-    executedSql: ''
+    executedSql: '',
+    behaviorMode: false,
+    activeBehavior: null,
+    isExecutingBehavior: false
   })
   
   // Search/filter
@@ -453,6 +600,15 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     return filteredTables.value.filter(t => !onCanvas.has(t.name))
   })
   
+  // 데이터소스 목록 (정렬됨)
+  const datasources = computed(() => {
+    const dsSet = new Set<string>()
+    allTables.value.forEach(table => {
+      dsSet.add(table.datasource || 'default')
+    })
+    return Array.from(dsSet).sort()
+  })
+  
   // 스키마 목록 (정렬됨)
   const schemas = computed(() => {
     const schemaSet = new Set<string>()
@@ -462,7 +618,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     return Array.from(schemaSet).sort()
   })
   
-  // 스키마별 테이블 그룹화 (캔버스에 없는 테이블만)
+  // 스키마별 테이블 그룹화 (캔버스에 없는 테이블만) - 레거시 호환
   const tablesBySchema = computed(() => {
     const onCanvas = new Set(tablesOnCanvas.value)
     const grouped: Record<string, Text2SqlTableInfo[]> = {}
@@ -485,6 +641,36 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     return grouped
   })
   
+  // 3레벨 그룹핑: datasource > schema > tables (캔버스에 없는 테이블만)
+  const tablesByDatasource = computed(() => {
+    const onCanvas = new Set(tablesOnCanvas.value)
+    const grouped: Record<string, Record<string, Text2SqlTableInfo[]>> = {}
+    
+    filteredTables.value.forEach(table => {
+      if (onCanvas.has(table.name)) return
+      
+      const ds = table.datasource || 'default'
+      const schema = table.schema || 'public'
+      
+      if (!grouped[ds]) {
+        grouped[ds] = {}
+      }
+      if (!grouped[ds][schema]) {
+        grouped[ds][schema] = []
+      }
+      grouped[ds][schema].push(table)
+    })
+    
+    // 각 스키마 내 테이블 정렬
+    Object.keys(grouped).forEach(ds => {
+      Object.keys(grouped[ds]).forEach(schema => {
+        grouped[ds][schema].sort((a, b) => a.name.localeCompare(b.name))
+      })
+    })
+    
+    return grouped
+  })
+  
   // Actions
   async function loadAllTables() {
     loading.value = true
@@ -497,6 +683,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         allTables.value = tables.map(t => ({
           name: t.name,
           schema: t.table_schema,  // Backend returns table_schema
+          datasource: t.datasource || '',  // 데이터소스명 추가
           description: t.description || '',
           description_source: (t.description_source && (t.description_source === 'ddl' || t.description_source === 'procedure' || t.description_source === 'user' || t.description_source === '')) 
             ? t.description_source 
@@ -614,7 +801,8 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
           to_schema: r.to_schema,
           to_column: r.to_column,
           relationship_type: r.relationship_type,
-          description: r.description
+          description: r.description,
+          name: (r as any).name  // 관계 이름
         }))
       } else {
         const response = await text2sqlApi.getUserRelationships()
@@ -632,7 +820,13 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   async function addTableToCanvas(
     table: Text2SqlTableInfo, 
     position?: { x: number; y: number },
-    options?: { autoLoadRelated?: boolean; isPrimary?: boolean }
+    options?: { 
+      autoLoadRelated?: boolean
+      isPrimary?: boolean
+      columns?: Text2SqlColumnInfo[]  // 컬럼을 직접 전달 (ObjectType용)
+      isObjectType?: boolean  // ObjectType 여부
+      behaviors?: any[]  // Behavior 목록
+    }
   ) {
     // Check if already on canvas
     if (nodes.value.some(n => n.data?.tableName === table.name)) {
@@ -642,8 +836,14 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     
     console.log(`[SchemaCanvas] 📋 테이블 추가 중: ${table.name} (isPrimary: ${options?.isPrimary ?? true})`)
     
-    // Load columns
-    const columns = await loadTableColumns(table.name, table.schema)
+    // Load columns - 직접 전달된 컬럼이 있으면 사용, 없으면 DB에서 로드
+    let columns: Text2SqlColumnInfo[]
+    if (options?.columns && options.columns.length > 0) {
+      columns = options.columns
+      console.log(`[SchemaCanvas] 직접 전달된 컬럼 사용: ${columns.length}개`)
+    } else {
+      columns = await loadTableColumns(table.name, table.schema)
+    }
     
     // Calculate position
     const pos = position || calculateNewNodePosition()
@@ -658,11 +858,14 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       data: {
         tableName: table.name,
         schema: table.schema || 'public',
+        datasource: table.datasource || '',  // 데이터소스명 (멀티 데이터소스 지원)
         description: table.description || undefined,
         description_source: table.description_source,  // 설명 출처
         columns: columns,
         columnCount: table.column_count || columns.length,
-        isPrimary: isPrimary  // 직접 선택한 테이블 표시
+        isPrimary: isPrimary,  // 직접 선택한 테이블 표시
+        isObjectType: options?.isObjectType || false,  // ObjectType 여부
+        behaviors: options?.behaviors || []  // Behavior 목록
       }
     }
     
@@ -672,8 +875,8 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     // Update edges for this table
     updateEdgesFromRelationships()
     
-    // Auto-load related tables (default: true)
-    if (options?.autoLoadRelated !== false) {
+    // Auto-load related tables (default: true) - ObjectType은 스킵
+    if (options?.autoLoadRelated !== false && !options?.columns) {
       await loadRelatedTablesFromNeo4j(table.name)
     }
   }
@@ -870,12 +1073,22 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     
     const node = nodes.value.find(n => n.id === nodeId)
     if (node && node.data) {
-      const table = allTables.value.find(t => t.name === node.data!.tableName)
-      if (table) {
-        selectedTable.value = table
-        selectedTableColumns.value = node.data.columns
-        isDetailPanelOpen.value = true
+      // allTables에서 찾거나, 없으면 노드 데이터로 직접 생성 (ObjectType 등)
+      let table = allTables.value.find(t => t.name === node.data!.tableName)
+      
+      if (!table) {
+        // ObjectType 등 allTables에 없는 경우 노드 데이터로 테이블 정보 생성
+        table = {
+          name: node.data.tableName,
+          schema: node.data.schema || 'ObjectType',
+          description: node.data.description || '',
+          column_count: node.data.columns?.length || 0
+        }
       }
+      
+      selectedTable.value = table
+      selectedTableColumns.value = node.data.columns || []
+      isDetailPanelOpen.value = true
     }
   }
   
@@ -947,6 +1160,37 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   const TEXT2SQL_API_BASE = import.meta.env.VITE_TEXT2SQL_API_URL || `${API_GATEWAY_URL}/text2sql`
   
   /**
+   * Behavior 실행 모드 시작
+   * 하단 데이터 패널을 behavior 실행 모드로 열고 데이터를 로드합니다.
+   */
+  async function startBehaviorMode(
+    objectTypeName: string, 
+    behaviorName: string, 
+    behaviorType: string
+  ) {
+    // Behavior 모드 활성화
+    tableDataPanel.value.behaviorMode = true
+    tableDataPanel.value.activeBehavior = {
+      name: behaviorName,
+      objectTypeName: objectTypeName,
+      behaviorType: behaviorType
+    }
+    tableDataPanel.value.isExecutingBehavior = false
+    
+    // ObjectType의 데이터 로드
+    await queryTableData(objectTypeName, 'ObjectType', tableDataPanel.value.limit)
+  }
+  
+  /**
+   * Behavior 실행 모드 종료
+   */
+  function cancelBehaviorMode() {
+    tableDataPanel.value.behaviorMode = false
+    tableDataPanel.value.activeBehavior = null
+    tableDataPanel.value.isExecutingBehavior = false
+  }
+  
+  /**
    * 테이블 데이터 조회 패널 열기 및 데이터 로드
    * 
    * PostgreSQL 식별자 규칙:
@@ -954,16 +1198,87 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
    * - 따옴표 있음: 대소문자 그대로 유지됨 ("RWIS"."RDITAG_TB")
    * 
    * 대문자로 생성된 테이블을 조회하려면 반드시 따옴표로 감싸야 함
+   * 
+   * 멀티 데이터소스 지원:
+   * - SQL 쿼리가 datasource.schema.table 형식으로 생성됨
+   * - 예: SELECT * FROM robo_postgres.ins.t_contract_base
    */
-  async function queryTableData(tableName: string, schema: string = 'public', limit: number = 25) {
-    // SQL 생성 - 테이블/스키마명을 따옴표로 감싸서 대소문자 보존
-    // PostgreSQL에서 대문자 테이블명은 반드시 "TABLE_NAME" 형식이어야 함
+  async function queryTableData(tableName: string, schema: string = 'public', limit: number = 25, datasource?: string) {
     const schemaName = schema || 'public'
-    const fullTableName = `"${schemaName}"."${tableName}"`
-    const sql = `SELECT * FROM ${fullTableName} LIMIT ${limit}`
+    const dsName = datasource || ''
+    let sql: string
     
-    // 패널 열기 및 로딩 상태 설정
+    // ObjectType인 경우 Neo4j에서 materializedView 또는 query 가져오기
+    if (schemaName === 'ObjectType' || dsName === 'ontology') {
+      try {
+        // ObjectType의 상세 정보 조회
+        const response = await fetch(`${import.meta.env.VITE_GATEWAY_URL || ''}/api/gateway/ontology/object-types/${encodeURIComponent(tableName)}`)
+        if (response.ok) {
+          const otData = await response.json()
+          if (otData.materializedView) {
+            // Materialized View가 있으면 해당 뷰에서 조회
+            sql = `SELECT * FROM ${otData.materializedView} LIMIT ${limit}`
+          } else if (otData.query) {
+            // query가 있으면 서브쿼리로 사용
+            sql = `SELECT * FROM (${otData.query}) AS subq LIMIT ${limit}`
+          } else {
+            throw new Error(`ObjectType '${tableName}'에 조회 가능한 데이터가 없습니다.`)
+          }
+        } else {
+          throw new Error(`ObjectType '${tableName}' 정보를 조회할 수 없습니다.`)
+        }
+      } catch (error) {
+        // 패널 열고 에러 표시 (behaviorMode 상태 유지)
+        tableDataPanel.value = {
+          ...tableDataPanel.value,
+          isOpen: true,
+          tableName,
+          schema: schemaName,
+          columns: [],
+          rows: [],
+          rowCount: 0,
+          executionTimeMs: 0,
+          isLoading: false,
+          error: error instanceof Error ? error.message : 'ObjectType 정보 조회 실패',
+          limit,
+          executedSql: ''
+        }
+        return
+      }
+    } else {
+      // 일반 테이블 - 대문자가 포함된 경우 식별자 감싸기
+      // MindsDB를 통할 경우: 백틱(`) 사용 (예: posgres.`RWIS`.`AAA`)
+      // 직접 PostgreSQL일 경우: 큰따옴표(") 사용
+      // 멀티 데이터소스: datasource.schema.table 형식 사용
+      let fullTableName: string
+      
+      // 대문자 포함 여부 확인
+      const hasUpperCase = (str: string) => /[A-Z]/.test(str)
+      const needsQuoting = hasUpperCase(schemaName) || hasUpperCase(tableName)
+      
+      if (dsName) {
+        // 데이터소스 프리픽스 포함 (MindsDB를 통한 쿼리)
+        // MindsDB에서는 백틱(`)으로 대문자 식별자 감싸기
+        if (needsQuoting) {
+          fullTableName = `${dsName}.\`${schemaName}\`.\`${tableName}\``
+        } else {
+          fullTableName = `${dsName}.${schemaName}.${tableName}`
+        }
+      } else {
+        // 데이터소스 없이 스키마.테이블만 사용 (직접 PostgreSQL)
+        // PostgreSQL에서는 큰따옴표(")로 대문자 식별자 감싸기
+        if (needsQuoting) {
+          fullTableName = `"${schemaName}"."${tableName}"`
+        } else {
+          fullTableName = `${schemaName}.${tableName}`
+        }
+      }
+      sql = `SELECT * FROM ${fullTableName} LIMIT ${limit}`
+    }
+    
+    // 패널 열기 및 로딩 상태 설정 (behaviorMode 상태 유지)
     tableDataPanel.value = {
+      ...tableDataPanel.value,
       isOpen: true,
       tableName,
       schema: schemaName,
@@ -1049,7 +1364,10 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       isLoading: false,
       error: null,
       limit: 25,
-      executedSql: ''
+      executedSql: '',
+      behaviorMode: false,
+      activeBehavior: null,
+      isExecutingBehavior: false
     }
   }
   
@@ -1065,6 +1383,39 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   function updateEdgesFromRelationships() {
     const newEdges: Edge[] = []
     const tableNamesOnCanvas = new Set(nodes.value.map(n => n.data?.tableName).filter(Boolean))
+    
+    // 노드 위치를 기반으로 핸들 위치 결정
+    // 소스가 타겟의 왼쪽에 있으면: sourceHandle=right, targetHandle=left
+    // 소스가 타겟의 오른쪽에 있으면: sourceHandle=left, targetHandle=right
+    function getHandles(fromTable: string, toTable: string, fromColumn: string, toColumn: string) {
+      const sourceNode = nodes.value.find(n => n.id === `table-${fromTable}`)
+      const targetNode = nodes.value.find(n => n.id === `table-${toTable}`)
+      
+      if (!sourceNode || !targetNode) {
+        // 기본값: 오른쪽에서 왼쪽으로
+        return {
+          sourceHandle: `fk-${fromColumn}-source`,
+          targetHandle: `pk-${toColumn}`
+        }
+      }
+      
+      const sourceX = sourceNode.position?.x ?? 0
+      const targetX = targetNode.position?.x ?? 0
+      
+      // 소스가 타겟의 왼쪽에 있는 경우
+      if (sourceX < targetX) {
+        return {
+          sourceHandle: `fk-${fromColumn}-source`,  // 오른쪽 source
+          targetHandle: `pk-${toColumn}`             // 왼쪽 target
+        }
+      } else {
+        // 소스가 타겟의 오른쪽에 있는 경우
+        return {
+          sourceHandle: `fk-${fromColumn}-source-left`,  // 왼쪽 source
+          targetHandle: `pk-${toColumn}-right`            // 오른쪽 target
+        }
+      }
+    }
     
     // Parse cardinality from description or relationship_type
     interface CardinalityInfo {
@@ -1136,20 +1487,21 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         if (tableNamesOnCanvas.has(rel.from_table) && tableNamesOnCanvas.has(rel.to_table)) {
           const cardinalityInfo = getCardinalityInfo(rel)
           
-          // Clean description for label
-          let displayLabel = rel.description || ''
+          // 관계 이름 우선, 없으면 description, 마지막으로 기본 라벨
+          let displayLabel = rel.name || rel.description || ''
           displayLabel = displayLabel.replace(/\[.*?\]\s*/, '') // Remove cardinality marker from display
           if (!displayLabel.trim()) {
             displayLabel = cardinalityInfo.label
           }
           
           // 사용자 추가 FK는 주황색 실선
+          const handles = getHandles(rel.from_table, rel.to_table, rel.from_column, rel.to_column)
           const edge: Edge = {
             id: `rel-${rel.from_table}-${rel.from_column}-${rel.to_table}-${rel.to_column}`,
             source: `table-${rel.from_table}`,
             target: `table-${rel.to_table}`,
-            sourceHandle: `fk-${rel.from_column}-source`,
-            targetHandle: `pk-${rel.to_column}`,
+            sourceHandle: handles.sourceHandle,
+            targetHandle: handles.targetHandle,
             type: 'default',  // 베지어 곡선
             animated: false,
             label: displayLabel,
@@ -1206,15 +1558,22 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
             
             // 중복 체크
             if (!newEdges.some(e => e.id === edgeId)) {
+              // 관계 이름 우선: pair.name > rel.name > 기본 라벨
+              const relationshipName = pair.name || rel.name
+              const edgeLabel = relationshipName || `${pair.source} → ${pair.target}`
+              
+              // 노드 위치 기반 핸들 선택
+              const handles = getHandles(rel.from_table, rel.to_table, pair.source, pair.target)
+              
               newEdges.push({
                 id: edgeId,
                 source: `table-${rel.from_table}`,
                 target: `table-${rel.to_table}`,
-                sourceHandle: `fk-${pair.source}-source`,
-                targetHandle: `pk-${pair.target}`,
+                sourceHandle: handles.sourceHandle,
+                targetHandle: handles.targetHandle,
                 type: 'default',  // 베지어 곡선
                 animated: false,
-                label: `${pair.source} → ${pair.target}`,
+                label: edgeLabel,
                 style: { stroke: strokeColor, strokeWidth: 2.5, strokeDasharray },
                 labelStyle: { fill: '#e9ecef', fontSize: 10, fontWeight: 500 },
                 labelBgStyle: { fill: '#1a1b26', fillOpacity: 0.9 },
@@ -1256,8 +1615,9 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   }
   
   type Cardinality = '1:1' | '1:N' | 'N:1' | 'N:N'
+  type MatchStrategy = 'EXACT_MATCH' | 'CONTAINS' | 'STARTS_WITH' | 'ENDS_WITH'
   
-  async function addRelationshipWithCardinality(relationship: Omit<RelationshipData, 'relationship_type'> & { cardinality: Cardinality }) {
+  async function addRelationshipWithCardinality(relationship: Omit<RelationshipData, 'relationship_type'> & { cardinality: Cardinality; matchStrategy?: MatchStrategy }) {
     try {
       // Map cardinality to relationship type
       let relationshipType = 'FK_TO_TABLE'
@@ -1284,7 +1644,8 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         to_schema: relationship.to_schema,
         to_column: relationship.to_column,
         description: relationship.description,
-        relationship_type: relationshipType
+        relationship_type: relationshipType,
+        match_strategy: relationship.matchStrategy || 'EXACT_MATCH'  // Correlation 전략 추가
       }
       
       if (dataSource.value === 'robo') {
@@ -1542,8 +1903,10 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     filteredTables,
     tablesOnCanvas,
     tablesNotOnCanvas,
+    datasources,
     schemas,
     tablesBySchema,
+    tablesByDatasource,
     
     // Actions
     loadAllTables,
@@ -1558,12 +1921,16 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     openSourceCodePanel,
     closeSourceCodePanel,
     queryTableData,
+    startBehaviorMode,
+    cancelBehaviorMode,
     closeTableDataPanel,
     changeTableDataLimit,
     updateEdgesFromRelationships,
+    debouncedUpdateEdges,
     addRelationship,
     addRelationshipWithCardinality,
     removeRelationship,
+    updateRelationshipInfo,
     updateTableDescription,
     updateColumnDescription,
     clearCanvas,

@@ -431,6 +431,13 @@ export const useReactStore = defineStore('react', () => {
       debugStreamRawXmlTokens?: boolean
       useCache?: boolean
       schemaFilter?: string[]  // 검색 대상 스키마 제한 (예: ['dw']는 OLAP만 검색)
+      objectTypeOnly?: boolean  // ObjectType(Materialized View) 테이블만 검색
+      linkedObjectTypes?: Array<{  // 연결된 ObjectType 정보 (프롬프트 확장용)
+        name: string
+        columns: Array<{ name: string; type: string }>
+        description?: string
+      }>
+      preferFormula?: boolean  // 계리수식/공식 우선 검색 모드
     }
   ) {
     cancelOngoing()
@@ -449,7 +456,10 @@ export const useReactStore = defineStore('react', () => {
         max_sql_seconds: options?.maxSqlSeconds,
         debug_stream_xml_tokens: debugStreamRawXmlTokens.value,
         use_cache: options?.useCache ?? true,
-        schema_filter: options?.schemaFilter
+        schema_filter: options?.schemaFilter,
+        object_type_only: options?.objectTypeOnly,
+        linked_object_types: options?.linkedObjectTypes,  // 백엔드에 전달
+        prefer_formula: options?.preferFormula  // 계리수식 우선 검색
       },
       controller
     )

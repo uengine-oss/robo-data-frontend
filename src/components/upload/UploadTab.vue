@@ -202,7 +202,7 @@ const handleFilesUpdated = (updatedFiles: File[]) => {
 }
 
 // 업로드 확인
-const handleUploadConfirm = async (metadata: { sourceType: import('@/types').SourceType }) => {
+const handleUploadConfirm = async (metadata: { sourceType: import('@/types').SourceType; datasource?: any }) => {
   showModal.value = false
   
   if (pendingFiles.value.length === 0) {
@@ -212,6 +212,11 @@ const handleUploadConfirm = async (metadata: { sourceType: import('@/types').Sou
   
   // 모달에서 선택한 소스 타입을 store에 설정
   projectStore.setSourceType(metadata.sourceType)
+  
+  // 데이터 소스 이름 설정 (있는 경우)
+  if (metadata.datasource) {
+    projectStore.setDatasourceName(metadata.datasource.name)
+  }
   
   try {
     await projectStore.uploadFiles(pendingFiles.value, projectStore.analyzeMeta)

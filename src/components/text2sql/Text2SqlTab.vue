@@ -1,7 +1,8 @@
 <template>
-  <div class="text2sql-tab">
-    <!-- 히스토리 패널 -->
+  <div class="text2sql-tab" :class="{ embedded: props.embedded }">
+    <!-- 히스토리 패널 (임베드 모드에서는 숨김) -->
     <HistoryPanel 
+      v-if="!props.embedded"
       :is-open="historyOpen" 
       @toggle="historyOpen = !historyOpen"
       @select="handleHistorySelect"
@@ -41,8 +42,14 @@
       <div class="chat-messages" ref="chatContainer" @scroll="handleScroll">
         <!-- 초기 안내 메시지 -->
         <div v-if="chatMessages.length === 0 && !reactStore.isRunning" class="welcome-message">
-          <h1 class="gradient-title">자연어로 데이터를 분석하세요</h1>
-          <p class="subtitle">질문을 입력하면 AI가 최적의 SQL 쿼리를 생성합니다</p>
+          <h1 class="gradient-title">
+            {{ props.domainLayerMode ? '도메인 레이어 데이터 분석' : '자연어로 데이터를 분석하세요' }}
+          </h1>
+          <p class="subtitle">
+            {{ props.domainLayerMode 
+              ? 'ObjectType(Materialized View) 테이블만 대상으로 AI가 쿼리를 생성합니다' 
+              : '질문을 입력하면 AI가 최적의 SQL 쿼리를 생성합니다' }}
+          </p>
           
           <!-- 최근 쿼리가 있으면 표시 -->
           <div v-if="recentQueries.length > 0" class="examples recent">
@@ -186,6 +193,13 @@
                 >
                   📊 OLAP
                 </button>
+                <button 
+                  v-if="getResultSql(msg)"
+                  class="ontology-instance-btn"
+                  @click="openOntologyInstanceModal(msg)"
+                >
+                  🔮 감시 에이전트
+                </button>
               </div>
               <ResultTable v-if="msg.data" :data="msg.data" :max-rows="20" />
             </div>
@@ -286,6 +300,11 @@
               <span class="setting-hint">OLAP 큐브 데이터만 검색</span>
             </div>
             <div class="setting-row">
+              <label>계리수식 우선</label>
+              <input v-model="preferFormula" type="checkbox" />
+              <span class="setting-hint">계리/보험수식을 우선 검색</span>
+            </div>
+            <div class="setting-row">
               <label>Raw XML(디버그)</label>
               <input v-model="debugRawXml" type="checkbox" />
             </div>
@@ -329,6 +348,124 @@
       </div>
     </div>
   </div>
+  
+  <!-- 온톨로지 인스턴스 생성 모달 -->
+  <Teleport to="body">
+    <div v-if="showOntologyModal" class="ontology-modal-overlay" @click.self="showOntologyModal = false">
+      <div class="ontology-modal">
+        <div class="modal-header">
+          <h3>🔮 감시 에이전트 등록</h3>
+          <button class="close-btn" @click="showOntologyModal = false">✕</button>
+        </div>
+        
+        <div class="modal-body">
+          <!-- 쿼리 정보 -->
+          <div class="info-section">
+            <div class="info-row">
+              <span class="info-label">질문:</span>
+              <span class="info-value">{{ ontologyModalData?.question }}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">결과 행 수:</span>
+              <span class="info-value">{{ ontologyModalData?.rowCount }}개</span>
+            </div>
+          </div>
+          
+          <!-- 온톨로지 스키마 선택 -->
+          <div class="form-section">
+            <label>온톨로지 스키마</label>
+            <select v-model="selectedSchemaId">
+              <option value="">스키마 선택...</option>
+              <option v-for="schema in ontologySchemas" :key="schema.id" :value="schema.id">
+                {{ schema.name }} ({{ schema.nodeCount }}개 노드)
+              </option>
+            </select>
+          </div>
+          
+          <!-- 노드 타입 선택 -->
+          <div class="form-section" v-if="selectedSchemaId">
+            <label>노드 타입 (인스턴스 종류)</label>
+            <select v-model="selectedNodeType">
+              <option value="">노드 타입 선택...</option>
+              <option v-for="node in availableNodeTypes" :key="node.id" :value="node.name">
+                {{ node.name }} - {{ node.description }}
+              </option>
+            </select>
+          </div>
+          
+          <!-- 컬럼 매핑 -->
+          <div class="form-section" v-if="selectedNodeType && ontologyModalData?.columns.length">
+            <label>ID 컬럼 (인스턴스 식별자)</label>
+            <select v-model="selectedIdColumn">
+              <option value="">컬럼 선택...</option>
+              <option v-for="col in ontologyModalData.columns" :key="col" :value="col">
+                {{ col }}
+              </option>
+            </select>
+          </div>
+          
+          <div class="form-section" v-if="selectedIdColumn">
+            <label>이름 컬럼 (표시 이름)</label>
+            <select v-model="selectedNameColumn">
+              <option value="">ID 컬럼과 동일</option>
+              <option v-for="col in ontologyModalData?.columns" :key="col" :value="col">
+                {{ col }}
+              </option>
+            </select>
+          </div>
+          
+          <!-- Materialized View 옵션 -->
+          <div class="form-section mv-section">
+            <label class="checkbox-label">
+              <input type="checkbox" v-model="createMaterializedView" />
+              <span>Materialized View 생성 (데이터 동기화용)</span>
+            </label>
+            <input 
+              v-if="createMaterializedView"
+              v-model="mvViewName"
+              type="text"
+              placeholder="뷰 이름 (예: mv_plant_list)"
+              class="mv-name-input"
+            />
+            <p class="hint" v-if="createMaterializedView">
+              MV를 생성하면 정기적으로 데이터를 동기화하여 인스턴스를 최신 상태로 유지할 수 있습니다.
+            </p>
+          </div>
+          
+          <!-- 샘플 데이터 미리보기 -->
+          <div class="sample-preview" v-if="ontologyModalData?.sampleData?.length">
+            <label>샘플 데이터 (상위 5개)</label>
+            <div class="sample-table-wrapper">
+              <table class="sample-table">
+                <thead>
+                  <tr>
+                    <th v-for="col in ontologyModalData.columns" :key="col">{{ col }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, idx) in ontologyModalData.sampleData" :key="idx">
+                    <td v-for="col in ontologyModalData.columns" :key="col">{{ row[col] }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        
+        <div class="modal-footer">
+          <button class="cancel-btn" @click="showOntologyModal = false">취소</button>
+          <button 
+            class="create-btn" 
+            @click="createOntologyInstances"
+            :disabled="!selectedSchemaId || !selectedNodeType || !selectedIdColumn || isCreatingInstances"
+          >
+            <span v-if="isCreatingInstances">생성 중...</span>
+            <span v-else>🔮 인스턴스 생성</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -344,6 +481,28 @@ import { buildSqlLineDiff, type PreviousSqlLine, type SqlDiffLine } from '@/util
 import {
   IconPlay, IconUpload, IconSettings, IconChevronDown, IconCopy
 } from '@/components/icons'
+
+// 연결된 ObjectType 정보 타입
+interface LinkedObjectType {
+  name: string
+  columns: Array<{ name: string; type: string }>
+  description?: string
+}
+
+// Props for embedded mode
+const props = withDefaults(defineProps<{
+  embedded?: boolean       // 임베드 모드 (히스토리 숨김, 심플 UI)
+  initialQuery?: string    // 초기 검색어 (자동 실행)
+  autoExecute?: boolean    // 초기 검색어 자동 실행 여부
+  domainLayerMode?: boolean  // 도메인 레이어 모드 (ObjectType 테이블만 검색)
+  linkedObjectTypes?: LinkedObjectType[]  // 연결할 ObjectType 정보 (프롬프트 확장용)
+}>(), {
+  embedded: false,
+  initialQuery: '',
+  autoExecute: false,
+  domainLayerMode: false,
+  linkedObjectTypes: () => []
+})
 
 // Types
 interface ToolInfo {
@@ -431,6 +590,149 @@ function exportToOlapFromMsg(msg: ChatMessage) {
   sessionStore.navigateToOlapWithSQL(question, sql)
 }
 
+// ========================================================================
+// 온톨로지 인스턴스 생성 (감시 에이전트)
+// ========================================================================
+const showOntologyModal = ref(false)
+const ontologyModalData = ref<{
+  sql: string
+  question: string
+  rowCount: number
+  columns: string[]
+  sampleData: any[]
+} | null>(null)
+
+const ontologySchemas = ref<any[]>([])
+const selectedSchemaId = ref('')
+const selectedNodeType = ref('')
+const selectedIdColumn = ref('')
+const selectedNameColumn = ref('')
+const createMaterializedView = ref(true)
+const mvViewName = ref('')
+const isCreatingInstances = ref(false)
+
+// 온톨로지 인스턴스 모달 열기
+async function openOntologyInstanceModal(msg: ChatMessage) {
+  const sql = getResultSql(msg)
+  if (!sql || !msg.data) {
+    alert('SQL 쿼리 또는 결과 데이터가 없습니다.')
+    return
+  }
+  
+  // 결과에서 컬럼 추출
+  const columns = msg.data.columns || []
+  const sampleData = (msg.data.rows || []).slice(0, 5)
+  
+  ontologyModalData.value = {
+    sql,
+    question: msg.question || reactStore.currentQuestion,
+    rowCount: msg.rowCount || 0,
+    columns,
+    sampleData
+  }
+  
+  // 스키마 목록 로드
+  try {
+    const response = await fetch('/api/gateway/ontology/schemas')
+    if (response.ok) {
+      const data = await response.json()
+      ontologySchemas.value = data.schemas || []
+    }
+  } catch (err) {
+    console.error('스키마 목록 로드 실패:', err)
+  }
+  
+  // 기본 뷰 이름 생성
+  mvViewName.value = `mv_${Date.now()}`
+  
+  showOntologyModal.value = true
+}
+
+// 선택된 스키마의 노드 타입 목록
+const availableNodeTypes = ref<any[]>([])
+
+// 스키마 선택 시 상세 정보 로드
+watch(selectedSchemaId, async (schemaId) => {
+  if (!schemaId) {
+    availableNodeTypes.value = []
+    return
+  }
+  
+  try {
+    const response = await fetch(`/api/gateway/ontology/schemas/${schemaId}`)
+    if (response.ok) {
+      const schema = await response.json()
+      availableNodeTypes.value = schema.nodes || []
+    }
+  } catch (err) {
+    console.error('스키마 상세 로드 실패:', err)
+    availableNodeTypes.value = []
+  }
+})
+
+// 온톨로지 인스턴스 생성 실행
+async function createOntologyInstances() {
+  if (!ontologyModalData.value || !selectedNodeType.value || !selectedIdColumn.value) {
+    alert('필수 항목을 선택해주세요.')
+    return
+  }
+  
+  isCreatingInstances.value = true
+  
+  try {
+    // 1. Materialized View 생성 (선택된 경우)
+    let viewFullName = null
+    if (createMaterializedView.value && mvViewName.value) {
+      const mvResponse = await fetch('/api/gateway/text2sql/direct-sql/materialized-view', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          view_name: mvViewName.value,
+          sql_query: ontologyModalData.value.sql,
+          schema_name: 'public',
+          description: `온톨로지 인스턴스 동기화: ${selectedNodeType.value}`,
+          refresh_on_create: true
+        })
+      })
+      
+      if (mvResponse.ok) {
+        const mvData = await mvResponse.json()
+        viewFullName = mvData.full_name
+        console.log('Materialized View 생성됨:', viewFullName)
+      }
+    }
+    
+    // 2. Neo4j에 온톨로지 인스턴스 생성
+    const instanceResponse = await fetch('/api/gateway/ontology/instances/bulk-create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        schema_id: selectedSchemaId.value,
+        node_type: selectedNodeType.value,
+        sql_query: ontologyModalData.value.sql,
+        id_column: selectedIdColumn.value,
+        name_column: selectedNameColumn.value || selectedIdColumn.value,
+        materialized_view: viewFullName,
+        source_question: ontologyModalData.value.question
+      })
+    })
+    
+    if (instanceResponse.ok) {
+      const result = await instanceResponse.json()
+      alert(`${result.created_count || 0}개의 인스턴스가 생성되었습니다.`)
+      showOntologyModal.value = false
+    } else {
+      const errData = await instanceResponse.json()
+      alert(`인스턴스 생성 실패: ${errData.detail || '알 수 없는 오류'}`)
+    }
+  } catch (err) {
+    console.error('온톨로지 인스턴스 생성 실패:', err)
+    alert('인스턴스 생성 중 오류가 발생했습니다.')
+  } finally {
+    isCreatingInstances.value = false
+  }
+}
+
 // Refs
 const historyOpen = ref(true)
 const chatContainer = ref<HTMLElement | null>(null)
@@ -441,6 +743,7 @@ const maxToolCalls = ref(30)
 const maxSqlSeconds = ref(60)
 const useCache = ref(true)  // 캐시 사용 여부
 const dwOnlySearch = ref(false)  // DW 스키마만 검색 (OLAP 전용)
+const preferFormula = ref(false)  // 계리수식 우선 검색
 const debugRawXml = ref(false)
 const expandedMessages = ref<Set<string>>(new Set())
 
@@ -786,12 +1089,21 @@ async function handleSubmit() {
     // ReAct 자연어 검색 모드
     chatMessages.value = []
     addMessage({ type: 'user', content: text })
+    
+    // 도메인 레이어 모드면 ObjectType(Materialized View) 테이블만 검색
+    const schemaFilter = props.domainLayerMode 
+      ? ['dw']  // ObjectType 테이블은 dw 스키마에 Materialized View로 저장됨
+      : (dwOnlySearch.value ? ['dw'] : undefined)
+    
     await reactStore.start(text, {
       maxToolCalls: maxToolCalls.value,
       maxSqlSeconds: maxSqlSeconds.value,
       debugStreamRawXmlTokens: debugRawXml.value,
       useCache: useCache.value,
-      schemaFilter: dwOnlySearch.value ? ['dw'] : undefined
+      schemaFilter,
+      objectTypeOnly: props.domainLayerMode,  // ObjectType 테이블만 검색
+      linkedObjectTypes: props.linkedObjectTypes,  // 연결된 ObjectType 정보 (프롬프트 확장용)
+      preferFormula: preferFormula.value  // 계리수식 우선 검색
     })
   }
 }
@@ -1110,7 +1422,18 @@ onMounted(() => {
   inputRef.value?.focus()
   
   // 로컬 스토리지에서 최근 쿼리 불러오기
-  loadRecentQueries()
+  if (!props.embedded) {
+    loadRecentQueries()
+  }
+  
+  // 임베드 모드에서 초기 쿼리 자동 실행
+  if (props.embedded && props.initialQuery && props.autoExecute) {
+    inputText.value = props.initialQuery
+    setTimeout(() => {
+      handleSubmit()
+    }, 100)
+    return
+  }
   
   // 상단 검색창에서 전달된 자연어 질문 처리
   const pendingQuery = sessionStore.consumeNLSearch()
@@ -1165,6 +1488,22 @@ $badge-error: #f87171;
   overflow: hidden;
   font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
   color: var(--color-text);
+  
+  // 임베드 모드 스타일
+  &.embedded {
+    .top-controls {
+      display: none;  // 모드 선택기 숨김
+    }
+    
+    .sql-side-panel {
+      display: none;  // 우측 SQL 패널 숨김
+    }
+    
+    .settings-toggle,
+    .settings-panel {
+      display: none;  // 고급 설정 숨김
+    }
+  }
 }
 
 // Direct SQL 전체 화면
@@ -2261,6 +2600,264 @@ $badge-error: #f87171;
 
   svg {
     color: #38bdf8;
+  }
+}
+
+// 온톨로지 인스턴스 버튼
+.ontology-instance-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding: 8px 14px;
+  background: linear-gradient(135deg, rgba(167, 139, 250, 0.15) 0%, rgba(124, 58, 237, 0.15) 100%);
+  border: 1px solid rgba(167, 139, 250, 0.3);
+  border-radius: 8px;
+  color: #a78bfa;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s ease;
+
+  &:hover {
+    background: linear-gradient(135deg, rgba(167, 139, 250, 0.25) 0%, rgba(124, 58, 237, 0.25) 100%);
+    border-color: rgba(167, 139, 250, 0.5);
+    box-shadow: 0 4px 16px rgba(167, 139, 250, 0.25);
+    transform: translateY(-1px);
+  }
+}
+
+// 온톨로지 모달 스타일
+.ontology-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.ontology-modal {
+  background: var(--color-bg-secondary, #1e293b);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+  border-radius: 16px;
+  width: 90%;
+  max-width: 600px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--color-border);
+    
+    h3 {
+      margin: 0;
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: var(--color-text-bright, #f0f4f8);
+    }
+    
+    .close-btn {
+      background: transparent;
+      border: none;
+      color: var(--color-text-muted);
+      font-size: 1.2rem;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      
+      &:hover {
+        background: var(--color-bg-tertiary);
+        color: var(--color-text-bright);
+      }
+    }
+  }
+  
+  .modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  
+  .modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 16px 24px;
+    border-top: 1px solid var(--color-border);
+  }
+  
+  .info-section {
+    background: var(--color-bg-tertiary, rgba(255, 255, 255, 0.05));
+    border-radius: 10px;
+    padding: 14px 16px;
+    
+    .info-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 8px;
+      
+      &:last-child {
+        margin-bottom: 0;
+      }
+      
+      .info-label {
+        color: var(--color-text-muted);
+        font-size: 0.85rem;
+        min-width: 80px;
+      }
+      
+      .info-value {
+        color: var(--color-text-bright);
+        font-size: 0.85rem;
+        flex: 1;
+      }
+    }
+  }
+  
+  .form-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    
+    label {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--color-text-light);
+    }
+    
+    select, input[type="text"] {
+      padding: 10px 14px;
+      background: var(--color-bg-tertiary);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      color: var(--color-text-bright);
+      font-size: 0.9rem;
+      
+      &:focus {
+        outline: none;
+        border-color: #a78bfa;
+      }
+    }
+    
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      
+      input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        accent-color: #a78bfa;
+      }
+      
+      span {
+        font-size: 0.9rem;
+        color: var(--color-text);
+      }
+    }
+    
+    .mv-name-input {
+      margin-top: 8px;
+    }
+    
+    .hint {
+      font-size: 0.8rem;
+      color: var(--color-text-muted);
+      margin: 4px 0 0 0;
+    }
+  }
+  
+  .sample-preview {
+    label {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--color-text-light);
+      display: block;
+      margin-bottom: 8px;
+    }
+    
+    .sample-table-wrapper {
+      overflow-x: auto;
+      border-radius: 8px;
+      border: 1px solid var(--color-border);
+    }
+    
+    .sample-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+      
+      th, td {
+        padding: 8px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--color-border);
+      }
+      
+      th {
+        background: var(--color-bg-tertiary);
+        color: var(--color-text-muted);
+        font-weight: 500;
+      }
+      
+      td {
+        color: var(--color-text);
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      
+      tbody tr:last-child td {
+        border-bottom: none;
+      }
+    }
+  }
+  
+  .cancel-btn {
+    padding: 10px 20px;
+    background: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    color: var(--color-text);
+    font-size: 0.9rem;
+    cursor: pointer;
+    
+    &:hover {
+      background: var(--color-bg-hover);
+    }
+  }
+  
+  .create-btn {
+    padding: 10px 24px;
+    background: linear-gradient(135deg, #a78bfa, #7c3aed);
+    border: none;
+    border-radius: 8px;
+    color: white;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    
+    &:hover:not(:disabled) {
+      box-shadow: 0 4px 16px rgba(167, 139, 250, 0.4);
+      transform: translateY(-1px);
+    }
+    
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
   }
 }
 

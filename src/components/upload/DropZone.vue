@@ -90,7 +90,8 @@ const readEntry = (entry: FileSystemEntry): Promise<File[]> => {
         (file) => {
           Object.defineProperty(file, 'webkitRelativePath', {
             value: entry.fullPath.slice(1),
-            writable: false
+            writable: true,
+            configurable: true  // 재정의 가능하도록 설정
           })
           resolve([file])
         },
