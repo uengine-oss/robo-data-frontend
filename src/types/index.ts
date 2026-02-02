@@ -292,6 +292,7 @@ export interface ReactResponseModel {
   partial_sql: string
   remaining_tool_calls: number
   session_state?: string | null
+  conversation_state?: string | null
   question_to_user?: string | null
   warnings?: string[] | null
 }
@@ -305,6 +306,7 @@ export interface ReactRequest {
   max_iterations?: number | null
   session_state?: string | null
   user_response?: string | null
+  conversation_state?: string | null
   max_sql_seconds?: number
   prefer_language?: string
   /** 디버그용: raw XML 토큰 스트림(event=token)을 함께 받을지 */

@@ -722,6 +722,8 @@ function startNewQuery() {
   if (langchainStore.isRunning) {
     langchainStore.cancel()
   }
+  // 연속질문 컨텍스트 초기화 (완전한 새 대화)
+  reactStore.clear()
   
   // 채팅 메시지 초기화
   chatMessages.value = []
@@ -784,7 +786,8 @@ async function handleSubmit() {
     })
   } else {
     // ReAct 자연어 검색 모드
-    chatMessages.value = []
+    // NOTE: 연속질문 UX를 위해 채팅 내역은 보존한다.
+    // 완전히 새 대화로 시작하고 싶으면 "새 쿼리" 버튼을 사용.
     addMessage({ type: 'user', content: text })
     await reactStore.start(text, {
       maxToolCalls: maxToolCalls.value,
@@ -831,6 +834,8 @@ async function handleResume() {
 
 // Watch for phase changes
 watch(() => reactStore.currentPhase, (phase) => {
+  // 중간 단계(tool/reasoning)는 디버그 모드에서만 채팅에 남긴다.
+  if (!debugRawXml.value) return
   if (phase === 'idle') {
     return
   }
@@ -839,6 +844,8 @@ watch(() => reactStore.currentPhase, (phase) => {
   const data = reactStore.currentPhaseData
 
   if (phase === 'acting' && data?.tool_name) {
+    // validate_sql 과정은 채팅 내역에 남길 필요 없음
+    if (data.tool_name === 'validate_sql') return
     addMessage({
       type: 'tool',
       content: '',
@@ -879,6 +886,8 @@ const previousIterationRef = ref(0)
 
 // Watch for iteration changes - 이전 스텝의 추론 내용을 chatMessages에 저장
 watch(() => reactStore.currentIteration, (newIteration) => {
+  // validate_sql 등 중간 reasoning은 일반 UX에서는 채팅에 남기지 않는다.
+  if (!debugRawXml.value) return
   const prevIteration = previousIterationRef.value
   
   if (newIteration > prevIteration && prevIteration > 0) {
@@ -895,6 +904,9 @@ watch(() => reactStore.currentIteration, (newIteration) => {
         // 도구 정보 수집
         const toolName = prevLive?.sections?.['tool_call.tool_name'] || ''
         const toolParams = prevLive?.sections?.['tool_call.parameters'] || ''
+
+        // validate_sql 과정은 채팅 내역에 남길 필요 없음
+        if (toolName === 'validate_sql') return
         
         // 해당 스텝의 tool 메시지에서 result 가져오기
         const toolMsg = chatMessages.value.find(
@@ -923,8 +935,11 @@ watch(() => reactStore.currentIteration, (newIteration) => {
 
 // Watch for steps completion - 완료된 스텝의 reasoning 저장 (백업)
 watch(() => reactStore.steps, (steps) => {
+  // validate_sql 등 중간 step은 디버그 모드에서만 노출
+  if (!debugRawXml.value) return
   steps.forEach(step => {
     if (!step.reasoning) return
+    if (step.tool_call?.name === 'validate_sql') return
     
     const existingReasoning = chatMessages.value.find(
       m => m.type === 'reasoning' && m.step === step.iteration

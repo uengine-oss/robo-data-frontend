@@ -54,6 +54,8 @@ export const useReactStore = defineStore('react', () => {
   const warnings = ref<string[]>([])
   const error = ref<string | null>(null)
   const sessionState = ref<string | null>(null)
+  // completed 이후 follow-up 연속질문용 (ask_user session_state와 분리)
+  const conversationState = ref<string | null>(null)
   const questionToUser = ref<string | null>(null)
   const remainingToolCalls = ref<number>(0)
   const abortController = ref<AbortController | null>(null)
@@ -105,6 +107,7 @@ export const useReactStore = defineStore('react', () => {
     warnings.value = []
     error.value = null
     sessionState.value = null
+    // NOTE: conversationState는 follow-up을 위해 유지한다.
     questionToUser.value = null
     remainingToolCalls.value = 0
     currentPhase.value = 'idle'
@@ -156,6 +159,7 @@ export const useReactStore = defineStore('react', () => {
           question: currentQuestion.value,
           session_state: resumeSessionState,
           user_response: feedbackText || undefined,
+          conversation_state: conversationState.value,
         },
         controller
       )
@@ -167,6 +171,7 @@ export const useReactStore = defineStore('react', () => {
       await consumeStream(
         {
           question: enhancedQuestion,
+          conversation_state: conversationState.value,
         },
         controller
       )
@@ -197,6 +202,9 @@ export const useReactStore = defineStore('react', () => {
     partialSql.value = response.partial_sql
     remainingToolCalls.value = response.remaining_tool_calls
     sessionState.value = response.session_state ?? null
+    if (response.conversation_state !== undefined) {
+      conversationState.value = response.conversation_state ?? null
+    }
     questionToUser.value = response.question_to_user ?? null
     warnings.value = response.warnings ?? []
     if (response.final_sql !== undefined) {
@@ -442,13 +450,16 @@ export const useReactStore = defineStore('react', () => {
     const controller = new AbortController()
     abortController.value = controller
     debugStreamRawXmlTokens.value = !!options?.debugStreamRawXmlTokens
+    const isFollowup = !!conversationState.value
     await consumeStream(
       {
         question,
         max_tool_calls: options?.maxToolCalls,
         max_sql_seconds: options?.maxSqlSeconds,
         debug_stream_xml_tokens: debugStreamRawXmlTokens.value,
-        use_cache: options?.useCache ?? true,
+        // 정책: follow-up 연속질문에서는 캐시 사용하지 않음
+        use_cache: isFollowup ? false : (options?.useCache ?? true),
+        conversation_state: conversationState.value,
         schema_filter: options?.schemaFilter
       },
       controller
@@ -474,6 +485,7 @@ export const useReactStore = defineStore('react', () => {
         question: currentQuestion.value,
         session_state: sessionState.value,
         user_response: userResponse,
+        conversation_state: conversationState.value,
         debug_stream_xml_tokens: debugStreamRawXmlTokens.value
       },
       controller
@@ -492,7 +504,13 @@ export const useReactStore = defineStore('react', () => {
     cancelOngoing()
     resetState()
     currentQuestion.value = ''
+    conversationState.value = null
     status.value = 'idle'
+  }
+
+  // 새 대화(새 쿼리) 시작 시 명시적으로 conversationState 초기화
+  function clearConversationState() {
+    conversationState.value = null
   }
 
   return {
@@ -507,6 +525,7 @@ export const useReactStore = defineStore('react', () => {
     warnings,
     error,
     sessionState,
+    conversationState,
     questionToUser,
     remainingToolCalls,
     // Phase 상태
@@ -535,6 +554,7 @@ export const useReactStore = defineStore('react', () => {
     continueWithResponse,
     cancel,
     clear,
+    clearConversationState,
     pause,
     resume
   }
