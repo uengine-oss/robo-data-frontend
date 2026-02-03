@@ -29,14 +29,15 @@ export default defineConfig({
         // SSE 스트리밍 지원
         configure: (proxy) => {
           proxy.on('proxyReq', (proxyReq, req) => {
-            // SSE 요청 감지
-            if (req.url?.includes('/stream/') || req.url?.includes('/react')) {
-              proxyReq.setHeader('Accept', 'text/event-stream')
+            // 스트리밍 요청: 버퍼 없이 전달 (causal-analysis/stream, /stream/, /react)
+            if (req.url?.includes('/stream') || req.url?.includes('/react')) {
+              proxyReq.setHeader('Accept', 'application/x-ndjson, text/event-stream')
               proxyReq.setHeader('Cache-Control', 'no-cache')
               proxyReq.setHeader('Connection', 'keep-alive')
             }
           })
-        }
+        },
+        ws: false
       }
     }
   },

@@ -45,6 +45,11 @@ interface ManualRecord {
   [key: string]: string | number | boolean | null
 }
 
+const props = defineProps<{
+  initialSql?: string
+  initialQuestion?: string  // 원본 질문 (LLM 이름 생성용)
+}>()
+
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'created', objectType: any): void
@@ -67,6 +72,12 @@ const isExecutingSql = ref(false)
 const sqlExecutionError = ref<string | null>(null)
 const sqlResultColumns = ref<string[]>([])
 const sqlResultRows = ref<any[]>([])
+
+// LLM 이름 생성 관련
+const isGeneratingNames = ref(false)
+const suggestedKoreanName = ref('')
+const suggestedEnglishName = ref('')
+const currentQuestion = ref('')  // 현재 질문 (재생성용)
 
 // 수동 입력 관련
 const manualColumns = ref<ManualColumn[]>([{ name: '', type: 'string' }])
@@ -409,6 +420,10 @@ async function createObjectType() {
         : undefined
       requestBody.createMindsDbView = createMindsDbView.value  // MindsDB View 생성
       requestBody.createMaterializedView = false  // PostgreSQL MV는 비활성화
+      // LLM이 생성한 영문 View 이름 사용
+      if (suggestedEnglishName.value) {
+        requestBody.viewName = suggestedEnglishName.value
+      }
     }
     
     // 1. ObjectType을 Neo4j에 저장
@@ -456,9 +471,89 @@ async function createObjectType() {
   }
 }
 
-// 컴포넌트 마운트 시 ObjectType 목록 로드
-onMounted(() => {
+// 이름 재생성
+async function regenerateNames() {
+  if (currentQuestion.value && directSqlInput.value) {
+    await generateNamesFromQuestion(currentQuestion.value, directSqlInput.value)
+  }
+}
+
+// LLM을 통해 ObjectType 이름 생성
+async function generateNamesFromQuestion(question: string, sql: string) {
+  if (!question || isGeneratingNames.value) return
+  
+  currentQuestion.value = question  // 재생성용으로 저장
+  isGeneratingNames.value = true
+  try {
+    console.log('[CreateObjectTypeDialog] LLM 이름 생성 시작:', question)
+    
+    const response = await fetch('/api/gateway/ontology/generate-object-type-name', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question: question,
+        sql: sql,
+        columns: sqlResultColumns.value
+      })
+    })
+    
+    if (response.ok) {
+      const result = await response.json()
+      console.log('[CreateObjectTypeDialog] LLM 이름 생성 결과:', result)
+      
+      if (result.korean_name) {
+        suggestedKoreanName.value = result.korean_name
+        objectTypeName.value = result.korean_name
+      }
+      if (result.english_name) {
+        suggestedEnglishName.value = result.english_name
+      }
+      if (result.description) {
+        objectTypeDescription.value = result.description
+      }
+    } else {
+      console.warn('[CreateObjectTypeDialog] LLM 이름 생성 실패:', await response.text())
+    }
+  } catch (err) {
+    console.error('[CreateObjectTypeDialog] LLM 이름 생성 오류:', err)
+  } finally {
+    isGeneratingNames.value = false
+  }
+}
+
+// 컴포넌트 마운트 시 ObjectType 목록 로드 및 초기 SQL 처리
+onMounted(async () => {
+  console.log('[CreateObjectTypeDialog] 마운트됨, initialSql:', !!props.initialSql, 'initialQuestion:', props.initialQuestion)
+  
   loadExistingObjectTypes()
+  
+  // 초기 SQL이 전달되면 SQL 입력 모드로 자동 전환
+  if (props.initialSql) {
+    console.log('[CreateObjectTypeDialog] 초기 SQL 전달받음:', props.initialSql.substring(0, 100))
+    dataSourceType.value = 'direct-sql'
+    directSqlInput.value = props.initialSql
+    step.value = 'sql-input'
+    
+    // 초기 질문이 있으면 LLM으로 이름 생성
+    if (props.initialQuestion) {
+      console.log('[CreateObjectTypeDialog] 초기 질문 전달받음:', props.initialQuestion)
+      currentQuestion.value = props.initialQuestion
+      
+      // SQL 실행과 이름 생성을 병렬로 진행
+      // 1. SQL 실행
+      executeDirectSql().then(() => {
+        console.log('[CreateObjectTypeDialog] SQL 실행 완료, step:', step.value, '컬럼:', sqlResultColumns.value)
+      }).catch(err => {
+        console.error('[CreateObjectTypeDialog] SQL 실행 오류:', err)
+      })
+      
+      // 2. 이름 생성 (SQL 실행과 병렬로)
+      console.log('[CreateObjectTypeDialog] 이름 생성 시작 (병렬)')
+      generateNamesFromQuestion(props.initialQuestion, props.initialSql).catch(err => {
+        console.error('[CreateObjectTypeDialog] 이름 생성 오류:', err)
+      })
+    }
+  }
 })
 </script>
 
@@ -765,15 +860,44 @@ onMounted(() => {
             <div class="form-section">
               <h3>ObjectType 정보</h3>
               
-              <div class="form-row">
+              <div class="form-row name-input-row">
                 <label>이름 <span class="required">*</span></label>
-                <input 
-                  :value="objectTypeName"
-                  @input="handleNameInput"
-                  type="text" 
-                  placeholder="예: 정수장, 수질측정소..."
-                />
-                <span class="input-hint">공백은 자동으로 "_"로 변환됩니다</span>
+                <div class="name-input-wrapper">
+                  <input 
+                    :value="objectTypeName"
+                    @input="handleNameInput"
+                    type="text" 
+                    placeholder="예: 정수장, 수질측정소..."
+                    :disabled="isGeneratingNames"
+                    :class="{ generating: isGeneratingNames }"
+                  />
+                  <!-- 로딩 스피너 (입력란 내부) -->
+                  <span v-if="isGeneratingNames" class="input-spinner">
+                    <span class="spinner-small"></span>
+                  </span>
+                  <!-- 재생성 버튼 -->
+                  <button 
+                    v-if="currentQuestion && !isGeneratingNames"
+                    class="regenerate-btn"
+                    @click="regenerateNames"
+                    title="AI로 이름 다시 생성"
+                  >
+                    🔄 재생성
+                  </button>
+                </div>
+                <span v-if="isGeneratingNames" class="input-hint generating-hint">
+                  ✨ AI가 적절한 이름을 생성 중...
+                </span>
+                <span v-else class="input-hint">공백은 자동으로 "_"로 변환됩니다</span>
+              </div>
+              
+              <!-- LLM 제안 영문 View 이름 -->
+              <div v-if="suggestedEnglishName && !isGeneratingNames" class="form-row suggested-name">
+                <label>View 이름 (자동생성)</label>
+                <div class="suggested-view-name">
+                  <code>{{ suggestedEnglishName }}</code>
+                  <span class="suggestion-hint">MindsDB에 생성될 View 이름입니다</span>
+                </div>
               </div>
               
               <div class="form-row">
@@ -782,6 +906,7 @@ onMounted(() => {
                   v-model="objectTypeDescription" 
                   placeholder="ObjectType에 대한 설명..."
                   rows="2"
+                  :disabled="isGeneratingNames"
                 ></textarea>
               </div>
             </div>
@@ -864,7 +989,7 @@ onMounted(() => {
                 <span>MindsDB에 View 생성 (데이터 동기화 자동 지원)</span>
               </label>
               <p v-if="createMindsDbView" class="hint-text">
-                MindsDB에 mv_{{ objectTypeName || 'ObjectType명' }} View가 생성됩니다.
+                MindsDB에 {{ suggestedEnglishName || ('mv_' + (objectTypeName || 'ObjectType명')) }} View가 생성됩니다.
               </p>
             </div>
             
@@ -1482,6 +1607,101 @@ onMounted(() => {
     margin-top: 4px;
     font-size: 0.75rem;
     color: var(--color-text-muted);
+  }
+}
+
+// 이름 입력란 래퍼
+.name-input-row {
+  .name-input-wrapper {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    position: relative;
+    
+    input {
+      flex: 1;
+      padding-right: 40px;
+      
+      &.generating {
+        background: rgba(16, 185, 129, 0.05);
+        border-color: rgba(16, 185, 129, 0.3);
+        color: var(--color-text-muted);
+      }
+    }
+    
+    .input-spinner {
+      position: absolute;
+      right: 110px;
+      display: flex;
+      align-items: center;
+      
+      .spinner-small {
+        width: 16px;
+        height: 16px;
+        border: 2px solid rgba(16, 185, 129, 0.3);
+        border-top-color: #10b981;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+    }
+    
+    .regenerate-btn {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 8px 12px;
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.15) 100%);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      border-radius: 6px;
+      color: #818cf8;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+      
+      &:hover {
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(139, 92, 246, 0.25) 100%);
+        border-color: rgba(99, 102, 241, 0.5);
+        box-shadow: 0 2px 8px rgba(99, 102, 241, 0.2);
+      }
+    }
+  }
+  
+  .generating-hint {
+    color: #10b981 !important;
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+// LLM 제안 View 이름
+.suggested-name {
+  .suggested-view-name {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    
+    code {
+      display: inline-block;
+      padding: 8px 14px;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      border-radius: 6px;
+      color: #10b981;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+    
+    .suggestion-hint {
+      font-size: 0.75rem;
+      color: var(--color-text-muted);
+    }
   }
 }
 

@@ -82,6 +82,17 @@
                 <span>{{ expandedItems.has(item.id) ? '접기' : '세부사항' }}</span>
               </button>
               
+              <!-- 온톨로지 내보내기 버튼 -->
+              <button 
+                v-if="item.final_sql"
+                class="export-ontology-btn"
+                @click.stop="exportToOntology(item)"
+                title="온톨로지로 내보내기 - ObjectType 생성"
+              >
+                🧩
+                <span>온톨로지</span>
+              </button>
+              
               <!-- OLAP 내보내기 버튼 -->
               <button 
                 v-if="item.final_sql"
@@ -204,6 +215,18 @@ function exportToOlap(item: QueryHistoryItem) {
     return
   }
   sessionStore.navigateToOlapWithSQL(item.question, item.final_sql)
+}
+
+// 온톨로지(도메인 스키마)로 내보내기
+function exportToOntology(item: QueryHistoryItem) {
+  console.log('[Ontology Export] item:', item)
+  console.log('[Ontology Export] final_sql:', item.final_sql)
+  
+  if (!item.final_sql) {
+    alert('SQL 쿼리가 없습니다.')
+    return
+  }
+  sessionStore.navigateToOntologyWithSQL(item.question, item.final_sql)
 }
 
 // 에이전트 생성
@@ -581,7 +604,7 @@ $text-muted: var(--color-text-muted);
   flex-wrap: wrap;
 }
 
-.export-olap-btn, .create-agent-btn {
+.export-ontology-btn, .export-olap-btn, .create-agent-btn {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -591,6 +614,18 @@ $text-muted: var(--color-text-muted);
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
+}
+
+.export-ontology-btn {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(6, 182, 212, 0.15) 100%);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #10b981;
+
+  &:hover {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(6, 182, 212, 0.25) 100%);
+    border-color: rgba(16, 185, 129, 0.5);
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
+  }
 }
 
 .export-olap-btn {

@@ -276,6 +276,8 @@ const editingRelationship = ref<{
   targetType: string
   sourceColumn: string
   targetColumn: string
+  fromSchema: string
+  toSchema: string
 } | null>(null)
 
 const { fitView, zoomIn, zoomOut } = useVueFlow()
@@ -501,19 +503,25 @@ function onEdgeDoubleClick(event: { edge: { id: string; label?: string; source: 
   const sourceType = edge.source.replace('table-', '')
   const targetType = edge.target.replace('table-', '')
   
-  // sourceHandle에서 컬럼명 추출 (fk-COLUMN_NAME-source 형식)
+  // 노드에서 스키마 정보 가져오기
+  const fromNode = store.nodes.find(n => n.id === edge.source)
+  const toNode = store.nodes.find(n => n.id === edge.target)
+  const fromSchema = fromNode?.data?.schema || 'public'
+  const toSchema = toNode?.data?.schema || 'public'
+  
+  // sourceHandle에서 컬럼명 추출 (fk-COLUMN_NAME-source 또는 fk-COLUMN_NAME-source-left 형식)
   let sourceColumn = ''
   if (edge.sourceHandle) {
-    const match = edge.sourceHandle.match(/^fk-(.+)-source$/)
+    const match = edge.sourceHandle.match(/^(?:fk|pk)-(.+?)(?:-source|-target|-left|-right)*$/)
     if (match) {
       sourceColumn = match[1]
     }
   }
   
-  // targetHandle에서 컬럼명 추출 (pk-COLUMN_NAME 형식)
+  // targetHandle에서 컬럼명 추출 (pk-COLUMN_NAME 또는 pk-COLUMN_NAME-right 형식)
   let targetColumn = ''
   if (edge.targetHandle) {
-    const match = edge.targetHandle.match(/^pk-(.+?)(-right)?$/)
+    const match = edge.targetHandle.match(/^(?:fk|pk)-(.+?)(?:-source|-target|-left|-right)*$/)
     if (match) {
       targetColumn = match[1]
     }
@@ -540,7 +548,9 @@ function onEdgeDoubleClick(event: { edge: { id: string; label?: string; source: 
     sourceType,
     targetType,
     sourceColumn,
-    targetColumn
+    targetColumn,
+    fromSchema,
+    toSchema
   }
   isEditRelationshipDialogOpen.value = true
 }
@@ -565,14 +575,33 @@ async function handleRelationshipUpdated() {
   store.updateEdgesFromRelationships()
 }
 
-// 관계 삭제 완료
-function handleRelationshipDeleted() {
+// 관계 삭제 완료 - 실제 Neo4j에서 삭제
+async function handleRelationshipDeleted() {
   isEditRelationshipDialogOpen.value = false
   const rel = editingRelationship.value
+  
   if (rel) {
-    // 캔버스에서 엣지 제거
-    store.edges = store.edges.filter(e => e.id !== rel.id)
+    try {
+      // 실제 백엔드 API를 통해 Neo4j에서 관계 삭제
+      const result = await store.removeRelationship({
+        from_table: rel.sourceType,
+        from_schema: rel.fromSchema,
+        from_column: rel.sourceColumn,
+        to_table: rel.targetType,
+        to_schema: rel.toSchema,
+        to_column: rel.targetColumn
+      })
+      
+      console.log('[SchemaCanvas] 관계 삭제 결과:', result)
+      
+      // 캔버스에서 엣지 제거
+      store.edges = store.edges.filter(e => e.id !== rel.id)
+    } catch (error) {
+      console.error('[SchemaCanvas] 관계 삭제 실패:', error)
+      alert('관계 삭제에 실패했습니다: ' + (error instanceof Error ? error.message : String(error)))
+    }
   }
+  
   editingRelationship.value = null
   // 관계 정보 업데이트
   store.updateEdgesFromRelationships()
@@ -587,26 +616,53 @@ function onConnect(connection: Connection) {
   const fromTable = connection.source.replace('table-', '')
   const toTable = connection.target.replace('table-', '')
   
-  // Parse column from handle ID
-  let fromColumn = connection.sourceHandle
-  if (fromColumn.startsWith('fk-')) {
-    fromColumn = fromColumn.replace('fk-', '').replace('-source', '')
-  } else if (fromColumn.startsWith('col-')) {
-    fromColumn = fromColumn.replace('col-', '').replace('-out', '')
+  // 노드에서 스키마 정보 가져오기
+  const fromNode = store.nodes.find(n => n.id === connection.source)
+  const toNode = store.nodes.find(n => n.id === connection.target)
+  const fromSchema = fromNode?.data?.schema || 'public'
+  const toSchema = toNode?.data?.schema || 'public'
+  
+  /**
+   * 핸들 ID에서 컬럼명 추출
+   * 핸들 ID 형식:
+   * - Source: fk-{컬럼명}-source, fk-{컬럼명}-source-left
+   * - Target: pk-{컬럼명}, pk-{컬럼명}-right
+   */
+  function extractColumnName(handleId: string): string {
+    let col = handleId
+    
+    // 접두사 제거 (fk-, pk-, col-)
+    col = col.replace(/^(?:fk-|pk-|col-)/, '')
+    
+    // 접미사 제거 - 가능한 모든 조합 처리
+    // -source-left, -source-right, -source, -target, -left, -right, -out, -in
+    col = col.replace(/-source-left$/, '')
+    col = col.replace(/-source-right$/, '')
+    col = col.replace(/-target-left$/, '')
+    col = col.replace(/-target-right$/, '')
+    col = col.replace(/-source$/, '')
+    col = col.replace(/-target$/, '')
+    col = col.replace(/-left$/, '')
+    col = col.replace(/-right$/, '')
+    col = col.replace(/-out$/, '')
+    col = col.replace(/-in$/, '')
+    
+    return col
   }
   
-  let toColumn = connection.targetHandle
-  if (toColumn.startsWith('pk-')) {
-    toColumn = toColumn.replace('pk-', '').replace('-right', '')
-  } else if (toColumn.startsWith('col-')) {
-    toColumn = toColumn.replace('col-', '').replace('-out', '')
-  }
+  const fromColumn = extractColumnName(connection.sourceHandle)
+  const toColumn = extractColumnName(connection.targetHandle)
+  
+  console.log('[onConnect] Raw handles:', { sourceHandle: connection.sourceHandle, targetHandle: connection.targetHandle })
+  console.log('[onConnect] Parsed:', { fromTable, fromSchema, fromColumn, toTable, toSchema, toColumn })
   
   // Store pending connection and show modal
   pendingConnection.value = {
     fromTable,
+    fromSchema,
     fromColumn,
     toTable,
+    toSchema,
     toColumn
   }
   isCardinalityModalOpen.value = true
@@ -616,21 +672,32 @@ function onConnect(connection: Connection) {
 async function handleCardinalityConfirm(cardinality: Cardinality, description: string, matchStrategy: MatchStrategy = 'EXACT_MATCH') {
   if (!pendingConnection.value) return
   
-  const { fromTable, fromColumn, toTable, toColumn } = pendingConnection.value
+  const { fromTable, fromSchema, fromColumn, toTable, toSchema, toColumn } = pendingConnection.value
   
   // Create description with cardinality and matchStrategy
   const fullDescription = description 
     ? `[${cardinality}] ${description}`
     : `[${cardinality}] ${fromTable}.${fromColumn} → ${toTable}.${toColumn}`
   
+  console.log('[handleCardinalityConfirm] Creating relationship:', {
+    from_table: fromTable,
+    from_schema: fromSchema,
+    from_column: fromColumn,
+    to_table: toTable,
+    to_schema: toSchema,
+    to_column: toColumn,
+    cardinality,
+    matchStrategy
+  })
+  
   try {
     isConnecting.value = true
     await store.addRelationshipWithCardinality({
       from_table: fromTable,
-      from_schema: 'public',
+      from_schema: fromSchema || 'public',
       from_column: fromColumn,
       to_table: toTable,
-      to_schema: 'public',
+      to_schema: toSchema || 'public',
       to_column: toColumn,
       description: fullDescription,
       cardinality,

@@ -9,6 +9,7 @@
 import { ref, computed, onMounted, provide, Teleport } from 'vue'
 import SchemaCanvas from '@/components/text2sql/SchemaCanvas.vue'
 import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
+import { useSessionStore } from '@/stores/session'
 import { IconPlus, IconSearch, IconRefresh, IconDatabase, IconTrash, IconAlertTriangle, IconEdit } from '@/components/icons'
 import CreateObjectTypeDialog from './CreateObjectTypeDialog.vue'
 import EditRelationshipDialog from '@/components/text2sql/EditRelationshipDialog.vue'
@@ -16,12 +17,15 @@ import ObjectTypeEditDialog from './ObjectTypeEditDialog.vue'
 import BehaviorDialog from './BehaviorDialog.vue'
 import BehaviorExecuteDialog from './BehaviorExecuteDialog.vue'
 
-// SchemaCanvas 스토어 사용
+// 스토어 사용
 const canvasStore = useSchemaCanvasStore()
+const sessionStore = useSessionStore()
 
 // 상태
 const searchQuery = ref('')
 const showCreateDialog = ref(false)
+const initialSqlForCreate = ref('')  // Text2SQL에서 전달받은 SQL
+const initialQuestionForCreate = ref('')  // Text2SQL에서 전달받은 질문
 const isLoading = ref(false)
 const objectTypes = ref<any[]>([])
 
@@ -551,6 +555,15 @@ function handleRenameInput(event: Event) {
 onMounted(() => {
   console.log('[ObjectTypeModeler] 컴포넌트 마운트됨')
   loadObjectTypes()
+  
+  // Text2SQL에서 전달된 SQL이 있으면 ObjectType 생성 다이얼로그 열기
+  const transferData = sessionStore.consumeOntologyTransferData()
+  if (transferData) {
+    console.log('[ObjectTypeModeler] Text2SQL에서 전달된 데이터:', transferData)
+    initialSqlForCreate.value = transferData.sql
+    initialQuestionForCreate.value = transferData.question
+    showCreateDialog.value = true
+  }
 })
 </script>
 
@@ -653,7 +666,9 @@ onMounted(() => {
     <!-- ObjectType 생성 다이얼로그 -->
     <CreateObjectTypeDialog 
       v-if="showCreateDialog"
-      @close="showCreateDialog = false"
+      :initial-sql="initialSqlForCreate"
+      :initial-question="initialQuestionForCreate"
+      @close="showCreateDialog = false; initialSqlForCreate = ''; initialQuestionForCreate = ''"
       @created="handleObjectTypeCreated"
     />
     

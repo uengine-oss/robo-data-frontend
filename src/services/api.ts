@@ -696,6 +696,7 @@ export const roboSchemaApi = {
   
   /**
    * 테이블 관계 목록 조회 (Neo4j)
+   * 백엔드는 배열을 직접 반환하므로 래핑하여 반환
    */
   async getRelationships(): Promise<{ relationships: RoboSchemaRelationship[] }> {
     const response = await fetch(`${ROBO_BASE_URL}/schema/relationships`)
@@ -703,7 +704,9 @@ export const roboSchemaApi = {
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`)
     }
-    return response.json()
+    const data = await response.json()
+    // 백엔드가 배열을 직접 반환하므로 래핑
+    return { relationships: Array.isArray(data) ? data : (data.relationships || []) }
   },
   
   /**
@@ -824,17 +827,41 @@ export const roboSchemaApi = {
       from_column: string
       to_table: string
       to_column: string
+      from_schema?: string
+      to_schema?: string
     }
-  ): Promise<{ success: boolean; message: string }> {
-    const searchParams = new URLSearchParams(params as Record<string, string>)
+  ): Promise<{ success: boolean; message: string; deleted?: number }> {
+    // 스키마 정보도 포함하여 전달
+    const searchParams = new URLSearchParams({
+      from_table: params.from_table,
+      from_column: params.from_column,
+      to_table: params.to_table,
+      to_column: params.to_column,
+      ...(params.from_schema && { from_schema: params.from_schema }),
+      ...(params.to_schema && { to_schema: params.to_schema })
+    })
+    
+    console.log('[roboSchemaApi.deleteRelationship] 호출:', Object.fromEntries(searchParams))
+    
     const response = await fetch(`${ROBO_BASE_URL}/schema/relationships?${searchParams}`, {
       method: 'DELETE'
     })
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      const errorText = await response.text()
+      console.error('[roboSchemaApi.deleteRelationship] 실패:', response.status, errorText)
+      throw new Error(`HTTP ${response.status}: ${errorText}`)
     }
-    return response.json()
+    
+    const result = await response.json()
+    console.log('[roboSchemaApi.deleteRelationship] 결과:', result)
+    
+    // 삭제된 개수가 0이면 경고
+    if (result.deleted === 0) {
+      console.warn('[roboSchemaApi.deleteRelationship] 삭제된 관계가 없습니다')
+    }
+    
+    return result
   },
   
   /**

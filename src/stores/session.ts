@@ -68,6 +68,13 @@ export const useSessionStore = defineStore('session', () => {
   }
   const pendingSourceNavigation = ref<SourceNavigation | null>(null)
   
+  // 온톨로지(도메인 스키마)로 전달할 SQL 정보
+  interface OntologyTransferData {
+    question: string
+    sql: string
+  }
+  const ontologyTransferData = ref<OntologyTransferData | null>(null)
+  
   // API Key 변경 시 로컬스토리지에 저장
   watch(apiKey, (newKey) => {
     saveToStorage(STORAGE_KEY_API_KEY, newKey)
@@ -181,6 +188,22 @@ export const useSessionStore = defineStore('session', () => {
     return data
   }
   
+  // 온톨로지(도메인 스키마)로 SQL 전달하며 이동
+  const navigateToOntologyWithSQL = (question: string, sql: string) => {
+    ontologyTransferData.value = {
+      question,
+      sql
+    }
+    activeTab.value = 'schema-modeling'
+  }
+  
+  // 온톨로지 전달 데이터 소비 (사용 후 초기화)
+  const consumeOntologyTransferData = () => {
+    const data = ontologyTransferData.value
+    ontologyTransferData.value = null
+    return data
+  }
+  
   // API Key 설정
   const setApiKey = (key: string) => {
     apiKey.value = key
@@ -218,6 +241,7 @@ export const useSessionStore = defineStore('session', () => {
     pendingSchemaSearch,
     pendingNLSearch,
     pendingSourceNavigation,
+    ontologyTransferData,
     createNewSession,
     clearSession,
     setApiKey,
@@ -235,7 +259,9 @@ export const useSessionStore = defineStore('session', () => {
     navigateToNLSearch,
     consumeNLSearch,
     navigateToSourceWithLine,
-    consumeSourceNavigation
+    consumeSourceNavigation,
+    navigateToOntologyWithSQL,
+    consumeOntologyTransferData
   }
 })
 

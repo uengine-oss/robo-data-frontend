@@ -1247,27 +1247,29 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       }
     } else {
       // 일반 테이블 - 대문자가 포함된 경우 식별자 감싸기
-      // MindsDB를 통할 경우: 백틱(`) 사용 (예: posgres.`RWIS`.`AAA`)
+      // MindsDB를 통할 경우: 백틱(`) 사용 (예: rwis.`AA_GET_MIN_STATUS`)
       // 직접 PostgreSQL일 경우: 큰따옴표(") 사용
-      // 멀티 데이터소스: datasource.schema.table 형식 사용
+      // 멀티 데이터소스: datasource.table 형식 사용 (MindsDB 데이터소스에 스키마 설정됨)
       let fullTableName: string
       
       // 대문자 포함 여부 확인
       const hasUpperCase = (str: string) => /[A-Z]/.test(str)
-      const needsQuoting = hasUpperCase(schemaName) || hasUpperCase(tableName)
+      const needsQuoting = hasUpperCase(tableName)
       
       if (dsName) {
         // 데이터소스 프리픽스 포함 (MindsDB를 통한 쿼리)
-        // MindsDB에서는 백틱(`)으로 대문자 식별자 감싸기
+        // MindsDB 데이터소스에 스키마가 설정되어 있으므로 datasource.table 형식 사용
+        // 테이블명이 대문자면 백틱(`)으로 감싸기
         if (needsQuoting) {
-          fullTableName = `${dsName}.\`${schemaName}\`.\`${tableName}\``
+          fullTableName = `${dsName}.\`${tableName}\``
         } else {
-          fullTableName = `${dsName}.${schemaName}.${tableName}`
+          fullTableName = `${dsName}.${tableName}`
         }
       } else {
         // 데이터소스 없이 스키마.테이블만 사용 (직접 PostgreSQL)
         // PostgreSQL에서는 큰따옴표(")로 대문자 식별자 감싸기
-        if (needsQuoting) {
+        const needsSchemaQuoting = hasUpperCase(schemaName)
+        if (needsSchemaQuoting || needsQuoting) {
           fullTableName = `"${schemaName}"."${tableName}"`
         } else {
           fullTableName = `${schemaName}.${tableName}`
@@ -1666,19 +1668,27 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         from_table: relationship.from_table,
         from_column: relationship.from_column,
         to_table: relationship.to_table,
-        to_column: relationship.to_column
+        to_column: relationship.to_column,
+        from_schema: relationship.from_schema,
+        to_schema: relationship.to_schema
       }
       
+      console.log('[schemaCanvas.removeRelationship] 삭제 요청:', params)
+      
       if (dataSource.value === 'robo') {
-        await roboSchemaApi.deleteRelationship(params)
+        const result = await roboSchemaApi.deleteRelationship(params)
+        console.log('[schemaCanvas.removeRelationship] 삭제 결과:', result)
+        
+        // 삭제된 개수가 0이면 에러
+        if (result.deleted === 0) {
+          throw new Error('삭제된 관계가 없습니다. 관계 정보를 확인해주세요.')
+        }
       } else {
-        await text2sqlApi.removeRelationship({
-          ...params,
-          from_schema: relationship.from_schema,
-          to_schema: relationship.to_schema
-        })
+        await text2sqlApi.removeRelationship(params)
       }
+      
       await loadUserRelationships()
+      return { success: true }
     } catch (error) {
       console.error('Failed to remove relationship:', error)
       throw error

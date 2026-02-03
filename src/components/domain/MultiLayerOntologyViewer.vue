@@ -7,9 +7,97 @@
         <button class="action-btn" @click="showGenerateDialog = true">
           <span>📄</span> 문서에서 생성
         </button>
-        <button class="action-btn" @click="loadFromNeo4j" :disabled="loading">
-          <span>📂</span> 불러오기
-        </button>
+        <div class="ontology-list-dropdown" :class="{ 'dropdown-open': showOntologyListDropdown }">
+          <button 
+            class="action-btn" 
+            @click="toggleOntologyListDropdown" 
+            :disabled="loading"
+          >
+            <span>📂</span> 온톨로지 목록
+            <span class="dropdown-arrow">{{ showOntologyListDropdown ? '▲' : '▼' }}</span>
+          </button>
+          <div v-if="showOntologyListDropdown" class="dropdown-menu">
+            <div v-if="loadingSchemalist" class="dropdown-loading">
+              <div class="loading-spinner small"></div>
+              <span>로딩 중...</span>
+            </div>
+            <div v-else-if="savedSchemas.length === 0" class="dropdown-empty">
+              <p>저장된 온톨로지가 없습니다.</p>
+            </div>
+            <div v-else class="dropdown-list">
+              <div 
+                v-for="schema in savedSchemas" 
+                :key="schema.id"
+                class="dropdown-item"
+                :class="{ 
+                  'schema-invalid': !schema.hasSchemaJson,
+                  'editing': editingSchemaId === schema.id,
+                  'active': currentSchemaId === schema.id
+                }"
+                @click.stop="!editingSchemaId && loadSchema(schema.id)"
+              >
+                <div class="dropdown-item-info">
+                  <input 
+                    v-if="editingSchemaId === schema.id"
+                    v-model="editingSchemaName"
+                    @blur="saveSchemaName(schema.id)"
+                    @keyup.enter="saveSchemaName(schema.id)"
+                    @keyup.esc="cancelEditSchemaName"
+                    class="schema-name-input"
+                    ref="schemaNameInput"
+                    @click.stop
+                  />
+                  <span 
+                    v-else 
+                    class="dropdown-item-name" 
+                    @dblclick.stop="startEditSchemaName(schema.id, schema.name)"
+                  >
+                    {{ schema.name }}
+                  </span>
+                  <span v-if="!schema.hasSchemaJson" class="schema-warning" title="schemaJson이 없어 로드할 수 없습니다">⚠️</span>
+                  <button 
+                    v-if="editingSchemaId !== schema.id"
+                    class="edit-name-btn-small"
+                    @click.stop="startEditSchemaName(schema.id, schema.name)"
+                    title="이름 편집"
+                  >
+                    ✏️
+                  </button>
+                </div>
+                <div class="dropdown-item-meta">
+                  <span class="node-count-small">{{ schema.nodeCount }} 노드</span>
+                  <span class="updated-at-small" v-if="schema.updatedAt">
+                    {{ new Date(schema.updatedAt).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' }) }}
+                  </span>
+                  <button 
+                    type="button"
+                    class="delete-schema-btn"
+                    @click.stop="requestDeleteSchema(schema)"
+                    title="온톨로지 삭제"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 온톨로지 삭제 확인 다이얼로그 -->
+        <div v-if="schemaToDelete" class="dialog-overlay" @click.self="schemaToDelete = null">
+          <div class="delete-confirm-dialog">
+            <h3>온톨로지 삭제 확인</h3>
+            <p class="delete-confirm-message">
+              다음 온톨로지를 삭제하시겠습니까?<br />
+              <strong class="delete-schema-name">「{{ schemaToDelete.name }}」</strong>
+            </p>
+            <p class="delete-confirm-warning">삭제된 온톨로지는 복구할 수 없습니다.</p>
+            <div class="delete-confirm-actions">
+              <button type="button" class="cancel-btn" @click="schemaToDelete = null">취소</button>
+              <button type="button" class="delete-confirm-btn" @click="confirmDeleteSchema">삭제</button>
+            </div>
+          </div>
+        </div>
         <button 
           class="action-btn" 
           @click="saveToNeo4j" 
@@ -113,7 +201,14 @@
       </div>
 
       <!-- 오른쪽: 상세 패널 -->
-      <div class="detail-panel" v-if="selectedNode">
+      <div class="detail-panel" v-if="selectedNode" :style="{ width: detailPanelWidth + 'px' }">
+        <!-- 리사이즈 핸들 -->
+        <div 
+          class="resize-handle"
+          @mousedown="startResize"
+          @dblclick="resetPanelWidth"
+          title="드래그하여 폭 조절 (더블클릭: 기본값)"
+        ></div>
         <h3>📋 노드 상세</h3>
         
         <!-- 탭 헤더 -->
@@ -132,6 +227,15 @@
           >
             📊 데이터
             <span v-if="selectedNode.dataSource" class="data-indicator">●</span>
+          </button>
+          <button 
+            :class="['tab-btn', { active: detailPanelTab === 'analysis' }]"
+            @click="handleAnalysisTabClick"
+            :disabled="!selectedNode.dataSource || !isKPIOrMeasure(selectedNode)"
+            :title="!selectedNode.dataSource ? '연결된 데이터 소스 없음' : !isKPIOrMeasure(selectedNode) ? 'KPI/Measure 노드만 분석 가능' : '원인 분석'"
+          >
+            🔍 분석
+            <span v-if="selectedNode.dataSource && isKPIOrMeasure(selectedNode)" class="data-indicator">●</span>
           </button>
         </div>
         
@@ -171,10 +275,19 @@
           <div class="detail-row" v-if="selectedNode.dataSource">
             <label>데이터 소스</label>
             <div class="datasource-info">
-              <code class="datasource-badge">{{ selectedNode.dataSource }}</code>
-              <span v-if="selectedNode.dataSourceSchema" class="datasource-meta">
-                {{ selectedNode.dataSourceSchema.columns?.length || 0 }}개 컬럼
-              </span>
+              <div class="datasource-content">
+                <code class="datasource-badge">{{ selectedNode.dataSource }}</code>
+                <span v-if="selectedNode.dataSourceSchema" class="datasource-meta">
+                  {{ selectedNode.dataSourceSchema.columns?.length || 0 }}개 컬럼
+                </span>
+              </div>
+              <button 
+                class="reset-datasource-btn" 
+                @click="openNodeDataSourceDialog(selectedNode.id)"
+                title="데이터 소스 재설정"
+              >
+                🔄 재설정
+              </button>
             </div>
           </div>
           <div v-else class="detail-row">
@@ -200,6 +313,22 @@
               </div>
             </div>
           </div>
+        </div>
+        
+        <!-- 분석 탭 -->
+        <div class="detail-content analysis-tab" v-if="detailPanelTab === 'analysis'">
+          <CausalAnalysisPanel
+            v-if="selectedNode"
+            :node="selectedNode"
+            :schema-id="currentSchemaId"
+            :node-data-result="nodeDataResult"
+            :analysis-result="analysisState?.result ?? null"
+            :analysis-loading="analysisState?.loading ?? false"
+            :analysis-error="analysisState?.error ?? null"
+            :analysis-progress="analysisState?.progress ?? null"
+            :streaming-report="displayedStreamingReport || null"
+            @analysis-complete="handleAnalysisComplete"
+          />
         </div>
         
         <!-- 데이터 탭 -->
@@ -307,16 +436,52 @@
       </div>
     </div>
 
-    <!-- 생성 다이얼로그 -->
-    <div v-if="showGenerateDialog" class="dialog-overlay" @click.self="!generating && (showGenerateDialog = false)">
-      <div class="generate-dialog" :class="{ 'dialog-expanded': generating }">
+    <!-- 차트 구간 선택 후 원인 분석 팝업 -->
+    <div v-if="showCausalBrushPopup && causalBrushSelection" class="dialog-overlay causal-brush-overlay" @click.self="closeCausalBrushPopup">
+      <div class="causal-brush-popup">
+        <div class="causal-brush-header">
+          <h4>원인 분석</h4>
+          <button type="button" class="close-btn small" @click="closeCausalBrushPopup" aria-label="닫기">✕</button>
+        </div>
+        <p class="causal-brush-text">선택한 구간에 대해 원인 분석을 실행하시겠습니까?</p>
+        <p class="causal-brush-range">
+          {{ causalBrushSelection.start }} ~ {{ causalBrushSelection.end }}
+        </p>
+        <div class="causal-brush-actions">
+          <button type="button" class="action-btn primary" @click="runCausalAnalysisFromBrush('increase')">
+            상승 원인 분석
+          </button>
+          <button type="button" class="action-btn primary" @click="runCausalAnalysisFromBrush('decrease')">
+            하락 원인 분석
+          </button>
+          <button type="button" class="action-btn secondary" @click="closeCausalBrushPopup">
+            취소
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 생성 다이얼로그 (오류 시 배경 클릭으로 닫히지 않음) -->
+    <div v-if="showGenerateDialog" class="dialog-overlay" @click.self="!generating && !generateError && (showGenerateDialog = false)">
+      <div class="generate-dialog" :class="{ 'dialog-expanded': generating || !!generateError }">
         <div class="dialog-header">
           <h3>📄 문서에서 온톨로지 생성</h3>
-          <button class="close-btn" @click="showGenerateDialog = false" :disabled="generating">✕</button>
+          <button class="close-btn" @click="onCloseGenerateDialog" :disabled="generating">✕</button>
         </div>
         
-        <!-- 입력 폼 (생성 중이 아닐 때) -->
-        <div class="dialog-content" v-if="!generating">
+        <!-- 오류 전용 화면 (폼으로 돌아가지 않고 먼저 표시) -->
+        <div class="error-result-view" v-if="generateError && !generating">
+          <div class="error-result-icon">⚠️</div>
+          <h4 class="error-result-title">온톨로지 생성 오류</h4>
+          <p class="error-result-message">{{ generateError }}</p>
+          <div class="error-result-actions">
+            <button type="button" class="retry-btn" @click="generateError = ''">다시 시도</button>
+            <button type="button" class="close-error-btn" @click="onCloseGenerateDialog">닫기</button>
+          </div>
+        </div>
+        
+        <!-- 입력 폼 (생성 중도 아니고 오류도 아닐 때만) -->
+        <div class="dialog-content" v-else-if="!generating">
           <div class="form-group">
             <label>입력 방식</label>
             <div class="input-type-tabs">
@@ -371,7 +536,7 @@
               <div v-if="!uploadedFile" class="drop-zone-content" @click="($refs.fileInput as HTMLInputElement)?.click()">
                 <span class="drop-icon">📁</span>
                 <p>PDF 파일을 드래그하거나 클릭하여 선택</p>
-                <span class="drop-hint">최대 10MB</span>
+                <span class="drop-hint">대용량 PDF 지원 (1GB 이하 권장)</span>
               </div>
               <div v-else class="file-info">
                 <span class="file-icon">📄</span>
@@ -418,7 +583,7 @@
         </div>
         
         <!-- 진행 상태 뷰어 (생성 중일 때) -->
-        <div class="progress-viewer" v-if="generating">
+        <div class="progress-viewer" v-else-if="generating">
           <div class="progress-header">
             <h4>🤖 에이전트 진행 상태</h4>
             <span class="progress-step">{{ currentStep }}</span>
@@ -506,13 +671,13 @@
           <span>🌐 웹에서 추가 정보 검색 중...</span>
         </div>
         
-        <div class="dialog-footer" v-if="!generating">
+        <div class="dialog-footer" v-if="!generating && !generateError">
           <button class="cancel-btn" @click="showGenerateDialog = false">취소</button>
           <button class="generate-btn" @click="generateOntology" :disabled="!canGenerate">
             🚀 온톨로지 생성
           </button>
         </div>
-        <div class="dialog-footer" v-else>
+        <div class="dialog-footer" v-else-if="generating">
           <button class="cancel-btn" @click="cancelGeneration">취소</button>
         </div>
       </div>
@@ -806,6 +971,28 @@
               <div class="search-hint">
                 💡 노드 이름과 레이어를 기반으로 검색어가 자동 생성됩니다. 필요시 수정하세요.
               </div>
+              
+              <!-- 검색 진행 상황 표시 -->
+              <div v-if="nodeSearchLoading && nodeSearchStatus" class="search-status">
+                <div class="search-spinner-small"></div>
+                <span>{{ nodeSearchStatus }}</span>
+              </div>
+              
+              <!-- 스트리밍 대화 내용 표시 -->
+              <div v-if="nodeSearchLoading && nodeSearchConversation.length > 0" class="search-conversation">
+                <div class="conversation-header">
+                  <span>💬 AI 대화 내용</span>
+                </div>
+                <div class="conversation-content">
+                  <div 
+                    v-for="(message, idx) in nodeSearchConversation" 
+                    :key="idx"
+                    class="conversation-message"
+                  >
+                    {{ message }}
+                  </div>
+                </div>
+              </div>
             </div>
             
             <!-- 검색 결과 -->
@@ -849,13 +1036,32 @@
           <!-- 테이블 선택 탭 -->
           <div v-if="nodeDataSourceTab === 'manual'" class="manual-tab">
             <div class="table-selector-section">
-              <label>스키마/테이블 선택</label>
+              <label>데이터 소스/스키마/테이블 선택</label>
               <div class="table-selector-wrapper">
-                <!-- 스키마 선택 -->
-                <div class="schema-selector">
+                <!-- 데이터 소스 선택 -->
+                <div class="datasource-selector">
+                  <label>데이터 소스:</label>
+                  <select 
+                    v-model="selectedDatasource" 
+                    @change="handleDatasourceChange"
+                  >
+                    <option value="">선택하세요</option>
+                    <option v-for="ds in availableDatasources" :key="ds" :value="ds">
+                      {{ ds }}
+                    </option>
+                    <option value="__ontology__">온톨로지 (ObjectType)</option>
+                  </select>
+                </div>
+                
+                <!-- 스키마 선택 (데이터 소스 선택 시에만 표시, 온톨로지 제외) -->
+                <div class="schema-selector" v-if="selectedDatasource && selectedDatasource !== '__ontology__'">
                   <label>스키마:</label>
-                  <select v-model="selectedSchema" @change="loadTablesForSchema">
-                    <option value="">전체</option>
+                  <select 
+                    v-model="selectedSchema"
+                    @change="handleSchemaChange"
+                    :disabled="!selectedDatasource || loadingTables"
+                  >
+                    <option value="">선택하세요</option>
                     <option v-for="schema in availableSchemas" :key="schema" :value="schema">
                       {{ schema }}
                     </option>
@@ -889,6 +1095,7 @@
                     <div class="table-header">
                       <span class="table-icon">📊</span>
                       <strong>{{ table.name }}</strong>
+                      <span v-if="table.datasource" class="datasource-badge-small">{{ table.datasource }}</span>
                       <span v-if="table.schema" class="schema-badge">{{ table.schema }}</span>
                       <span v-if="selectedManualTable === table.fullName" class="selected-check">✓</span>
                     </div>
@@ -1003,45 +1210,6 @@
       </div>
     </div>
 
-    <!-- 스키마 목록 다이얼로그 -->
-    <div v-if="showSchemaListDialog" class="dialog-overlay" @click.self="showSchemaListDialog = false">
-      <div class="schema-list-dialog">
-        <div class="dialog-header">
-          <h3>📂 저장된 온톨로지 목록</h3>
-          <button class="close-btn" @click="showSchemaListDialog = false">✕</button>
-        </div>
-        <div class="dialog-body">
-          <div v-if="loadingSchemalist" class="loading-schemas">
-            <div class="loading-spinner small"></div>
-            <span>스키마 목록 로딩 중...</span>
-          </div>
-          <div v-else-if="savedSchemas.length === 0" class="no-schemas">
-            <p>저장된 온톨로지가 없습니다.</p>
-          </div>
-          <div v-else class="schema-list">
-            <div 
-              v-for="schema in savedSchemas" 
-              :key="schema.id"
-              class="schema-item"
-              :class="{ 'schema-invalid': !schema.hasSchemaJson }"
-              @click="loadSchema(schema.id)"
-            >
-              <div class="schema-info">
-                <span class="schema-name">{{ schema.name }}</span>
-                <span class="schema-domain" v-if="schema.domain">{{ schema.domain }}</span>
-                <span v-if="!schema.hasSchemaJson" class="schema-warning" title="schemaJson이 없어 로드할 수 없습니다">⚠️</span>
-              </div>
-              <div class="schema-meta">
-                <span class="node-count">{{ schema.nodeCount }} 노드</span>
-                <span class="updated-at" v-if="schema.updatedAt">
-                  {{ new Date(schema.updatedAt).toLocaleDateString('ko-KR') }}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
 
     <!-- 엣지 삭제 확인 다이얼로그 -->
     <div v-if="showEdgeDeleteDialog" class="dialog-overlay" @click.self="cancelDeleteEdge">
@@ -1073,11 +1241,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick, computed, onUnmounted } from 'vue'
+import { ref, onMounted, watch, nextTick, computed, onUnmounted, watchEffect } from 'vue'
 import cytoscape from 'cytoscape'
 import edgehandles from 'cytoscape-edgehandles'
 import * as echarts from 'echarts'
 import LineChart from '@/components/charts/LineChart.vue'
+import CausalAnalysisPanel from '@/components/domain/CausalAnalysisPanel.vue'
+import { text2sqlApi } from '@/services/api'
+import type { ReactRequest, ReactStreamEvent } from '@/types'
 
 // Register edgehandles extension
 cytoscape.use(edgehandles)
@@ -1151,6 +1322,9 @@ const collapsedLayers = ref(new Set<string>())
 const selectedNodeId = ref<string | null>(null)
 const currentLayout = ref('hierarchical')
 
+// 스키마 로드 중 플래그 (watch가 initCytoscape를 덮어쓰지 않도록)
+const isLoadingSchema = ref(false)
+
 // Undo/Redo 히스토리
 interface HistoryState {
   nodes: OntologyNode[]
@@ -1182,6 +1356,9 @@ const generateForm = ref({
 const fileInput = ref<HTMLInputElement | null>(null)
 const uploadedFile = ref<File | null>(null)
 const isDraggingFile = ref(false)
+
+// 생성 오류 메시지 (화면에 고정 표시, 초기화면으로 돌아가도 배너로 남김)
+const generateError = ref('')
 
 // Progress tracking
 const currentStep = ref('')
@@ -1217,13 +1394,18 @@ const currentNodeForDataSource = ref<OntologyNode | null>(null)
 const nodeDataSourceTab = ref<'search' | 'manual'>('search')
 const nodeSearchQuery = ref('')
 const nodeSearchLoading = ref(false)
+const nodeSearchStatus = ref<string>('') // 검색 진행 상황 메시지
+const nodeSearchConversation = ref<string[]>([]) // 스트리밍 대화 내용
 const nodeSearchResults = ref<any[]>([])
 const selectedSearchResult = ref<number | null>(null)
+const nodeSearchAbortController = ref<AbortController | null>(null)
 const selectedManualTable = ref<string | null>(null)
+const availableDatasources = ref<string[]>([])
 const availableSchemas = ref<string[]>([])
+const selectedDatasource = ref<string>('')
 const selectedSchema = ref('')
 const tableSearchQuery = ref('')
-const availableTables = ref<Array<{ name: string; schema: string; fullName: string; columnCount?: number }>>([])
+const availableTables = ref<Array<{ name: string; schema: string; datasource?: string; fullName: string; columnCount?: number; materializedView?: string }>>([])
 const loadingTables = ref(false)
 
 const dataSourceMappings = ref<Record<string, {
@@ -1250,7 +1432,7 @@ const sampleDataLoading = ref(false)
 const sampleData = ref<any[]>([])
 
 // 노드 데이터 소스 뷰어 상태
-const detailPanelTab = ref<'info' | 'data'>('info')
+const detailPanelTab = ref<'info' | 'data' | 'analysis'>('info')
 const nodeDataLoading = ref(false)
 const lastDataError = ref<string | null>(null)
 const nodeDataResult = ref<{
@@ -1270,6 +1452,353 @@ const nodeDataResult = ref<{
 } | null>(null)
 const chartContainerRef = ref<HTMLElement | null>(null)
 let chartInstance: echarts.ECharts | null = null
+
+// 원인 분석 상태 (진행·보고서 스트리밍용)
+const analysisState = ref<{
+  loading: boolean
+  result: any | null
+  error: string | null
+  progress?: { step: string; message: string; detail?: any }
+  streamingReport?: string
+} | null>(null)
+
+// 스트리밍 보고서 타이핑 효과: 서버가 한꺼번에 보내도 글자가 차례로 보이도록
+const streamingRevealedLength = ref(0)
+const displayedStreamingReport = computed(() => {
+  const full = analysisState.value?.streamingReport ?? ''
+  if (!analysisState.value?.loading) return full
+  return full.slice(0, streamingRevealedLength.value)
+})
+watchEffect((onCleanup) => {
+  if (!analysisState.value?.loading) return
+  const id = setInterval(() => {
+    const full = (analysisState.value?.streamingReport ?? '').length
+    const cur = streamingRevealedLength.value
+    if (cur < full) streamingRevealedLength.value = Math.min(cur + 10, full)
+  }, 25)
+  onCleanup(() => clearInterval(id))
+})
+
+const showCausalBrushPopup = ref(false)
+const causalBrushSelection = ref<{
+  start: string
+  end: string
+  targetMetric: string
+  analysisType: 'increase' | 'decrease'
+} | null>(null)
+
+const highlightedCausalNodeIds = ref<Set<string>>(new Set())
+const highlightedCausalEdgePairs = ref<Set<string>>(new Set())
+
+function handleAnalysisComplete(result: any) {
+  analysisState.value = {
+    loading: false,
+    result,
+    error: null
+  }
+}
+
+function applyCausalHighlight() {
+  if (!cy) return
+  
+  // 모든 노드와 엣지에서 하이라이트 클래스 제거
+  cy.elements().removeClass('causal-highlight')
+  cy.elements().removeClass('causal-faded')
+  
+  // 하이라이트된 노드 ID 집합
+  const highlightedIds = highlightedCausalNodeIds.value
+  
+  if (highlightedIds.size > 0) {
+    // 모든 노드를 먼저 반투명으로 만들기
+    cy.nodes().addClass('causal-faded')
+    
+    // 하이라이트된 노드만 불투명하게 만들고 테두리 추가
+    highlightedIds.forEach((id) => {
+      const n = cy!.$(`#${id}`)
+      if (n.length) {
+        n.removeClass('causal-faded')
+        n.addClass('causal-highlight')
+      }
+    })
+    
+    // 하이라이트된 엣지 쌍 집합
+    const highlightedEdgePairs = new Set(highlightedCausalEdgePairs.value)
+    
+    // 모든 엣지를 먼저 반투명으로 만들기
+    cy.edges().addClass('causal-faded')
+    
+    // 하이라이트된 엣지만 불투명하게 만들기
+    highlightedEdgePairs.forEach((key) => {
+      const [s, t] = key.split('\t')
+      const es = cy!.edges().filter((e: any) => e.data('source') === s && e.data('target') === t)
+      if (es.length) {
+        es.removeClass('causal-faded')
+        es.addClass('causal-highlight')
+      }
+    })
+  }
+}
+
+function clearCausalHighlight() {
+  highlightedCausalNodeIds.value = new Set()
+  highlightedCausalEdgePairs.value = new Set()
+  if (cy) {
+    cy.elements().removeClass('causal-highlight')
+    cy.elements().removeClass('causal-faded')
+  }
+}
+
+async function runCausalAnalysisFromBrush(analysisType?: 'increase' | 'decrease') {
+  console.log('runCausalAnalysisFromBrush 호출됨', { analysisType })
+  const sel = causalBrushSelection.value
+  const node = selectedNode.value
+  const schemaId = currentSchemaId.value
+  console.log('조건 확인:', { hasSel: !!sel, hasNode: !!node?.id, hasSchema: !!schemaId })
+  if (!sel || !node?.id || !schemaId) {
+    console.log('조건 불만족으로 종료')
+    return
+  }
+  
+  // analysisType이 제공되지 않으면 저장된 값 사용
+  const finalAnalysisType = analysisType || sel.analysisType
+  
+  showCausalBrushPopup.value = false
+  streamingRevealedLength.value = 0
+  analysisState.value = { loading: true, result: null, error: null, progress: undefined, streamingReport: '' }
+  // detailPanelTab.value = 'analysis' 제거 (이미 분석 탭으로 전환된 상태)
+  try {
+    const incRes = await fetch(
+      `/api/gateway/ontology/schemas/${encodeURIComponent(schemaId)}/nodes/${encodeURIComponent(node.id)}/incoming-network`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ max_depth: 3 })
+      }
+    )
+    if (incRes.ok) {
+      const incData = await incRes.json()
+      highlightedCausalNodeIds.value = new Set((incData.nodes || []).map((n: any) => n.id).filter(Boolean))
+      highlightedCausalEdgePairs.value = new Set(
+        (incData.relationships || []).map((r: any) => `${r.source}\t${r.target}`)
+      )
+      applyCausalHighlight()
+    }
+
+    const requestBody = {
+      time_range: { start: sel.start, end: sel.end },
+      target_metric: sel.targetMetric,
+      analysis_type: finalAnalysisType,
+      max_lag: 7
+    }
+    console.log('서버 요청 본문:', requestBody)
+    
+    const basePath = `/api/gateway/ontology/schemas/${encodeURIComponent(schemaId)}/nodes/${encodeURIComponent(node.id)}`
+    const streamUrl = `${basePath}/causal-analysis/stream`
+    let res = await fetch(streamUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    })
+    
+    // 404면 스트림 미지원 백엔드 → 비스트림 엔드포인트로 폴백
+    if (res.status === 404) {
+      res = await fetch(`${basePath}/causal-analysis`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      })
+    }
+    
+    if (!res.ok) {
+      const text = await res.text()
+      let data: any
+      try {
+        data = JSON.parse(text)
+      } catch {
+        data = {
+          success: false,
+          error: {
+            type: 'server_error',
+            message: '서버 오류',
+            detail: text,
+            user_friendly_message: `## 서버 오류\n\n${text.substring(0, 500)}`
+          }
+        }
+      }
+      handleAnalysisComplete(data)
+      return
+    }
+    
+    const contentType = res.headers.get('content-type') || ''
+    if (!contentType.includes('ndjson') && !contentType.includes('stream')) {
+      // 스트림이 아닌 일반 JSON 응답 (폴백)
+      const data = await res.json()
+      handleAnalysisComplete(data)
+      return
+    }
+    
+    // NDJSON 스트림 파싱: 진행 상황·결과를 실시간 반영 (스트리밍 검증용 로그)
+    const reader = res.body?.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let data: any = null
+    let reportChunkCount = 0
+    let firstReportChunkAt: number | null = null
+    const streamLogPrefix = '[causal-stream]'
+
+    if (reader) {
+      while (true) {
+        const readStart = Date.now()
+        const { value, done } = await reader.read()
+        if (done) break
+        const readEnd = Date.now()
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed) continue
+          try {
+            const item = JSON.parse(trimmed)
+            if (item.type === 'progress') {
+              const step = item.step || ''
+              const msg = item.message || ''
+              if (step === 'report_chunk') {
+                reportChunkCount += 1
+                if (firstReportChunkAt == null) firstReportChunkAt = Date.now()
+                const cumulative = (analysisState.value?.streamingReport || '').length + (msg?.length || 0)
+                console.log(
+                  `${streamLogPrefix} chunk #${reportChunkCount} at ${new Date().toISOString()} read_duration_ms=${readEnd - readStart} len=${msg?.length ?? 0} cumulative=${cumulative}`
+                )
+              }
+              const prev = analysisState.value!
+              const streamingReport = step === 'report_chunk' ? (prev.streamingReport || '') + msg : prev.streamingReport
+              analysisState.value = {
+                ...prev,
+                progress: { step, message: step === 'report_chunk' ? '보고서 생성 중...' : msg, detail: item.detail },
+                streamingReport: streamingReport ?? prev.streamingReport
+              }
+            } else if (item.type === 'result' && item.data) {
+              if (reportChunkCount > 0 && firstReportChunkAt != null) {
+                const span = Date.now() - firstReportChunkAt
+                console.log(
+                  `${streamLogPrefix} summary: ${reportChunkCount} report_chunks over ${span}ms (${(reportChunkCount / (span / 1000)).toFixed(1)} chunks/s)`
+                )
+              }
+              data = item.data
+              break
+            }
+          } catch (_) {
+            // 라인 파싱 무시
+          }
+        }
+        if (data) break
+      }
+      if (buffer.trim()) {
+        try {
+          const item = JSON.parse(buffer.trim())
+          if (item.type === 'result' && item.data) data = item.data
+        } catch (_) {}
+      }
+    }
+    
+    if (data) {
+      handleAnalysisComplete(data)
+    } else {
+      analysisState.value = {
+        loading: false,
+        result: null,
+        error: '스트림에서 최종 결과를 받지 못했습니다.'
+      }
+    }
+  } catch (e: any) {
+    analysisState.value = {
+      loading: false,
+      result: null,
+      error: e?.message || String(e)
+    }
+    clearCausalHighlight()
+  } finally {
+    causalBrushSelection.value = null
+  }
+}
+
+function closeCausalBrushPopup() {
+  showCausalBrushPopup.value = false
+  causalBrushSelection.value = null
+}
+
+// 분석 탭 클릭 핸들러
+function handleAnalysisTabClick() {
+  console.log('=== 분석 탭 클릭 핸들러 호출됨 ===')
+  detailPanelTab.value = 'analysis'
+  
+  // 구간 선택이 있으면 자동으로 분석 시작
+  console.log('분석 탭 클릭 - 상태 확인:', {
+    hasSelection: !!causalBrushSelection.value,
+    selection: causalBrushSelection.value,
+    nodeId: selectedNode.value?.id,
+    schemaId: currentSchemaId.value,
+    selectedNode: selectedNode.value
+  })
+  
+  if (!causalBrushSelection.value) {
+    console.log('❌ causalBrushSelection이 없습니다')
+    return
+  }
+  
+  if (!selectedNode.value?.id) {
+    console.log('❌ selectedNode.id가 없습니다')
+    return
+  }
+  
+  if (!currentSchemaId.value) {
+    console.log('❌ currentSchemaId가 없습니다')
+    return
+  }
+  
+  console.log('✅ 모든 조건 만족, 분석 시작')
+  // nextTick 없이 바로 호출
+  runCausalAnalysisFromBrush()
+}
+
+// 상세 패널 리사이즈
+const detailPanelWidth = ref(380)
+const isResizing = ref(false)
+const resizeStartX = ref(0)
+const resizeStartWidth = ref(380)
+
+function startResize(e: MouseEvent) {
+  isResizing.value = true
+  resizeStartX.value = e.clientX
+  resizeStartWidth.value = detailPanelWidth.value
+  document.addEventListener('mousemove', handleResize)
+  document.addEventListener('mouseup', stopResize)
+  e.preventDefault()
+}
+
+function handleResize(e: MouseEvent) {
+  if (!isResizing.value) return
+  
+  const deltaX = resizeStartX.value - e.clientX // 오른쪽에서 왼쪽으로 드래그하면 증가
+  const newWidth = resizeStartWidth.value + deltaX
+  const minWidth = 280
+  const maxWidth = 800
+  
+  if (newWidth >= minWidth && newWidth <= maxWidth) {
+    detailPanelWidth.value = newWidth
+  }
+}
+
+function stopResize() {
+  isResizing.value = false
+  document.removeEventListener('mousemove', handleResize)
+  document.removeEventListener('mouseup', stopResize)
+}
+
+function resetPanelWidth() {
+  detailPanelWidth.value = 380
+}
 
 // Computed
 const selectedNode = computed(() => {
@@ -1445,9 +1974,19 @@ function selectNode(nodeId: string) {
   detailPanelTab.value = 'info'  // 탭 초기화
   nodeDataResult.value = null    // 데이터 초기화
   
+  // 분석 탭 상태 초기화
+  if (analysisState.value) {
+    analysisState.value = null
+  }
+  
   if (cy) {
     cy.nodes().removeClass('selected')
     cy.$(`#${nodeId}`).addClass('selected')
+  }
+  
+  // 선택된 노드를 로컬스토리지에 저장
+  if (currentSchemaId.value) {
+    saveSelectedNode(currentSchemaId.value, nodeId)
   }
   
   // 선택된 노드에 데이터 소스가 있으면 자동으로 데이터 탭 표시 가능
@@ -1455,6 +1994,21 @@ function selectNode(nodeId: string) {
   if (node?.dataSource) {
     // 데이터가 있으면 자동으로 데이터 로드 (선택 사항)
     // fetchNodeData(nodeId)
+  }
+}
+
+// 노드 선택 해제
+function deselectNode() {
+  // 선택 해제 시 로컬스토리지에서 제거
+  if (currentSchemaId.value && selectedNodeId.value) {
+    removeSelectedNode(currentSchemaId.value, selectedNodeId.value)
+  }
+  selectedNodeId.value = null
+  detailPanelTab.value = 'info'
+  nodeDataResult.value = null
+  
+  if (cy) {
+    cy.nodes().removeClass('selected')
   }
 }
 
@@ -1638,16 +2192,11 @@ async function fetchDataViaText2SQL(node: OntologyNode, nodeId: string) {
       yAxis: []
     }
     
-    if (timeColumns.length > 0 && numericColumns.length > 0) {
+    // 기본은 라인 차트 (시간 컬럼 없어도 숫자 컬럼만 있으면 라인)
+    if (numericColumns.length > 0) {
       chartRecommendation = {
         type: 'line',
-        xAxis: timeColumns[0],
-        yAxis: numericColumns.slice(0, 3)
-      }
-    } else if (numericColumns.length > 0) {
-      chartRecommendation = {
-        type: 'bar',
-        xAxis: columns[0] || null,
+        xAxis: (timeColumns.length > 0 ? timeColumns[0] : columns[0]) || null,
         yAxis: numericColumns.slice(0, 3)
       }
     }
@@ -1920,7 +2469,15 @@ function renderChart() {
     },
     series
   }
-  
+
+  if (chartRecommendation.type === 'line') {
+    (option as any).brush = {
+      toolbox: ['rect', 'keep', 'clear'],
+      xAxisIndex: 0,
+      brushType: 'lineX'
+    }
+  }
+
   try {
     chartInstance.setOption(option, true) // notMerge: true로 설정하여 완전히 새로 그리기
     console.log('차트 옵션 설정 완료', { seriesCount: series.length, xDataLength: xData.length })
@@ -1928,7 +2485,188 @@ function renderChart() {
     console.error('차트 옵션 설정 실패:', error)
     return
   }
-  
+
+  if (chartRecommendation.type === 'line' && chartInstance) {
+    chartInstance.off('brushSelected')
+    chartInstance.on('brushSelected', (params: any) => {
+      console.log('=== 브러시 선택 이벤트 발생 ===')
+      try {
+        console.log('전체 params:', JSON.parse(JSON.stringify(params)))
+      } catch (e) {
+        console.log('params (직렬화 실패):', params)
+      }
+      
+      // 노드와 스키마 확인
+      if (!selectedNode.value?.id || !currentSchemaId.value) {
+        console.log('❌ 노드 ID 또는 스키마 ID가 없음')
+        return
+      }
+      
+      // ECharts brush 이벤트에서 coordRange 찾기
+      let range: number[] | null = null
+      
+      // 1. params.areas에서 직접 찾기
+      if (params?.areas?.length > 0 && params.areas[0]?.coordRange) {
+        range = params.areas[0].coordRange
+        console.log('✅ params.areas[0].coordRange에서 찾음:', range)
+      }
+      // 2. params.batch[0]에서 찾기
+      else if (params?.batch?.length > 0) {
+        const batchItem = params.batch[0]
+        try {
+          console.log('batch 항목:', JSON.parse(JSON.stringify(batchItem)))
+        } catch (e) {
+          console.log('batch 항목 (직렬화 실패):', batchItem)
+        }
+        
+        // batchItem에 직접 coordRange가 있는지
+        if (batchItem?.coordRange) {
+          range = batchItem.coordRange
+          console.log('✅ batchItem.coordRange에서 찾음:', range)
+        }
+        // batchItem.areas[0].coordRange에서 찾기
+        else if (batchItem?.areas?.[0]?.coordRange) {
+          range = batchItem.areas[0].coordRange
+          console.log('✅ batchItem.areas[0].coordRange에서 찾음:', range)
+        }
+        // batchItem.selected[0].areas[0].coordRange에서 찾기
+        else if (batchItem?.selected?.[0]?.areas?.[0]?.coordRange) {
+          range = batchItem.selected[0].areas[0].coordRange
+          console.log('✅ batchItem.selected[0].areas[0].coordRange에서 찾음:', range)
+        }
+        // batchItem.range에서 찾기 (다른 형식일 수 있음)
+        else if (batchItem?.range) {
+          if (Array.isArray(batchItem.range)) {
+            range = batchItem.range
+          } else if (typeof batchItem.range === 'object' && batchItem.range.start != null && batchItem.range.end != null) {
+            range = [batchItem.range.start, batchItem.range.end]
+          }
+          if (range) {
+            console.log('✅ batchItem.range에서 찾음:', range)
+          }
+        }
+      }
+      
+      if (!range || !Array.isArray(range) || range.length < 2) {
+        console.log('❌ coordRange를 찾을 수 없거나 유효하지 않음:', range)
+        return
+      }
+      
+      console.log('브러시 범위 (원본):', range, '타입:', Array.isArray(range[0]) ? '2D' : '1D')
+      
+      // coordRange가 2D 배열인 경우 처리 [[x1, y1], [x2, y2]] -> [x1, x2]
+      let xRange: number[]
+      if (Array.isArray(range[0])) {
+        // 2D 배열: [[x1, y1], [x2, y2]] 형태
+        xRange = [range[0][0], range[1][0]]
+        console.log('2D 배열 감지, X 범위 추출:', xRange)
+      } else {
+        // 1D 배열: [x1, x2] 형태
+        xRange = range as number[]
+        console.log('1D 배열, X 범위:', xRange)
+      }
+      
+      // rows, xAxis, xData가 클로저에서 접근 가능한지 확인
+      if (!rows || !xAxis || !xData) {
+        console.log('❌ rows, xAxis, 또는 xData가 없음:', { 
+          hasRows: !!rows, 
+          hasXAxis: !!xAxis, 
+          hasXData: !!xData,
+          rows: rows?.length,
+          xAxis,
+          xDataLength: xData?.length
+        })
+        return
+      }
+      
+      const startIdx = Math.max(0, Math.floor(xRange[0]))
+      const endIdx = Math.min(xData.length - 1, Math.ceil(xRange[1]))
+      console.log('인덱스 계산:', { 
+        range, 
+        startIdx, 
+        endIdx, 
+        xDataLength: xData.length,
+        rowsLength: rows.length,
+        xAxis
+      })
+      
+      if (startIdx >= endIdx) {
+        console.log('❌ 시작 인덱스가 끝 인덱스보다 크거나 같음')
+        return
+      }
+      
+      // 값 추출
+      let startVal: any = rows[startIdx]?.[xAxis]
+      let endVal: any = rows[endIdx]?.[xAxis]
+      console.log('값 추출:', { 
+        startIdx, 
+        endIdx, 
+        startVal, 
+        endVal,
+        startRowExists: !!rows[startIdx],
+        endRowExists: !!rows[endIdx],
+        xAxis
+      })
+      
+      if (startVal == null || endVal == null) {
+        console.log('❌ startVal 또는 endVal이 null/undefined:', { startVal, endVal })
+        return
+      }
+      
+      if (startVal instanceof Date) startVal = startVal.toISOString()
+      else if (typeof startVal !== 'string') startVal = startVal != null ? String(startVal) : ''
+      if (endVal instanceof Date) endVal = endVal.toISOString()
+      else if (typeof endVal !== 'string') endVal = endVal != null ? String(endVal) : ''
+      
+      console.log('변환된 값:', { startVal, endVal })
+      
+      // 선택한 구간의 데이터를 보고 상승/하락 자동 판단
+      const targetMetric = yAxes[0]
+      const startValue = rows[startIdx]?.[targetMetric]
+      const endValue = rows[endIdx]?.[targetMetric]
+      let analysisType: 'increase' | 'decrease' = 'increase'
+      if (typeof startValue === 'number' && typeof endValue === 'number') {
+        analysisType = endValue > startValue ? 'increase' : 'decrease'
+      } else {
+        // 숫자가 아닌 경우 전체 구간의 평균을 비교
+        let sumStart = 0
+        let sumEnd = 0
+        let countStart = 0
+        let countEnd = 0
+        const midIdx = Math.floor((startIdx + endIdx) / 2)
+        for (let i = startIdx; i <= midIdx; i++) {
+          const val = rows[i]?.[targetMetric]
+          if (typeof val === 'number') {
+            sumStart += val
+            countStart++
+          }
+        }
+        for (let i = midIdx + 1; i <= endIdx; i++) {
+          const val = rows[i]?.[targetMetric]
+          if (typeof val === 'number') {
+            sumEnd += val
+            countEnd++
+          }
+        }
+        if (countStart > 0 && countEnd > 0) {
+          const avgStart = sumStart / countStart
+          const avgEnd = sumEnd / countEnd
+          analysisType = avgEnd > avgStart ? 'increase' : 'decrease'
+        }
+      }
+      
+      causalBrushSelection.value = {
+        start: startVal,
+        end: endVal,
+        targetMetric: targetMetric,
+        analysisType: analysisType
+      }
+      console.log('✅ 구간 선택 완료:', causalBrushSelection.value)
+      console.log('저장된 causalBrushSelection:', causalBrushSelection.value)
+      // 팝업을 띄우지 않고 구간 선택만 저장 (분석 탭 클릭 시 자동 시작)
+    })
+  }
+
   // 리사이즈 핸들러 (중복 등록 방지)
   const resizeHandler = () => {
     chartInstance?.resize()
@@ -2041,6 +2779,12 @@ function handleKeyDown(event: KeyboardEvent) {
     event.preventDefault()
     redo()
   }
+}
+
+function isKPIOrMeasure(node: { layer?: string; label?: string } | null): boolean {
+  if (!node) return false
+  const layer = node.layer || node.label || ''
+  return layer === 'KPI' || layer === 'Measure'
 }
 
 function getNodeName(nodeId: string): string {
@@ -2211,6 +2955,13 @@ function cancelGeneration() {
   }
   generating.value = false
   addLog('사용자에 의해 취소됨', 'warning')
+}
+
+function onCloseGenerateDialog() {
+  if (!generating.value) {
+    generateError.value = ''
+    showGenerateDialog.value = false
+  }
 }
 
 // Cytoscape 스타일 생성 (다크/라이트 모드 지원)
@@ -2482,12 +3233,43 @@ function getCytoscapeStyles(): cytoscape.Stylesheet[] {
         'line-style': 'dashed',
         'opacity': 0.7
       }
+    },
+    {
+      selector: 'node.causal-highlight',
+      style: {
+        'border-width': 4,
+        'border-color': '#fbbf24',
+        'border-opacity': 1,
+        'opacity': 1
+        // 배경색은 원래 색상 유지 (data(color) 사용)
+      }
+    },
+    {
+      selector: 'node.causal-faded',
+      style: {
+        'opacity': 0.25
+      }
+    },
+    {
+      selector: 'edge.causal-highlight',
+      style: {
+        'line-color': '#f59e0b',
+        'target-arrow-color': '#f59e0b',
+        'width': 4,
+        'opacity': 1
+      }
+    },
+    {
+      selector: 'edge.causal-faded',
+      style: {
+        'opacity': 0.15
+      }
     }
   ]
 }
 
 // Cytoscape
-function initCytoscape() {
+function initCytoscape(shouldRestoreSelection: boolean = false) {
   if (!cytoscapeContainer.value) {
     console.warn('Cytoscape container not found')
     return
@@ -2497,7 +3279,7 @@ function initCytoscape() {
   const rect = cytoscapeContainer.value.getBoundingClientRect()
   if (rect.width === 0 || rect.height === 0) {
     console.warn('Cytoscape container has no dimensions, retrying...')
-    setTimeout(() => initCytoscape(), 100)
+    setTimeout(() => initCytoscape(shouldRestoreSelection), 100)
     return
   }
   
@@ -2684,8 +3466,7 @@ function initCytoscape() {
   
   cy.on('tap', (evt) => {
     if (evt.target === cy) {
-      selectedNodeId.value = null
-      cy?.nodes().removeClass('selected')
+      deselectNode()
     }
   })
   
@@ -2719,15 +3500,53 @@ function initCytoscape() {
   // Edgehandles 초기화 - 노드 테두리에서 드래그하여 관계 생성
   initEdgehandles()
   
-  // 저장된 위치가 있으면 레이아웃 적용하지 않음, 없으면 계층형 레이아웃 적용
+    // 저장된 위치가 있으면 레이아웃 적용하지 않음, 없으면 계층형 레이아웃 적용
   if (hasPositions) {
     // 저장된 위치 사용 - fit만 수행
     cy.fit(undefined, 50)
     console.log('Using saved node positions')
+    
+    // 저장된 노드 자동 선택: 그래프 그려진 뒤 오버레이(선택) 적용 (애니메이션 여유 후)
+    if (shouldRestoreSelection && currentSchemaId.value) {
+      setTimeout(() => {
+        restoreSelectedNode()
+      }, 600)
+    }
   } else {
-    // 위치가 없으면 계층형 레이아웃 적용
-    applyLayout()
-    console.log('Applying hierarchical layout')
+    // 위치가 없으면 레이아웃 적용
+    const layout = applyLayout()
+    console.log('Applying layout')
+    
+    // 레이아웃 완료 후 저장된 노드 자동 선택 (애니메이션 끝난 뒤 오버레이 적용)
+    if (shouldRestoreSelection && currentSchemaId.value) {
+      if (layout) {
+        // 레이아웃 객체가 있으면 (cose, circle, grid) layoutstop = 애니메이션 종료 후
+        layout.one('layoutstop', () => {
+          setTimeout(() => restoreSelectedNode(), 100)
+        })
+      } else {
+        // 계층형 레이아웃은 동기 실행 → 그래프 그려진 뒤 여유 시간 두고 선택
+        setTimeout(() => {
+          restoreSelectedNode()
+        }, 600)
+      }
+    }
+  }
+}
+
+// 저장된 노드 복원
+function restoreSelectedNode() {
+  if (!currentSchemaId.value) return
+  
+  const savedNodeId = getSelectedNodeIdForSchema(currentSchemaId.value)
+  console.log('🔍 저장된 노드 확인:', { savedNodeId, currentSchemaId: currentSchemaId.value, nodesCount: nodes.value.length })
+  
+  if (savedNodeId && nodes.value.some(n => n.id === savedNodeId)) {
+    // 저장된 노드가 현재 스키마에 존재하면 자동 선택
+    console.log(`📌 저장된 노드 자동 선택: ${savedNodeId}`)
+    selectNode(savedNodeId)
+  } else {
+    console.log('❌ 저장된 노드를 찾을 수 없음:', { savedNodeId, availableNodes: nodes.value.map(n => n.id).slice(0, 5) })
   }
 }
 
@@ -2887,7 +3706,7 @@ function initEdgehandles() {
  * - 모든 화살표가 위로 향하도록 배치
  */
 function applyHierarchicalLayout() {
-  if (!cy) return
+  if (!cy) return null
   
   // 레이어 계층 정의 (낮은 값 = 상위)
   const layerRank: Record<string, number> = {
@@ -3188,17 +4007,19 @@ function applyHierarchicalLayout() {
   })
   
   cy.fit(undefined, 50)
+  
+  // 계층형 레이아웃은 동기적으로 실행되므로 null 반환 (이벤트 없음)
+  return null
 }
 
 function applyLayout() {
-  if (!cy) return
+  if (!cy) return null
   
   let layoutOptions: cytoscape.LayoutOptions
   
   switch (currentLayout.value) {
     case 'hierarchical':
-      applyHierarchicalLayout()
-      return
+      return applyHierarchicalLayout()
       
     case 'cose':
       layoutOptions = {
@@ -3231,7 +4052,7 @@ function applyLayout() {
       layoutOptions = { name: 'cose' }
   }
   
-  cy.layout(layoutOptions).run()
+  return cy.layout(layoutOptions).run()
 }
 
 function cycleLayout() {
@@ -3584,8 +4405,8 @@ function openNodeDataSourceDialog(nodeId: string) {
   const baseQuery = layerSearchTerms[layer] || '데이터'
   nodeSearchQuery.value = `${node.name} ${baseQuery}`
   
-  // 테이블 목록 로드
-  loadTablesForSchema()
+  // 데이터 소스 목록만 먼저 로드
+  loadDatasources()
 }
 
 // 노드 데이터 소스 자연어 검색
@@ -3593,11 +4414,13 @@ async function searchNodeDataSource() {
   if (!currentNodeForDataSource.value || !nodeSearchQuery.value.trim()) return
   
   nodeSearchLoading.value = true
+  nodeSearchStatus.value = '🔍 관련 테이블 검색 중...'
   nodeSearchResults.value = []
   selectedSearchResult.value = null
   
   try {
     // Text2SQL /ask API 호출
+    nodeSearchStatus.value = '🤖 AI가 SQL 쿼리 생성 중...'
     const response = await fetch('/api/gateway/text2sql/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3608,6 +4431,7 @@ async function searchNodeDataSource() {
     })
     
     if (response.ok) {
+      nodeSearchStatus.value = '📊 검색 결과 처리 중...'
       const result = await response.json()
       
       // Text2SQL 응답에서 테이블 정보 추출
@@ -3618,6 +4442,7 @@ async function searchNodeDataSource() {
       const rows = tableData.rows || []
       
       if (usedTables.length > 0 || result.sql) {
+        nodeSearchStatus.value = `✅ ${usedTables.length}개 테이블 발견`
         // 테이블 정보를 후보 형식으로 변환
         // usedTables는 이미 datasource.schema.table 형식일 수 있음
         const candidates = usedTables.map((tableName: string, idx: number) => {
@@ -3650,9 +4475,11 @@ async function searchNodeDataSource() {
         })
         
         nodeSearchResults.value = candidates
+        nodeSearchStatus.value = '' // 성공 시 상태 메시지 제거
       } else {
         // 직접 SQL에서 테이블 추출 시도
         if (result.sql) {
+          nodeSearchStatus.value = '📋 SQL에서 테이블 정보 추출 중...'
           const tableMatch = result.sql.match(/FROM\s+["`]?(\w+)["`]?/i)
           if (tableMatch) {
             nodeSearchResults.value = [{
@@ -3664,7 +4491,12 @@ async function searchNodeDataSource() {
               match_reason: `SQL에서 추출: ${result.sql.substring(0, 50)}...`,
               suggested_sql: result.sql
             }]
+            nodeSearchStatus.value = '✅ 테이블 정보 추출 완료'
+          } else {
+            nodeSearchStatus.value = '⚠️ 테이블 정보를 찾을 수 없습니다'
           }
+        } else {
+          nodeSearchStatus.value = '⚠️ 검색 결과가 없습니다'
         }
       }
     } else {
@@ -3696,60 +4528,138 @@ async function searchNodeDataSource() {
       }
       
       console.error('검색 실패:', errorMessage)
+      nodeSearchStatus.value = `❌ 검색 실패: ${errorMessage.substring(0, 100)}${errorMessage.length > 100 ? '...' : ''}`
+      // 3초 후 상태 메시지 제거
+      setTimeout(() => {
+        if (nodeSearchStatus.value.includes('❌')) {
+          nodeSearchStatus.value = ''
+        }
+      }, 5000)
       alert(`검색 실패: ${errorMessage}`)
     }
   } catch (error: any) {
     console.error('노드 데이터 소스 검색 오류:', error)
     const errorMessage = error?.message || error?.toString() || '알 수 없는 오류'
+    nodeSearchStatus.value = `❌ 오류 발생: ${errorMessage.substring(0, 100)}${errorMessage.length > 100 ? '...' : ''}`
+    setTimeout(() => {
+      if (nodeSearchStatus.value.includes('❌')) {
+        nodeSearchStatus.value = ''
+      }
+    }, 5000)
     alert(`검색 중 오류가 발생했습니다: ${errorMessage}`)
   } finally {
     nodeSearchLoading.value = false
+    // 성공한 경우 상태 메시지는 이미 제거됨
+    if (nodeSearchResults.value.length === 0 && !nodeSearchStatus.value) {
+      nodeSearchStatus.value = ''
+    }
   }
 }
 
-// 스키마별 테이블 목록 로드
-async function loadTablesForSchema() {
+// 데이터 소스 목록만 로드 (초기 로드)
+async function loadDatasources() {
   loadingTables.value = true
-  availableTables.value = []
+  availableDatasources.value = []
   availableSchemas.value = []
+  availableTables.value = []
+  selectedDatasource.value = ''
+  selectedSchema.value = ''
   
   try {
-    // Text2SQL meta API로 테이블 목록 조회
-    const response = await fetch('/api/gateway/text2sql/meta/tables?limit=500')
+    const response = await fetch('/api/gateway/text2sql/meta/datasources')
     
     if (response.ok) {
-      const tables = await response.json()  // 배열로 직접 반환됨
+      const datasources = await response.json()
+      availableDatasources.value = datasources
+      // "온톨로지" 옵션 추가 (ObjectType용)
+      if (datasources.length > 0) {
+        // 데이터 소스 목록에 "온톨로지" 추가하지 않고, 별도로 처리
+      }
+    } else {
+      const error = await response.json().catch(() => ({ detail: '데이터 소스 목록 조회 실패' }))
+      console.error('데이터 소스 목록 조회 실패:', error)
+    }
+  } catch (error) {
+    console.error('데이터 소스 목록 로드 오류:', error)
+  } finally {
+    loadingTables.value = false
+  }
+}
+
+// 데이터 소스 선택 시 스키마 목록 로드
+async function loadSchemasForDatasource(datasource: string) {
+  if (!datasource) {
+    availableSchemas.value = []
+    availableTables.value = []
+    return
+  }
+  
+  // "온톨로지" 선택 시 ObjectType 목록 바로 로드
+  if (datasource === '__ontology__') {
+    await loadObjectTypes()
+    return
+  }
+  
+  loadingTables.value = true
+  availableSchemas.value = []
+  availableTables.value = []
+  selectedSchema.value = ''
+  
+  try {
+    const response = await fetch(`/api/gateway/text2sql/meta/datasources/${encodeURIComponent(datasource)}/schemas`)
+    
+    if (response.ok) {
+      const schemas = await response.json()
+      availableSchemas.value = schemas
+    } else {
+      const error = await response.json().catch(() => ({ detail: '스키마 목록 조회 실패' }))
+      console.error('스키마 목록 조회 실패:', error)
+    }
+  } catch (error) {
+    console.error('스키마 목록 로드 오류:', error)
+  } finally {
+    loadingTables.value = false
+  }
+}
+
+// 스키마 선택 시 테이블 목록 로드
+async function loadTablesForSchema(datasource: string, schema: string) {
+  if (!datasource || !schema) {
+    availableTables.value = []
+    return
+  }
+  
+  loadingTables.value = true
+  availableTables.value = []
+  
+  try {
+    const response = await fetch(`/api/gateway/text2sql/meta/datasources/${encodeURIComponent(datasource)}/schemas/${encodeURIComponent(schema)}/tables?limit=500`)
+    
+    if (response.ok) {
+      const tables = await response.json()
       
-      // 스키마 목록 추출
-      const schemaSet = new Set<string>()
       tables.forEach((t: any) => {
-        const schema = t.schema || 'public'
-        const datasource = t.datasource || ''
-        schemaSet.add(schema)
+        const tableSchema = t.schema || 'public'
+        const tableDatasource = t.datasource || ''
         
-        // fullName 생성: datasource.schema.table 형식 (datasource가 있으면)
+        // fullName 생성: datasource.schema.table 형식
         let fullName = ''
-        if (datasource) {
-          // datasource.schema.table 형식
-          fullName = `"${datasource}"."${schema}"."${t.name}"`
-        } else if (schema !== 'public') {
-          // schema.table 형식 (datasource 없을 때)
-          fullName = `"${schema}"."${t.name}"`
+        if (tableDatasource) {
+          fullName = `"${tableDatasource}"."${tableSchema}"."${t.name}"`
+        } else if (tableSchema !== 'public') {
+          fullName = `"${tableSchema}"."${t.name}"`
         } else {
-          // table만 (public 스키마)
           fullName = `"${t.name}"`
         }
         
         availableTables.value.push({
           name: t.name,
-          schema: schema,
-          datasource: datasource,
+          schema: tableSchema,
+          datasource: tableDatasource,
           fullName: fullName,
           columnCount: t.column_count || 0
         })
       })
-      
-      availableSchemas.value = Array.from(schemaSet).sort()
     } else {
       const error = await response.json().catch(() => ({ detail: '테이블 목록 조회 실패' }))
       console.error('테이블 목록 조회 실패:', error)
@@ -3761,26 +4671,79 @@ async function loadTablesForSchema() {
   }
 }
 
-// 필터링된 테이블 목록
+// ObjectType 목록 로드 (온톨로지)
+async function loadObjectTypes() {
+  loadingTables.value = true
+  availableSchemas.value = []  // 스키마 없음
+  availableTables.value = []
+  selectedSchema.value = ''
+  
+  try {
+    const response = await fetch('/api/gateway/text2sql/meta/objecttypes?limit=500')
+    
+    if (response.ok) {
+      const objectTypes = await response.json()
+      
+      objectTypes.forEach((ot: any) => {
+        const schema = ot.schema || 'dw'
+        // ObjectType의 경우 materialized_view 값을 데이터 소스로 사용
+        const materializedView = ot.materialized_view || ot.name
+        
+        // fullName 생성: ObjectType은 스키마 없이 materializedView만 사용
+        // materializedView만 (스키마 없음)
+        const fullName = `"${materializedView}"`
+        
+        availableTables.value.push({
+          name: ot.name,  // ObjectType 이름 (표시용)
+          schema: schema,
+          datasource: materializedView,  // Materialized View 이름을 데이터 소스로 사용
+          fullName: fullName,
+          columnCount: ot.column_count || 0,
+          materializedView: materializedView  // Materialized View 이름 저장
+        })
+      })
+    } else {
+      const error = await response.json().catch(() => ({ detail: 'ObjectType 목록 조회 실패' }))
+      console.error('ObjectType 목록 조회 실패:', error)
+    }
+  } catch (error) {
+    console.error('ObjectType 목록 로드 오류:', error)
+  } finally {
+    loadingTables.value = false
+  }
+}
+
+// 필터링된 테이블 목록 (검색어만 적용)
 const filteredTables = computed(() => {
   let filtered = availableTables.value
   
-  // 스키마 필터
-  if (selectedSchema.value) {
-    filtered = filtered.filter(t => t.schema === selectedSchema.value)
-  }
-  
-  // 검색어 필터
+  // 검색어 필터만 적용 (데이터 소스/스키마는 이미 서버에서 필터링됨)
   if (tableSearchQuery.value) {
     const query = tableSearchQuery.value.toLowerCase()
     filtered = filtered.filter(t => 
       t.name.toLowerCase().includes(query) || 
-      t.fullName.toLowerCase().includes(query)
+      t.fullName.toLowerCase().includes(query) ||
+      (t.datasource && t.datasource.toLowerCase().includes(query)) ||
+      (t.schema && t.schema.toLowerCase().includes(query))
     )
   }
   
   return filtered
 })
+
+// 데이터 소스 변경 핸들러
+async function handleDatasourceChange() {
+  selectedSchema.value = ''
+  availableTables.value = []
+  await loadSchemasForDatasource(selectedDatasource.value)
+}
+
+// 스키마 변경 핸들러
+async function handleSchemaChange() {
+  if (selectedDatasource.value && selectedDatasource.value !== '__ontology__' && selectedSchema.value) {
+    await loadTablesForSchema(selectedDatasource.value, selectedSchema.value)
+  }
+}
 
 // 검색 결과 미리보기
 function previewSearchResult(result: any) {
@@ -3813,17 +4776,25 @@ async function confirmNodeDataSource() {
   } else if (nodeDataSourceTab.value === 'manual' && selectedManualTable.value) {
     const table = availableTables.value.find(t => t.fullName === selectedManualTable.value)
     if (table) {
-      // 테이블명 정리 (따옴표 제거)
-      const cleanTableName = table.fullName.replace(/"/g, '')
+      // ObjectType의 경우 materializedView 값을 데이터 소스로 사용
+      // 일반 테이블의 경우 fullName 사용
+      let tableNameForDataSource = table.fullName.replace(/"/g, '')
+      
+      // ObjectType이고 materializedView가 있으면 그것을 사용 (스키마 없이)
+      if (table.materializedView && selectedDatasource.value === '__ontology__') {
+        // materializedView만 사용 (스키마 없음)
+        tableNameForDataSource = table.materializedView
+      }
       
       candidate = {
-        table_name: cleanTableName,
+        table_name: tableNameForDataSource,
         columns: [],
         sample_data: [],
         row_count: 0,
         relevance_score: 1.0,
-        match_reason: '수동 선택',
-        suggested_sql: `SELECT * FROM ${table.fullName} LIMIT 100`
+        match_reason: selectedDatasource.value === '__ontology__' ? '온톨로지 (ObjectType) 선택' : '수동 선택',
+        suggested_sql: `SELECT * FROM ${table.fullName} LIMIT 100`,
+        materializedView: table.materializedView  // Materialized View 이름 저장
       }
       
       // 테이블 컬럼 정보 가져오기
@@ -3952,7 +4923,10 @@ async function deleteNode(nodeId: string) {
     cy.$(`#${nodeId}`).remove()
   }
   
-  selectedNodeId.value = null
+  // 선택된 노드가 삭제되는 노드면 선택 해제
+  if (selectedNodeId.value === nodeId) {
+    deselectNode()
+  }
 }
 
 // 관계 삭제
@@ -3973,6 +4947,7 @@ async function generateOntology() {
   generating.value = true
   resetProgress()
   abortController = new AbortController()
+  generateError.value = ''
   
   addLog('온톨로지 생성 시작...', 'info')
   currentStep.value = '문서 준비 중'
@@ -4008,7 +4983,16 @@ async function generateOntology() {
     })
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      let errMessage = `HTTP ${response.status}`
+      try {
+        const errBody = await response.json()
+        const detail = errBody.detail ?? errBody.message ?? errBody.error?.message
+        if (detail) errMessage = typeof detail === 'string' ? detail : JSON.stringify(detail)
+      } catch (_) {
+        const text = await response.text()
+        if (text) errMessage = text.slice(0, 500)
+      }
+      throw new Error(errMessage)
     }
     
     // Process streaming response
@@ -4051,9 +5035,12 @@ async function generateOntology() {
     if (error.name === 'AbortError') {
       addLog('생성이 취소되었습니다.', 'warning')
     } else {
+      const msg = error?.message || '온톨로지 생성 중 오류가 발생했습니다.'
       console.error('온톨로지 생성 오류:', error)
-      addLog(`오류: ${error.message}`, 'error')
-      alert('온톨로지 생성 중 오류가 발생했습니다.')
+      addLog(`오류: ${msg}`, 'error')
+      generateError.value = msg
+      // alert를 먼저 띄워 화면 전환 후에도 사용자가 메시지를 놓치지 않도록 함
+      alert('온톨로지 생성 오류\n\n' + msg)
     }
   } finally {
     generating.value = false
@@ -4128,7 +5115,14 @@ function handleStreamEvent(event: any) {
         if (event.data.schema.id) {
           currentSchemaId.value = event.data.schema.id
         }
-        if (event.data.schema.name) {
+        
+        // 자동으로 이름 생성 (이름이 없거나 기본값인 경우)
+        if (!event.data.schema.name || event.data.schema.name.startsWith('온톨로지_') || event.data.schema.name === 'Multi-Layer Ontology') {
+          addLog('온톨로지 이름 자동 생성 중...', 'info')
+          const autoName = generateOntologyName(nodes.value, relationships.value, generateForm.value.domainHint)
+          schemaName.value = autoName
+          addLog(`이름 생성 완료: ${autoName}`, 'success')
+        } else {
           schemaName.value = event.data.schema.name
         }
         
@@ -4149,12 +5143,15 @@ function handleStreamEvent(event: any) {
           }, 1500)
         })
       } else {
-        addLog(`생성 실패: ${event.data?.error || '알 수 없는 오류'}`, 'error')
+        const errMsg = event.data?.error || '알 수 없는 오류'
+        addLog(`생성 실패: ${errMsg}`, 'error')
+        generateError.value = errMsg
       }
       break
       
     case 'error':
       addLog(`오류: ${event.message}`, 'error')
+      generateError.value = event.message || '온톨로지 생성 중 오류가 발생했습니다.'
       // Mark all running layers as failed
       Object.keys(layerProgress.value).forEach(layer => {
         if (layerProgress.value[layer].status === 'running') {
@@ -4179,14 +5176,227 @@ async function fileToBase64(file: File): Promise<string> {
   })
 }
 
-// 저장된 스키마 목록 다이얼로그
-const showSchemaListDialog = ref(false)
-const savedSchemas = ref<Array<{id: string; name: string; domain?: string; nodeCount: number; updatedAt?: string}>>([])
+// 저장된 스키마 목록 (드롭다운)
+const showOntologyListDropdown = ref(false)
+const savedSchemas = ref<Array<{id: string; name: string; domain?: string; nodeCount: number; updatedAt?: string; hasSchemaJson?: boolean}>>([])
 const loadingSchemalist = ref(false)
+/** 삭제 확인 대기 중인 온톨로지 (이름을 명확히 확인 후 삭제) */
+const schemaToDelete = ref<{ id: string; name: string } | null>(null)
 
-async function loadFromNeo4j() {
-  // 저장된 스키마 목록을 보여주는 다이얼로그 열기
-  showSchemaListDialog.value = true
+// localStorage 키
+const RECENT_SCHEMAS_KEY = 'robo-analyzer-recent-schemas'
+const SELECTED_NODES_KEY = 'robo-analyzer-selected-nodes'
+const MAX_SELECTED_NODES = 100 // 최대 저장 개수
+
+// 선택된 노드 정보 타입
+interface SelectedNodeInfo {
+  schemaId: string
+  nodeId: string
+  timestamp: number
+}
+
+// 최근 열어본 스키마 ID 목록 가져오기
+function getRecentSchemaIds(): string[] {
+  try {
+    const stored = localStorage.getItem(RECENT_SCHEMAS_KEY)
+    return stored ? JSON.parse(stored) : []
+  } catch {
+    return []
+  }
+}
+
+// 최근 열어본 스키마 ID 목록 저장
+function saveRecentSchemaId(schemaId: string) {
+  try {
+    const recent = getRecentSchemaIds()
+    // 이미 있으면 제거하고 맨 앞에 추가
+    const filtered = recent.filter(id => id !== schemaId)
+    const updated = [schemaId, ...filtered].slice(0, 50) // 최대 50개만 유지
+    localStorage.setItem(RECENT_SCHEMAS_KEY, JSON.stringify(updated))
+  } catch (error) {
+    console.warn('최근 스키마 저장 실패:', error)
+  }
+}
+
+// 선택된 노드 목록 가져오기 (FIFO 큐)
+function getSelectedNodes(): SelectedNodeInfo[] {
+  try {
+    const stored = localStorage.getItem(SELECTED_NODES_KEY)
+    return stored ? JSON.parse(stored) : []
+  } catch {
+    return []
+  }
+}
+
+// 선택된 노드 저장 (FIFO 큐 방식)
+function saveSelectedNode(schemaId: string, nodeId: string) {
+  try {
+    const selectedNodes = getSelectedNodes()
+    
+    // 같은 스키마의 같은 노드가 이미 있으면 제거 (중복 방지)
+    const filtered = selectedNodes.filter(
+      n => !(n.schemaId === schemaId && n.nodeId === nodeId)
+    )
+    
+    // 새로운 노드 정보 추가 (맨 앞에)
+    const newNode: SelectedNodeInfo = {
+      schemaId,
+      nodeId,
+      timestamp: Date.now()
+    }
+    
+    const updated = [newNode, ...filtered].slice(0, MAX_SELECTED_NODES) // 최대 개수 제한
+    localStorage.setItem(SELECTED_NODES_KEY, JSON.stringify(updated))
+  } catch (error) {
+    console.warn('선택된 노드 저장 실패:', error)
+  }
+}
+
+// 선택된 노드 제거
+function removeSelectedNode(schemaId: string, nodeId: string) {
+  try {
+    const selectedNodes = getSelectedNodes()
+    const filtered = selectedNodes.filter(
+      n => !(n.schemaId === schemaId && n.nodeId === nodeId)
+    )
+    localStorage.setItem(SELECTED_NODES_KEY, JSON.stringify(filtered))
+  } catch (error) {
+    console.warn('선택된 노드 제거 실패:', error)
+  }
+}
+
+// 현재 스키마의 선택된 노드 ID 가져오기
+function getSelectedNodeIdForSchema(schemaId: string): string | null {
+  try {
+    const selectedNodes = getSelectedNodes()
+    // 해당 스키마의 가장 최근 선택된 노드 찾기
+    const nodeInfo = selectedNodes.find(n => n.schemaId === schemaId)
+    return nodeInfo ? nodeInfo.nodeId : null
+  } catch {
+    return null
+  }
+}
+
+// 스키마 이름 편집
+const editingSchemaId = ref<string | null>(null)
+const editingSchemaName = ref('')
+const schemaNameInput = ref<HTMLInputElement[]>([])
+
+function startEditSchemaName(schemaId: string, currentName: string) {
+  editingSchemaId.value = schemaId
+  editingSchemaName.value = currentName
+  nextTick(() => {
+    const input = schemaNameInput.value?.[0]
+    if (input) {
+      input.focus()
+      input.select()
+    }
+  })
+}
+
+async function saveSchemaName(schemaId: string) {
+  if (!editingSchemaName.value.trim()) {
+    cancelEditSchemaName()
+    return
+  }
+  
+  const newName = editingSchemaName.value.trim()
+  const schema = savedSchemas.value.find(s => s.id === schemaId)
+  if (!schema || schema.name === newName) {
+    editingSchemaId.value = null
+    return
+  }
+  
+  try {
+    const response = await fetch(`/api/gateway/ontology/schemas/${schemaId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newName })
+    })
+    
+    if (response.ok) {
+      const result = await response.json()
+      console.log('[saveSchemaName] 업데이트 성공:', result)
+      
+      // 로컬 상태 업데이트
+      schema.name = newName
+      schema.updatedAt = new Date().toISOString()
+      
+      // 현재 로드된 스키마의 이름도 업데이트
+      if (currentSchemaId.value === schemaId) {
+        schemaName.value = newName
+      }
+      
+      // 성공 메시지 (선택적)
+      // console.log(`✅ 스키마 이름이 '${newName}'으로 변경되었습니다.`)
+    } else {
+      const error = await response.json().catch(() => ({ detail: '이름 변경 실패' }))
+      console.error('[saveSchemaName] 업데이트 실패:', error)
+      alert(`이름 변경 실패: ${error.detail || '알 수 없는 오류'}`)
+    }
+  } catch (error) {
+    console.error('스키마 이름 변경 오류:', error)
+    alert('이름 변경 중 오류가 발생했습니다.')
+  } finally {
+    editingSchemaId.value = null
+  }
+}
+
+function cancelEditSchemaName() {
+  editingSchemaId.value = null
+  editingSchemaName.value = ''
+}
+
+function toggleOntologyListDropdown() {
+  showOntologyListDropdown.value = !showOntologyListDropdown.value
+  if (showOntologyListDropdown.value && savedSchemas.value.length === 0) {
+    loadOntologyList()
+  }
+}
+
+function requestDeleteSchema(schema: { id: string; name: string }) {
+  schemaToDelete.value = { id: schema.id, name: schema.name }
+}
+
+async function confirmDeleteSchema() {
+  if (!schemaToDelete.value) return
+  const { id, name } = schemaToDelete.value
+  try {
+    const response = await fetch(`/api/gateway/ontology/schemas/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      alert(`삭제 실패: ${err.detail || response.status}`)
+      return
+    }
+    if (currentSchemaId.value === id) {
+      currentSchemaId.value = ''
+      nodes.value = []
+      relationships.value = []
+      selectedNodeId.value = null
+      try {
+        const selectedNodes = getSelectedNodes().filter(n => n.schemaId !== id)
+        localStorage.setItem(SELECTED_NODES_KEY, JSON.stringify(selectedNodes))
+      } catch (_) {}
+    }
+    schemaToDelete.value = null
+    showOntologyListDropdown.value = true
+    await loadOntologyList()
+    alert(`온톨로지 「${name}」이(가) 삭제되었습니다.`)
+  } catch (e: any) {
+    const msg = e?.message || String(e)
+    if (msg === 'Failed to fetch' || msg.includes('fetch')) {
+      alert(
+        '삭제 요청 연결에 실패했습니다.\n\n' +
+        '• API 게이트웨이(포트 9000)와 도메인 레이어(포트 8002)가 실행 중인지 확인해 주세요.\n' +
+        '• 개발 시에는 프론트를 실행한 터미널과 동일한 환경에서 백엔드를 띄워야 합니다.'
+      )
+    } else {
+      alert(`삭제 중 오류: ${msg}`)
+    }
+  }
+}
+
+async function loadOntologyList() {
   loadingSchemalist.value = true
   
   try {
@@ -4210,8 +5420,50 @@ async function loadFromNeo4j() {
         console.warn(`⚠️ ${invalidCount}개의 스키마가 schemaJson이 없어 제외되었습니다.`)
       }
       
-      savedSchemas.value = validSchemas
-      console.log(`✅ 유효한 스키마 ${validSchemas.length}개 로드됨`)
+      savedSchemas.value = validSchemas.map((s: any) => ({
+        id: s.id,
+        name: s.name,
+        domain: s.domain,
+        nodeCount: s.nodeCount || 0,
+        updatedAt: s.updatedAt,
+        hasSchemaJson: s.hasSchemaJson !== false  // 명시적으로 설정
+      }))
+      
+      // 최근 열어본 순서로 정렬
+      const recentIds = getRecentSchemaIds()
+      savedSchemas.value.sort((a, b) => {
+        const aIndex = recentIds.indexOf(a.id)
+        const bIndex = recentIds.indexOf(b.id)
+        
+        // 둘 다 최근 목록에 있으면 최근 순서대로
+        if (aIndex !== -1 && bIndex !== -1) {
+          return aIndex - bIndex
+        }
+        // 하나만 있으면 그것이 앞으로
+        if (aIndex !== -1) return -1
+        if (bIndex !== -1) return 1
+        // 둘 다 없으면 updatedAt 기준 (최신순)
+        if (a.updatedAt && b.updatedAt) {
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+        }
+        return 0
+      })
+      
+      console.log(`✅ 유효한 스키마 ${validSchemas.length}개 로드됨 (최근 열어본 순서로 정렬)`)
+      
+      // 최근 스키마 자동 로드 (화면 진입 시)
+      if (recentIds.length > 0 && validSchemas.length > 0) {
+        // 최근 스키마 ID 중 유효한 스키마 찾기
+        const recentSchemaId = recentIds.find(id => 
+          validSchemas.some(s => s.id === id)
+        )
+        
+        if (recentSchemaId && !currentSchemaId.value) {
+          // 현재 스키마가 없고 최근 스키마가 있으면 자동으로 로드
+          console.log(`📂 최근 접속한 온톨로지 자동 로드: ${recentSchemaId}`)
+          await loadSchema(recentSchemaId)
+        }
+      }
     } else {
       const errorText = await response.text()
       console.error('스키마 목록 조회 실패:', errorText)
@@ -4228,7 +5480,10 @@ async function loadFromNeo4j() {
 async function loadSchema(schemaId: string) {
   loading.value = true
   loadingMessage.value = 'Neo4j에서 온톨로지 로딩 중...'
-  showSchemaListDialog.value = false
+  showOntologyListDropdown.value = false
+  
+  // 최근 열어본 목록에 추가
+  saveRecentSchemaId(schemaId)
   
   try {
     // 스키마 활성화
@@ -4275,6 +5530,9 @@ async function loadSchema(schemaId: string) {
     currentSchemaId.value = schema.id
     schemaName.value = schema.name || ''
     
+    // 스키마 로드 중 플래그 (watch가 initCytoscape 덮어쓰기 방지)
+    isLoadingSchema.value = true
+    
     // 노드와 관계 로드
     nodes.value = schema.nodes || []
     relationships.value = schema.relationships || []
@@ -4291,11 +5549,16 @@ async function loadSchema(schemaId: string) {
     // 그래프 렌더링 (DOM이 렌더링된 후)
     if (nodes.value.length > 0) {
       await nextTick()
-      // 약간의 딜레이 후 그래프 초기화 (DOM 완전 렌더링 대기)
+      // 약간의 딜레이 후 그래프 초기화 → 그려지는 애니메이션 후에 선택 복원됨
       setTimeout(() => {
-        initCytoscape()
+        initCytoscape(true)
+        // 복원 로직이 600ms/ layoutstop 후에 돌므로 그 뒤에 플래그 해제
+        setTimeout(() => {
+          isLoadingSchema.value = false
+        }, 800)
       }, 150)
     } else {
+      isLoadingSchema.value = false
       console.warn('스키마에 노드가 없습니다.')
     }
     return // finally에서 loading.value = false 하지 않도록
@@ -4306,6 +5569,7 @@ async function loadSchema(schemaId: string) {
     alert(`스키마 로드에 실패했습니다.\n\n${errorMessage}`)
   } finally {
     loading.value = false
+    isLoadingSchema.value = false
   }
 }
 
@@ -4369,6 +5633,50 @@ async function saveToNeo4j() {
 const currentSchemaId = ref<string | null>(null)
 const schemaName = ref('')
 
+// 온톨로지 이름 자동 생성 함수
+function generateOntologyName(nodes: OntologyNode[], relationships: OntologyRelationship[], domainHint?: string): string {
+  if (nodes.length === 0) {
+    return `온톨로지_${new Date().toISOString().slice(0, 10)}`
+  }
+  
+  // 레이어별 노드 수 집계
+  const layerCounts: Record<string, number> = {}
+  const nodeNames: string[] = []
+  
+  nodes.forEach(node => {
+    const layer = node.layer || node.label || 'Unknown'
+    layerCounts[layer] = (layerCounts[layer] || 0) + 1
+    if (node.name) {
+      nodeNames.push(node.name)
+    }
+  })
+  
+  // 주요 레이어 찾기 (노드가 가장 많은 레이어)
+  const mainLayer = Object.entries(layerCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || ''
+  
+  // 주요 노드 이름들 추출 (상위 3개)
+  const topNodes = nodeNames.slice(0, 3).join('_')
+  
+  // 도메인 힌트가 있으면 사용
+  if (domainHint && domainHint.trim()) {
+    const hint = domainHint.trim().replace(/\s+/g, '_')
+    return `${hint}_온톨로지`
+  }
+  
+  // 레이어와 노드 수 기반 이름 생성
+  if (mainLayer && topNodes) {
+    const layerName = mainLayer === 'KPI' ? 'KPI' : 
+                     mainLayer === 'Measure' ? '측정' :
+                     mainLayer === 'Process' ? '프로세스' :
+                     mainLayer === 'Driver' ? '드라이버' :
+                     mainLayer === 'Resource' ? '자원' : mainLayer
+    return `${layerName}_${topNodes}_온톨로지`
+  }
+  
+  // 기본값: 노드 수와 날짜
+  return `온톨로지_${nodes.length}노드_${new Date().toISOString().slice(5, 10).replace('-', '')}`
+}
+
 // 테마 변경 감지 및 Cytoscape 스타일 업데이트
 function updateCytoscapeTheme() {
   isDarkMode.value = document.documentElement.getAttribute('data-theme') !== 'light'
@@ -4378,7 +5686,7 @@ function updateCytoscapeTheme() {
 }
 
 // Lifecycle
-onMounted(() => {
+onMounted(async () => {
   // 키보드 단축키 등록 (Ctrl+Z, Ctrl+Y)
   window.addEventListener('keydown', handleKeyDown)
   
@@ -4391,6 +5699,17 @@ onMounted(() => {
     })
   })
   themeObserver.observe(document.documentElement, { attributes: true })
+  
+  // 드롭다운 외부 클릭 시 닫기
+  document.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement
+    if (showOntologyListDropdown.value && !target.closest('.ontology-list-dropdown')) {
+      showOntologyListDropdown.value = false
+    }
+  })
+  
+  // 온톨로지 목록 로드 및 최근 온톨로지 자동 열기
+  await loadOntologyList()
   
   if (nodes.value.length > 0) {
     initCytoscape()
@@ -4437,8 +5756,32 @@ watch(chartContainerRef, async (newVal) => {
 })
 
 watch([nodes, relationships], () => {
+  // 스키마 로드 중에는 loadSchema에서 initCytoscape(true)를 호출하므로 여기서 덮어쓰지 않음
+  if (isLoadingSchema.value) return
   if (nodes.value.length > 0) {
     nextTick(() => initCytoscape())
+  }
+})
+
+// 분석 탭 클릭 시 구간 선택이 있으면 자동으로 분석 시작 (watch는 백업용, 핸들러에서 먼저 처리)
+watch(detailPanelTab, (newTab, oldTab) => {
+  console.log('=== detailPanelTab watch 트리거됨 ===', { newTab, oldTab })
+  // 핸들러에서 이미 처리했을 수 있으므로, 다른 경로로 탭이 변경된 경우만 처리
+  if (newTab === 'analysis' && oldTab !== 'analysis') {
+    console.log('watch - 분석 탭으로 변경됨:', {
+      hasSelection: !!causalBrushSelection.value,
+      selection: causalBrushSelection.value,
+      nodeId: selectedNode.value?.id,
+      schemaId: currentSchemaId.value
+    })
+    if (causalBrushSelection.value && selectedNode.value?.id && currentSchemaId.value) {
+      console.log('watch에서 분석 시작 (백업)')
+      nextTick(() => {
+        runCausalAnalysisFromBrush()
+      })
+    } else {
+      console.log('watch - 조건 불만족으로 분석 시작 안 함')
+    }
   }
 })
 </script>
@@ -4448,7 +5791,8 @@ watch([nodes, relationships], () => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
+  /* 스키마 에디터와 동일한 배경 그라데이션 */
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
 }
 
 .viewer-header {
@@ -4456,10 +5800,8 @@ watch([nodes, relationships], () => {
   justify-content: space-between;
   align-items: center;
   padding: 16px 24px;
-  /* Glassmorphism */
-  background: rgba(30, 30, 40, 0.8);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  /* 스키마 에디터와 통일된 배경 (glassmorphism 제거) */
+  background: rgba(30, 30, 40, 0.4);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -4473,6 +5815,178 @@ watch([nodes, relationships], () => {
 .header-actions {
   display: flex;
   gap: 8px;
+  position: relative;
+}
+
+/* 온톨로지 목록 드롭다운 */
+.ontology-list-dropdown {
+  position: relative;
+}
+
+.ontology-list-dropdown .action-btn {
+  position: relative;
+}
+
+.dropdown-arrow {
+  margin-left: 4px;
+  font-size: 0.75rem;
+  opacity: 0.7;
+  transition: transform 0.2s ease;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 320px;
+  max-width: 400px;
+  max-height: 500px;
+  background: rgba(20, 20, 30, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  overflow: hidden;
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dropdown-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 20px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.dropdown-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.dropdown-list {
+  max-height: 500px;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.dropdown-item {
+  padding: 12px 16px;
+  margin-bottom: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.dropdown-item:hover:not(.editing) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(99, 102, 241, 0.4);
+  transform: translateX(4px);
+}
+
+.dropdown-item.active {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+.dropdown-item.schema-invalid {
+  opacity: 0.6;
+  border-color: rgba(239, 68, 68, 0.3);
+  cursor: not-allowed;
+}
+
+.dropdown-item.schema-invalid:hover {
+  background: rgba(255, 255, 255, 0.04);
+  transform: none;
+}
+
+.dropdown-item.editing {
+  border-color: rgba(99, 102, 241, 0.5);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.dropdown-item-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.dropdown-item-name {
+  flex: 1;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  cursor: pointer;
+}
+
+.dropdown-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.delete-schema-btn {
+  margin-left: auto;
+  padding: 2px 6px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  font-size: 0.875rem;
+  border-radius: 4px;
+}
+
+.delete-schema-btn:hover {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.15);
+}
+
+.node-count-small {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.updated-at-small {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.edit-name-btn-small {
+  padding: 2px 6px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  transition: all 0.2s ease;
+  opacity: 0;
+}
+
+.dropdown-item:hover .edit-name-btn-small {
+  opacity: 1;
+}
+
+.edit-name-btn-small:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .action-btn {
@@ -4542,16 +6056,15 @@ watch([nodes, relationships], () => {
   width: 100%;    /* 전체 너비 사용 */
 }
 
-/* 왼쪽 패널 - Glassmorphism */
+/* 왼쪽 패널 - 오른쪽 영역과 동일한 배경으로 통일 */
 .layer-panel {
   width: 280px;
   min-width: 280px;
   flex-shrink: 0;
   overflow-y: auto;
-  /* Glassmorphism */
-  background: rgba(30, 30, 40, 0.75);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  /* 오른쪽 graph-panel과 동일한 배경 */
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
+  /* backdrop-filter 제거하여 오른쪽과 동일한 불투명도 유지 */
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 4px 0 24px rgba(0, 0, 0, 0.2);
 }
@@ -4563,19 +6076,23 @@ watch([nodes, relationships], () => {
   font-weight: 600;
   color: rgba(255, 255, 255, 0.95);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
+  /* graph-toolbar와 동일한 배경으로 통일 */
+  background: rgba(30, 30, 40, 0.4);
 }
 
 .layer-list {
   padding: 12px;
+  /* graph-panel과 동일한 배경 유지 (투명하여 그라데이션이 보이도록) */
+  background: transparent;
 }
 
 .layer-item {
   margin-bottom: 6px;
   border-radius: 10px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  /* 오른쪽 패널 요소들과 유사한 배경 */
+  background: rgba(30, 30, 40, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .layer-header {
@@ -4656,10 +6173,8 @@ watch([nodes, relationships], () => {
   display: flex;
   gap: 8px;
   padding: 12px 16px;
-  /* Glassmorphism */
-  background: rgba(30, 30, 40, 0.6);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  /* 왼쪽/오른쪽 패널과 통일된 배경 */
+  background: rgba(30, 30, 40, 0.4);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -4704,6 +6219,8 @@ watch([nodes, relationships], () => {
 .cytoscape-container {
   flex: 1;
   min-height: 400px;
+  /* graph-panel과 동일한 배경 (투명하게 하여 그라데이션이 보이도록) */
+  background: transparent;
 }
 
 .graph-legend {
@@ -4716,7 +6233,7 @@ watch([nodes, relationships], () => {
   left: 50%;
   transform: translateX(-50%);
   z-index: 10;
-  /* Glassmorphism */
+  /* Glassmorphism 효과 */
   background: rgba(30, 30, 40, 0.7);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -4760,36 +6277,61 @@ watch([nodes, relationships], () => {
 .edge-line.measured { background: #22c55e; }
 .edge-line.produces { background: #3b82f6; }
 
-/* 오른쪽 상세 패널 - Glassmorphism */
+/* 오른쪽 상세 패널 - Glassmorphism 효과 */
 .detail-panel {
-  width: 380px;
-  min-width: 320px;
-  max-width: 400px;
+  position: relative;
+  min-width: 280px;
+  max-width: 800px;
   flex-shrink: 0;
   height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
   z-index: 10;
-  /* Glassmorphism */
-  background: rgba(20, 20, 30, 0.85);
+  /* Glassmorphism 효과 - 투명도 낮춰서 뒤가 비치도록 */
+  background: rgba(20, 20, 30, 0.6);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-left: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: -8px 0 32px rgba(0, 0, 0, 0.4);
+  transition: width 0.1s ease;
+}
+
+/* 리사이즈 핸들 */
+.resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: ew-resize;
+  z-index: 20;
+  background: transparent;
+  transition: background 0.2s ease;
+}
+
+.resize-handle:hover {
+  background: rgba(99, 102, 241, 0.5);
+}
+
+.resize-handle:active {
+  background: rgba(99, 102, 241, 0.8);
 }
 
 .detail-panel h3 {
   margin: 0;
   padding: 14px 20px;
-  font-size: 1rem;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.95);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #fff;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
+  /* Glassmorphism 효과 - 더 투명하게 */
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   position: sticky;
   top: 0;
   z-index: 2;
-  backdrop-filter: blur(10px);
+  letter-spacing: -0.01em;
 }
 
 /* 상세 패널 탭 */
@@ -4797,7 +6339,10 @@ watch([nodes, relationships], () => {
   display: flex;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   padding: 0 16px;
-  background: rgba(255, 255, 255, 0.02);
+  /* Glassmorphism 효과 - 더 투명하게 */
+  background: rgba(255, 255, 255, 0.01);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   position: sticky;
   top: 48px;
   z-index: 1;
@@ -4808,30 +6353,34 @@ watch([nodes, relationships], () => {
   padding: 12px 16px;
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(255, 255, 255, 0.92);
   cursor: pointer;
-  font-size: 0.8125rem;
-  font-weight: 500;
+  font-size: 0.9375rem;
+  font-weight: 600;
   transition: all 0.2s ease;
   border-bottom: 2px solid transparent;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
+  letter-spacing: -0.01em;
 }
 
 .detail-tabs .tab-btn:hover:not(:disabled) {
-  color: rgba(255, 255, 255, 0.9);
-  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .detail-tabs .tab-btn.active {
-  color: #a78bfa;
-  border-bottom-color: #a78bfa;
+  color: #fff;
+  background: rgba(99, 102, 241, 0.45);
+  border-bottom-color: #6366f1;
+  font-weight: 700;
 }
 
 .detail-tabs .tab-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.5;
+  color: rgba(255, 255, 255, 0.5);
   cursor: not-allowed;
 }
 
@@ -4916,7 +6465,11 @@ watch([nodes, relationships], () => {
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.05);
+  /* Glassmorphism 효과 - 더 투명하게 */
+  background: rgba(30, 30, 40, 0.3);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   font-size: 0.8125rem;
 }
@@ -4950,13 +6503,41 @@ watch([nodes, relationships], () => {
 .datasource-info {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.datasource-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 1;
 }
 
 .datasource-meta {
   font-size: 0.75rem;
   color: rgba(255, 255, 255, 0.6);
+}
+
+.reset-datasource-btn {
+  padding: 6px 12px;
+  font-size: 0.75rem;
+  background: rgba(251, 146, 60, 0.15);
+  color: #fb923c;
+  border: 1px solid rgba(251, 146, 60, 0.3);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.reset-datasource-btn:hover {
+  background: rgba(251, 146, 60, 0.25);
+  border-color: rgba(251, 146, 60, 0.5);
+  transform: translateY(-1px);
 }
 
 .no-datasource {
@@ -5000,14 +6581,16 @@ watch([nodes, relationships], () => {
 
 /* 차트 섹션 */
 .chart-section {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(30, 30, 40, 0.4);
   border-radius: 10px;
   overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .chart-header {
   padding: 12px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(30, 30, 40, 0.3);
 }
 
 .chart-header h5 {
@@ -5034,9 +6617,10 @@ watch([nodes, relationships], () => {
 
 /* 데이터 테이블 섹션 */
 .data-table-section {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(30, 30, 40, 0.4);
   border-radius: 10px;
   overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .table-header {
@@ -5044,7 +6628,8 @@ watch([nodes, relationships], () => {
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(30, 30, 40, 0.3);
 }
 
 .table-header h5 {
@@ -5145,7 +6730,10 @@ watch([nodes, relationships], () => {
 
 .detail-row code {
   padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.06);
+  /* Glassmorphism 효과 */
+  background: rgba(30, 30, 40, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   font-family: var(--font-mono);
@@ -5195,8 +6783,11 @@ watch([nodes, relationships], () => {
   flex-wrap: wrap;
   gap: 8px;
   padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  /* Glassmorphism 효과 */
+  background: rgba(30, 30, 40, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
   font-size: 0.8125rem;
 }
@@ -5241,6 +6832,74 @@ watch([nodes, relationships], () => {
   z-index: 1000;
 }
 
+.causal-brush-popup {
+  background: var(--color-bg-elevated, #1e1e2e);
+  border-radius: 12px;
+  padding: 20px;
+  min-width: 320px;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.causal-brush-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.causal-brush-header h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.causal-brush-header .close-btn.small {
+  padding: 4px 8px;
+  font-size: 0.875rem;
+}
+
+.causal-brush-text {
+  margin: 0 0 8px 0;
+  font-size: 0.9rem;
+  color: var(--color-text);
+}
+
+.causal-brush-range {
+  margin: 0 0 16px 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.causal-brush-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.causal-brush-actions .action-btn.primary {
+  background: var(--color-accent, #228be6);
+  color: #fff;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.causal-brush-actions .action-btn.primary:hover {
+  filter: brightness(1.1);
+}
+
+.causal-brush-actions .action-btn.secondary {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
 .generate-dialog {
   width: 650px;
   max-height: 85vh;
@@ -5255,6 +6914,66 @@ watch([nodes, relationships], () => {
 
 .generate-dialog.dialog-expanded {
   width: 750px;
+}
+
+/* 온톨로지 삭제 확인 다이얼로그 */
+.delete-confirm-dialog {
+  width: 420px;
+  padding: 24px;
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+
+.delete-confirm-dialog h3 {
+  margin: 0 0 16px;
+  font-size: 1.125rem;
+  color: var(--color-text);
+}
+
+.delete-confirm-message {
+  margin: 0 0 8px;
+  font-size: 0.9375rem;
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+.delete-confirm-dialog .delete-schema-name {
+  display: block;
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-md);
+  color: var(--color-error, #dc2626);
+  font-size: 1rem;
+  word-break: break-word;
+}
+
+.delete-confirm-warning {
+  margin: 0 0 20px;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.delete-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.delete-confirm-btn {
+  padding: 8px 18px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-error, #dc2626);
+  color: white;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.delete-confirm-btn:hover {
+  opacity: 0.9;
 }
 
 /* Input type tabs */
@@ -5397,6 +7116,43 @@ watch([nodes, relationships], () => {
   overflow-y: auto;
 }
 
+.generate-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: var(--radius-md);
+  color: var(--color-error, #dc2626);
+  font-size: 0.875rem;
+}
+
+.generate-error-banner .error-icon {
+  flex-shrink: 0;
+}
+
+.generate-error-banner .error-text {
+  flex: 1;
+  word-break: break-word;
+}
+
+.generate-error-banner .error-dismiss {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 0.8125rem;
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  border-radius: var(--radius-sm);
+  color: inherit;
+  cursor: pointer;
+}
+
+.generate-error-banner .error-dismiss:hover {
+  background: rgba(239, 68, 68, 0.3);
+}
+
 .form-group {
   margin-bottom: 16px;
 }
@@ -5496,6 +7252,74 @@ watch([nodes, relationships], () => {
 .generate-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* 오류 전용 화면 (폼으로 돌아가지 않고 고정 표시) */
+.error-result-view {
+  padding: 32px 24px;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: var(--radius-md);
+  margin: 20px;
+}
+
+.error-result-view .error-result-icon {
+  font-size: 3rem;
+  margin-bottom: 12px;
+}
+
+.error-result-view .error-result-title {
+  margin: 0 0 12px;
+  font-size: 1.125rem;
+  color: var(--color-error, #dc2626);
+}
+
+.error-result-view .error-result-message {
+  margin: 0 0 24px;
+  font-size: 0.9375rem;
+  color: var(--color-text);
+  line-height: 1.5;
+  word-break: break-word;
+  max-width: 100%;
+}
+
+.error-result-view .error-result-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.error-result-view .retry-btn {
+  padding: 10px 20px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.error-result-view .retry-btn:hover {
+  background: var(--color-bg-hover);
+}
+
+.error-result-view .close-error-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-error, #dc2626);
+  color: white;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.error-result-view .close-error-btn:hover {
+  opacity: 0.9;
 }
 
 /* Progress viewer */
@@ -6342,7 +8166,7 @@ watch([nodes, relationships], () => {
   margin-top: 8px;
 }
 
-/* 개별 노드 데이터 소스 연결 다이얼로그 */
+/* 개별 노드 데이터 소스 연결 다이얼로그 - 글자 가독성 확보 */
 .node-datasource-dialog {
   width: 900px;
   max-width: 95vw;
@@ -6350,9 +8174,13 @@ watch([nodes, relationships], () => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--color-bg-elevated);
+  background: var(--color-bg-elevated, #1e1e2e);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
+}
+
+.node-datasource-dialog .dialog-header h3 {
+  color: var(--color-text-bright, rgba(255, 255, 255, 0.95)) !important;
 }
 
 .node-datasource-dialog .dialog-body {
@@ -6362,6 +8190,7 @@ watch([nodes, relationships], () => {
   padding: 20px;
   min-width: 0;
   width: 100%;
+  color: var(--color-text-bright, rgba(255, 255, 255, 0.9));
 }
 
 .node-info-section {
@@ -6384,8 +8213,12 @@ watch([nodes, relationships], () => {
 }
 
 .node-info-item .label {
-  color: var(--color-text-light);
+  color: var(--color-text-light, rgba(255, 255, 255, 0.7));
   font-weight: 500;
+}
+
+.node-info-item span:not(.label) {
+  color: var(--color-text-bright, rgba(255, 255, 255, 0.95));
 }
 
 .datasource-tabs {
@@ -6399,7 +8232,7 @@ watch([nodes, relationships], () => {
   padding: 12px 20px;
   border: none;
   background: transparent;
-  color: var(--color-text-light);
+  color: var(--color-text-light, rgba(255, 255, 255, 0.75));
   cursor: pointer;
   font-size: 0.875rem;
   font-weight: 500;
@@ -6469,6 +8302,58 @@ watch([nodes, relationships], () => {
 .search-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.search-hint {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* 검색 진행 상황 표시 */
+.search-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.9);
+  animation: fadeIn 0.3s ease-in;
+}
+
+.search-status span {
+  flex: 1;
+}
+
+.search-spinner-small {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(59, 130, 246, 0.3);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .search-hint {
@@ -6602,13 +8487,36 @@ watch([nodes, relationships], () => {
   margin-bottom: 8px;
   font-size: 0.875rem;
   font-weight: 500;
-  color: var(--color-text-bright);
+  color: var(--color-text-bright, rgba(255, 255, 255, 0.95));
 }
 
 .table-selector-wrapper {
   display: flex;
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.datasource-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.datasource-selector label {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-light, rgba(255, 255, 255, 0.8));
+  white-space: nowrap;
+}
+
+.datasource-selector select {
+  padding: 8px 12px;
+  background: var(--color-bg-secondary, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-sm);
+  color: var(--color-text-bright, rgba(255, 255, 255, 0.95));
+  font-size: 0.8125rem;
+  min-width: 120px;
 }
 
 .schema-selector {
@@ -6620,16 +8528,23 @@ watch([nodes, relationships], () => {
 .schema-selector label {
   margin: 0;
   font-size: 0.8125rem;
-  color: var(--color-text-light);
+  color: var(--color-text-light, rgba(255, 255, 255, 0.8));
+  white-space: nowrap;
 }
 
 .schema-selector select {
   padding: 8px 12px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
   border-radius: var(--radius-sm);
-  color: var(--color-text-bright);
+  color: var(--color-text-bright, rgba(255, 255, 255, 0.95));
   font-size: 0.8125rem;
+  min-width: 120px;
+}
+
+.schema-selector select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .table-search {
@@ -6639,10 +8554,10 @@ watch([nodes, relationships], () => {
 .table-search input {
   width: 100%;
   padding: 8px 12px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
   border-radius: var(--radius-sm);
-  color: var(--color-text-bright);
+  color: var(--color-text-bright, rgba(255, 255, 255, 0.95));
   font-size: 0.8125rem;
 }
 
@@ -6660,7 +8575,7 @@ watch([nodes, relationships], () => {
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  color: var(--color-text-light);
+  color: var(--color-text-light, rgba(255, 255, 255, 0.8));
 }
 
 .table-list {
@@ -6670,11 +8585,12 @@ watch([nodes, relationships], () => {
 .table-item {
   padding: 12px;
   margin-bottom: 6px;
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
+  background: var(--color-bg, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all 0.2s ease;
+  color: var(--color-text-bright, rgba(255, 255, 255, 0.95));
 }
 
 .table-item:hover {
@@ -6698,7 +8614,26 @@ watch([nodes, relationships], () => {
 
 .table-header strong {
   flex: 1;
-  color: var(--color-text-bright);
+  color: var(--color-text-bright, rgba(255, 255, 255, 0.95));
+  font-weight: 600;
+}
+
+.schema-badge {
+  background: rgba(99, 102, 241, 0.15);
+  color: #a78bfa;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.datasource-badge-small {
+  background: rgba(251, 146, 60, 0.15);
+  color: #fb923c;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
 }
 
 .schema-badge {
@@ -6725,13 +8660,17 @@ watch([nodes, relationships], () => {
 
 .table-meta {
   font-size: 0.75rem;
-  color: var(--color-text-light);
+  color: var(--color-text-light, rgba(255, 255, 255, 0.75));
 }
 
 .no-tables {
   padding: 40px 20px;
   text-align: center;
-  color: var(--color-text-light);
+  color: var(--color-text-light, rgba(255, 255, 255, 0.75));
+}
+
+.no-tables p {
+  color: inherit;
 }
 
 /* Sample Data Dialog */
@@ -7078,12 +9017,62 @@ watch([nodes, relationships], () => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  flex: 1;
+  position: relative;
 }
 
 .schema-name {
   font-size: 1rem;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.95);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.2s ease;
+}
+
+.schema-name:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.schema-name-input {
+  font-size: 1rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(99, 102, 241, 0.2);
+  border: 2px solid rgba(99, 102, 241, 0.5);
+  border-radius: 6px;
+  padding: 4px 8px;
+  width: 100%;
+  max-width: 300px;
+  outline: none;
+}
+
+.schema-item.editing {
+  border-color: rgba(99, 102, 241, 0.5);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.edit-name-btn {
+  margin-left: 8px;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  transition: all 0.2s ease;
+  opacity: 0;
+}
+
+.schema-item:hover .edit-name-btn {
+  opacity: 1;
+}
+
+.edit-name-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .schema-domain {
@@ -7158,22 +9147,34 @@ watch([nodes, relationships], () => {
   border-color: rgba(0, 0, 0, 0.2) !important;
 }
 
+/* 레이어별 노드 패널 - 흰색 계열로 통일 */
 .light-mode .layer-panel {
-  background: rgba(255, 255, 255, 0.85) !important;
-  border-right: 1px solid rgba(0, 0, 0, 0.08) !important;
+  background: #ffffff !important;
+  border-right: 1px solid #e2e8f0 !important;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04) !important;
 }
 
 .light-mode .layer-panel h3 {
-  color: #1e293b !important;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+  color: #0f172a !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  background: #f8fafc !important;
+}
+
+.light-mode .layer-list {
+  background: #ffffff !important;
+}
+
+.light-mode .layer-item {
+  background: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
 }
 
 .light-mode .layer-header {
-  color: #1e293b !important;
+  color: #0f172a !important;
 }
 
 .light-mode .layer-header .layer-name {
-  color: #1e293b !important;
+  color: #0f172a !important;
 }
 
 .light-mode .layer-header .layer-icon {
@@ -7181,7 +9182,7 @@ watch([nodes, relationships], () => {
 }
 
 .light-mode .layer-header:hover {
-  background: rgba(0, 0, 0, 0.04) !important;
+  background: #f1f5f9 !important;
 }
 
 .light-mode .collapse-icon {
@@ -7189,13 +9190,18 @@ watch([nodes, relationships], () => {
 }
 
 .light-mode .layer-count {
-  background: rgba(0, 0, 0, 0.08) !important;
-  color: #64748b !important;
+  background: #e2e8f0 !important;
+  color: #475569 !important;
+}
+
+.light-mode .layer-nodes {
+  background: transparent !important;
 }
 
 .light-mode .node-item {
   color: #334155 !important;
-  background: rgba(0, 0, 0, 0.02) !important;
+  background: #ffffff !important;
+  border: 1px solid transparent !important;
 }
 
 .light-mode .node-item .node-name {
@@ -7203,8 +9209,9 @@ watch([nodes, relationships], () => {
 }
 
 .light-mode .node-item:hover {
-  background: rgba(0, 0, 0, 0.06) !important;
-  color: #1e293b !important;
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+  border-color: #e2e8f0 !important;
 }
 
 .light-mode .node-item.selected {
@@ -7258,9 +9265,10 @@ watch([nodes, relationships], () => {
 }
 
 .light-mode .detail-panel h3 {
-  color: #1e293b !important;
+  color: #0f172a !important;
   background: rgba(255, 255, 255, 0.98) !important;
   border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+  font-weight: 700 !important;
 }
 
 .light-mode .detail-tabs {
@@ -7269,21 +9277,59 @@ watch([nodes, relationships], () => {
 }
 
 .light-mode .detail-tabs .tab-btn {
-  color: #64748b !important;
+  color: #334155 !important;
+  font-weight: 600 !important;
 }
 
 .light-mode .detail-tabs .tab-btn:hover:not(:disabled) {
-  color: #1e293b !important;
-  background: rgba(0, 0, 0, 0.03) !important;
+  color: #0f172a !important;
+  background: rgba(0, 0, 0, 0.04) !important;
 }
 
 .light-mode .detail-tabs .tab-btn.active {
-  color: #6366f1 !important;
-  border-bottom-color: #6366f1 !important;
+  color: #fff !important;
+  background: #4f46e5 !important;
+  border-bottom-color: #4f46e5 !important;
+  font-weight: 700 !important;
+}
+
+.light-mode .detail-tabs .tab-btn:disabled {
+  color: #94a3b8 !important;
 }
 
 .light-mode .detail-content {
   color: #334155 !important;
+}
+
+/* 분석 탭 내부(원인 분석 패널) 글자 가독성 - 라이트 모드 */
+.light-mode .analysis-tab :deep(.causal-analysis-panel),
+.light-mode .analysis-tab :deep(.error-content),
+.light-mode .analysis-tab :deep(.error-message),
+.light-mode .analysis-tab :deep(.error-data-info),
+.light-mode .analysis-tab :deep(.interpolation-info),
+.light-mode .analysis-tab :deep(.node-status-info) {
+  color: #1e293b !important;
+}
+.light-mode .analysis-tab :deep(.error-message) {
+  color: #0f172a !important;
+  background: rgba(0, 0, 0, 0.06) !important;
+}
+.light-mode .analysis-tab :deep(.error-data-info p),
+.light-mode .analysis-tab :deep(.interpolation-info p),
+.light-mode .analysis-tab :deep(.node-status-info p) {
+  color: #334155 !important;
+}
+.light-mode .analysis-tab :deep(.error-data-info ul),
+.light-mode .analysis-tab :deep(.interpolation-info ul),
+.light-mode .analysis-tab :deep(.node-name),
+.light-mode .analysis-tab :deep(.reason-text),
+.light-mode .analysis-tab :deep(.node-status-details) {
+  color: #475569 !important;
+}
+.light-mode .analysis-tab :deep(.report-content),
+.light-mode .analysis-tab :deep(.report-md-h2),
+.light-mode .analysis-tab :deep(.report-md-h3) {
+  color: #1e293b !important;
 }
 
 .light-mode .data-loading {
@@ -7605,7 +9651,103 @@ watch([nodes, relationships], () => {
   background: rgba(0, 0, 0, 0.05) !important;
 }
 
-/* 데이터 소스 연결 다이얼로그 - 라이트 모드 */
+/* 데이터 소스 연결 다이얼로그 - 라이트 모드 (글자 가독성) */
+.light-mode .node-datasource-dialog {
+  background: #ffffff !important;
+}
+
+.light-mode .node-datasource-dialog .dialog-header h3 {
+  color: #1e293b !important;
+}
+
+.light-mode .node-datasource-dialog .dialog-body {
+  color: #334155 !important;
+}
+
+.light-mode .node-info-item .label {
+  color: #64748b !important;
+}
+
+.light-mode .node-info-item span:not(.label) {
+  color: #1e293b !important;
+}
+
+.light-mode .datasource-tabs .tab-btn {
+  color: #64748b !important;
+}
+
+.light-mode .datasource-tabs .tab-btn:hover {
+  color: #1e293b !important;
+}
+
+.light-mode .datasource-tabs .tab-btn.active {
+  color: #6366f1 !important;
+}
+
+.light-mode .table-selector-section label,
+.light-mode .search-input-section label {
+  color: #1e293b !important;
+}
+
+.light-mode .datasource-selector label,
+.light-mode .schema-selector label {
+  color: #475569 !important;
+}
+
+.light-mode .datasource-selector select,
+.light-mode .schema-selector select,
+.light-mode .table-search input {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  color: #1e293b !important;
+}
+
+.light-mode .table-list-container {
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+.light-mode .table-item {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  color: #1e293b !important;
+}
+
+.light-mode .table-item:hover {
+  background: #f1f5f9 !important;
+  border-color: #6366f1 !important;
+}
+
+.light-mode .table-header strong {
+  color: #1e293b !important;
+}
+
+.light-mode .table-meta {
+  color: #64748b !important;
+}
+
+.light-mode .loading-tables {
+  color: #64748b !important;
+}
+
+.light-mode .no-tables {
+  color: #64748b !important;
+}
+
+.light-mode .schema-badge {
+  background: rgba(99, 102, 241, 0.12) !important;
+  color: #4f46e5 !important;
+}
+
+.light-mode .datasource-badge-small {
+  background: rgba(251, 146, 60, 0.15) !important;
+  color: #c2410c !important;
+}
+
+.light-mode .node-info-section {
+  background: #f8fafc !important;
+}
+
 .light-mode .stats-summary {
   background: rgba(248, 250, 252, 0.9) !important;
   border: 1px solid rgba(0, 0, 0, 0.08) !important;

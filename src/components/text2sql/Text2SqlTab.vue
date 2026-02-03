@@ -188,6 +188,13 @@
                 <span class="result-meta">{{ msg.rowCount }}행 · {{ msg.execTime }}ms</span>
                 <button 
                   v-if="getResultSql(msg)"
+                  class="ontology-export-btn"
+                  @click="exportToOntologyFromMsg(msg)"
+                >
+                  🧩 온톨로지
+                </button>
+                <button 
+                  v-if="getResultSql(msg)"
                   class="olap-export-btn"
                   @click="exportToOlapFromMsg(msg)"
                 >
@@ -588,6 +595,21 @@ function exportToOlapFromMsg(msg: ChatMessage) {
     return
   }
   sessionStore.navigateToOlapWithSQL(question, sql)
+}
+
+// 메시지에서 온톨로지(도메인 스키마)로 내보내기
+function exportToOntologyFromMsg(msg: ChatMessage) {
+  const sql = getResultSql(msg)
+  const question = msg.question || reactStore.currentQuestion
+  
+  console.log('[Ontology Export] sql:', sql)
+  console.log('[Ontology Export] question:', question)
+  
+  if (!sql) {
+    alert('SQL 쿼리가 없습니다.')
+    return
+  }
+  sessionStore.navigateToOntologyWithSQL(question, sql)
 }
 
 // ========================================================================
@@ -2574,12 +2596,36 @@ $badge-error: #f87171;
   }
 }
 
+// 온톨로지 내보내기 버튼
+.ontology-export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 8px 14px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(6, 182, 212, 0.15) 100%);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 8px;
+  color: #10b981;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s ease;
+
+  &:hover {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(6, 182, 212, 0.25) 100%);
+    border-color: rgba(16, 185, 129, 0.5);
+    box-shadow: 0 4px 16px rgba(16, 185, 129, 0.25);
+    transform: translateY(-1px);
+  }
+}
+
 // OLAP 내보내기 버튼
 .olap-export-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
+  margin-left: 8px;
   padding: 8px 14px;
   background: linear-gradient(135deg, rgba(34, 139, 230, 0.15) 0%, rgba(124, 58, 237, 0.15) 100%);
   border: 1px solid rgba(34, 139, 230, 0.3);

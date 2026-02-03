@@ -4,8 +4,10 @@ import { IconX } from '@/components/icons'
 
 export interface ConnectionInfo {
   fromTable: string
+  fromSchema?: string
   fromColumn: string
   toTable: string
+  toSchema?: string
   toColumn: string
 }
 
