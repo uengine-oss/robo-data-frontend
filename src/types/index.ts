@@ -335,6 +335,83 @@ export type ReactStreamEvent =
       token: string
     }
   | {
+      /** 새 세션에서 build_sql_context 선행 호출 완료 알림 */
+      event: 'prefetch'
+      tool_name: 'build_sql_context' | string
+      elapsed_ms: number
+      remaining_tool_calls: number
+    }
+  | {
+      /** 새 세션에서 build_sql_context 선행 호출 실패 알림 */
+      event: 'prefetch_error'
+      tool_name: 'build_sql_context' | string
+      elapsed_ms: number
+      error: string
+    }
+  | {
+      /**
+       * 컨트롤러가 ask_user 직전 자동 문맥 보강을 시도할 때 build_sql_context refresh 완료 알림.
+       * mode=auto 인 경우 enrichment_index/context_delta 등의 필드가 포함될 수 있다.
+       */
+      event: 'context_refresh'
+      tool_name: 'build_sql_context' | string
+      elapsed_ms: number
+      remaining_tool_calls: number
+      mode?: 'auto' | 'manual' | string
+      enrichment_index?: number
+      context_parse_mode?: string
+      context_hash_changed?: boolean
+      context_delta?: {
+        tables_added?: number
+        values_added?: number
+        relationships_added?: number
+      }
+    }
+  | {
+      /** 자동/수동 문맥 보강(build_sql_context refresh) 실패 알림 */
+      event: 'context_refresh_error'
+      tool_name: 'build_sql_context' | string
+      elapsed_ms?: number
+      remaining_tool_calls?: number
+      mode?: 'auto' | 'manual' | string
+      error: string
+    }
+  | {
+      /**
+       * (신규) build_sql_context 내부 단계 진행 이벤트.
+       * 비즈니스 UX에서는 기본적으로 단계명/경과시간/카운트만 요약 표시하고,
+       * 세부(테이블/컬럼/SQL)는 토글에서만 노출한다.
+       */
+      event: 'pipeline_stage'
+      pipeline: 'build_sql_context' | string
+      stage: string
+      status: 'start' | 'done' | 'error'
+      seq: number
+      iteration: number
+      elapsed_ms?: number
+      counts?: Record<string, number>
+      notes?: string[]
+      error?: string
+      ts_ms?: number
+    }
+  | {
+      /**
+       * (신규) build_sql_context 내부 아이템 진행 이벤트.
+       * 현재는 light_queries query preview 진행에 사용.
+       */
+      event: 'pipeline_item'
+      pipeline: 'build_sql_context' | string
+      stage: 'light_queries' | string
+      item_type: 'query_preview' | string
+      iteration: number
+      index: number
+      total: number
+      verdict?: 'PASS' | 'FAIL' | string
+      row_count?: number
+      elapsed_ms?: number
+      ts_ms?: number
+    }
+  | {
       event: 'section_delta'
       iteration: number
       /** extractor가 추출한 섹션/필드 키 (예: reasoning, partial_sql, tool_call.tool_name 등) */
@@ -374,6 +451,12 @@ export type ReactStreamEvent =
       event: 'needs_user_input'
       response: ReactResponseModel
       state: Record<string, unknown>
+    }
+  | {
+      /** 캐시 히트 알림 (다음 completed 이벤트에서 실제 결과 처리) */
+      event: 'cache_hit'
+      message?: string
+      hit_count?: number
     }
   | {
       event: 'error'

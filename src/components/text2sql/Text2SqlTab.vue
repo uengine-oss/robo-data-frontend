@@ -204,6 +204,61 @@
           </template>
         </div>
 
+        <!-- 진행 상황 카드 (문맥 수집/보강) - 요약 기본, 세부 토글 -->
+        <div v-if="reactStore.isRunning && progressHeadline" class="chat-message ai progress">
+          <div class="message-avatar ai">⏳</div>
+          <div class="message-content progress-content">
+            <div class="message-header">
+              <span class="phase-label thinking">진행 상황</span>
+              <span class="progress-headline">{{ progressHeadline }}</span>
+              <button
+                class="progress-toggle-btn"
+                @click="progressExpanded = !progressExpanded"
+              >
+                {{ progressExpanded ? '세부 정보 접기' : '세부 정보 보기' }}
+              </button>
+            </div>
+
+            <div v-if="progressDetails.length" class="progress-details">
+              <span
+                v-for="(d, idx) in progressDetails"
+                :key="idx"
+                class="progress-detail-chip"
+              >
+                {{ d }}
+              </span>
+            </div>
+
+            <div v-if="progressExpanded" class="progress-expanded">
+              <div v-if="reactStore.pipelineStageList.length" class="progress-stages">
+                <div
+                  v-for="st in reactStore.pipelineStageList"
+                  :key="st.stage"
+                  class="progress-stage-row"
+                >
+                  <span class="stage-name">{{ getStageLabel(st.stage) }}</span>
+                  <span :class="['stage-status', st.status]">
+                    {{ st.status === 'start' ? '진행 중' : st.status === 'done' ? '완료' : '오류' }}
+                  </span>
+                  <span v-if="typeof st.elapsed_ms === 'number'" class="stage-elapsed">
+                    {{ (st.elapsed_ms / 1000).toFixed(1) }}s
+                  </span>
+                </div>
+              </div>
+
+              <div v-if="reactStore.progressLog.length" class="progress-log">
+                <div
+                  v-for="item in reactStore.progressLog.slice(-8)"
+                  :key="item.ts_ms + '-' + item.kind"
+                  class="progress-log-row"
+                >
+                  <span class="log-text">{{ item.message }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Live 스트리밍 패널 - 추론 + SQL 중심 -->
         <div v-if="reactStore.isRunning && liveCurrent" class="chat-message ai live">
           <div class="message-avatar ai">🧩</div>
@@ -241,7 +296,7 @@
         <!-- 진행 중 상태 표시 -->
         <div v-else-if="isAnyRunning && !reactStore.isWaitingUser" class="status-bar">
           <span class="status-dot running"></span>
-          <span>{{ mode === 'langchain' ? '⚡ 빠른 검색 중...' : '🧠 AI가 분석 중...' }}</span>
+          <span>{{ runningStatusText }}</span>
           <button class="pause-btn" @click="handlePause">⏸ 잠시 멈춤</button>
           <button class="cancel-btn" @click="handleCancel">✕ 중단</button>
         </div>
@@ -341,6 +396,7 @@ import DirectSqlInput from './DirectSqlInput.vue'
 import { useLangChainStore } from '@/stores/langchain'
 import type { ReactExecutionResult } from '@/types'
 import { buildSqlLineDiff, type PreviousSqlLine, type SqlDiffLine } from '@/utils/sqlLineDiff'
+import { getText2SqlStageLabelKo } from '@/utils/text2sqlProgress'
 import {
   IconPlay, IconUpload, IconSettings, IconChevronDown, IconCopy
 } from '@/components/icons'
@@ -443,6 +499,9 @@ const useCache = ref(true)  // 캐시 사용 여부
 const dwOnlySearch = ref(false)  // DW 스키마만 검색 (OLAP 전용)
 const debugRawXml = ref(false)
 const expandedMessages = ref<Set<string>>(new Set())
+
+// 진행 카드(요약 기본) 토글
+const progressExpanded = ref(false)
 
 // DOM 최적화: 메시지 윈도우링
 const MAX_VISIBLE_MESSAGES = 30  // 최대 표시 메시지 수
@@ -566,6 +625,20 @@ const displaySql = computed(() =>
 const latestCompleteness = computed(() =>
   reactStore.latestStep?.sql_completeness ?? null
 )
+
+const progressHeadline = computed(() => reactStore.progressHeadline)
+const progressDetails = computed(() => reactStore.progressDetails)
+
+function getStageLabel(stage: string): string {
+  return getText2SqlStageLabelKo(stage)
+}
+
+const runningStatusText = computed(() => {
+  if (mode.value === 'langchain') return '⚡ 빠른 검색 중...'
+  // ReAct 모드: 진행 headline이 있으면 우선 사용
+  const h = progressHeadline.value
+  return h ? `🧠 ${h}` : '🧠 AI가 분석 중...'
+})
 
 // ============================================================================
 // Current SQL diff (right panel only)
@@ -880,6 +953,13 @@ watch(() => reactStore.streamingText, () => {
 watch(() => reactStore.liveByIteration, () => {
   scrollToBottom()
 }, { deep: true })
+
+// 실행 종료 시 진행 카드 접기
+watch(() => reactStore.status, (s) => {
+  if (s !== 'running') {
+    progressExpanded.value = false
+  }
+})
 
 // 이전 iteration 저장 (스텝 변경 감지용)
 const previousIterationRef = ref(0)
@@ -1517,6 +1597,15 @@ $badge-error: #f87171;
       box-shadow: 0 4px 32px rgba(0, 212, 170, 0.12);
     }
   }
+
+  &.progress {
+    max-width: 95%;
+
+    .message-content {
+      border-color: rgba(56, 189, 248, 0.25);
+      box-shadow: 0 4px 24px rgba(56, 189, 248, 0.08);
+    }
+  }
 }
 
 @keyframes messageSlide {
@@ -1568,6 +1657,120 @@ $badge-error: #f87171;
 .message-content {
   padding: 16px 20px;
   min-width: 120px;
+}
+
+.progress-content {
+  width: 100%;
+}
+
+.progress-headline {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.progress-toggle-btn {
+  margin-left: auto;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--color-text);
+  }
+}
+
+.progress-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.progress-detail-chip {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  color: #38bdf8;
+}
+
+.progress-expanded {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.progress-stages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.progress-stage-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.stage-name {
+  color: var(--color-text);
+  flex: 1;
+  min-width: 0;
+}
+
+.stage-status {
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+
+  &.start {
+    background: rgba(251, 191, 36, 0.10);
+    border-color: rgba(251, 191, 36, 0.25);
+    color: #fbbf24;
+  }
+
+  &.done {
+    background: rgba(52, 211, 153, 0.10);
+    border-color: rgba(52, 211, 153, 0.25);
+    color: #34d399;
+  }
+
+  &.error {
+    background: rgba(248, 113, 113, 0.10);
+    border-color: rgba(248, 113, 113, 0.25);
+    color: #f87171;
+  }
+}
+
+.stage-elapsed {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.progress-log {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.progress-log-row {
+  font-size: 12px;
+  color: var(--color-text-muted);
 }
 
 .live-content {

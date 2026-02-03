@@ -6,6 +6,11 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { text2sqlApi } from '@/services/api'
+import {
+  buildProgressHeadlineKo,
+  formatCountsSummaryKo,
+  getText2SqlStageLabelKo
+} from '@/utils/text2sqlProgress'
 import type {
   ReactStatus,
   ReactPhase,
@@ -81,6 +86,49 @@ export const useReactStore = defineStore('react', () => {
   const liveByIteration = ref<Record<number, LiveIterationState>>({})
   const debugStreamRawXmlTokens = ref<boolean>(false)
 
+  // ============================================================================
+  // 진행 상황(문맥 수집/보강) - 비기술 사용자용
+  // ============================================================================
+
+  type PipelineStageStatus = 'start' | 'done' | 'error'
+  interface PipelineStageState {
+    stage: string
+    seq: number
+    status: PipelineStageStatus
+    started_at_ms?: number
+    done_at_ms?: number
+    elapsed_ms?: number
+    counts?: Record<string, number>
+    notes?: string[]
+    error?: string
+  }
+
+  interface LightQueryProgressState {
+    index: number
+    total: number
+    pass: number
+    fail: number
+  }
+
+  interface ProgressLogItem {
+    ts_ms: number
+    kind:
+      | 'prefetch'
+      | 'prefetch_error'
+      | 'context_refresh'
+      | 'context_refresh_error'
+      | 'pipeline_stage'
+      | 'pipeline_item'
+    message: string
+    details?: Record<string, unknown>
+  }
+
+  const pipelineStages = ref<Record<string, PipelineStageState>>({})
+  const pipelineStageOrder = ref<string[]>([])
+  const lightQueryProgress = ref<LightQueryProgressState | null>(null)
+  const progressLog = ref<ProgressLogItem[]>([])
+  const progressLastUpdatedMs = ref<number>(0)
+
   // 일시정지 상태
   const isPaused = ref<boolean>(false)
   const pausedSessionState = ref<string | null>(null)
@@ -95,6 +143,46 @@ export const useReactStore = defineStore('react', () => {
     steps.value.length > 0 ? steps.value[steps.value.length - 1] : null
   )
   const latestPartialSql = computed(() => latestStep.value?.partial_sql || partialSql.value)
+
+  const pipelineStageList = computed(() => {
+    const out: PipelineStageState[] = []
+    for (const key of pipelineStageOrder.value) {
+      const st = pipelineStages.value[key]
+      if (st) out.push(st)
+    }
+    return out
+  })
+
+  const currentPipelineStage = computed(() => {
+    // Prefer running stage; else last stage in order.
+    const ordered = pipelineStageList.value
+    for (let i = ordered.length - 1; i >= 0; i--) {
+      if (ordered[i]?.status === 'start') return ordered[i]
+    }
+    return ordered.length ? ordered[ordered.length - 1] : null
+  })
+
+  const progressHeadline = computed(() => {
+    const st = currentPipelineStage.value
+    const light = lightQueryProgress.value
+    if (st) {
+      return buildProgressHeadlineKo({
+        stage: st.stage,
+        status: st.status,
+        elapsed_ms: st.elapsed_ms,
+        light: light ? { index: light.index, total: light.total } : null
+      })
+    }
+    // Fallback for older servers (no pipeline_stage)
+    return isRunning.value ? '문맥을 수집하는 중' : ''
+  })
+
+  const progressDetails = computed(() => {
+    const st = currentPipelineStage.value
+    if (!st) return []
+    const pieces = formatCountsSummaryKo(st.counts)
+    return pieces
+  })
 
   // 내부 함수
   function resetState() {
@@ -116,6 +204,12 @@ export const useReactStore = defineStore('react', () => {
     streamingText.value = ''
     isStreaming.value = false
     liveByIteration.value = {}
+
+    pipelineStages.value = {}
+    pipelineStageOrder.value = []
+    lightQueryProgress.value = null
+    progressLog.value = []
+    progressLastUpdatedMs.value = 0
   }
 
   function cancelOngoing() {
@@ -232,6 +326,31 @@ export const useReactStore = defineStore('react', () => {
     liveByIteration.value[iteration].exploringOpen = open
   }
 
+  function _nowMs(): number {
+    return Date.now()
+  }
+
+  function _pushProgressLog(item: Omit<ProgressLogItem, 'ts_ms'> & { ts_ms?: number }) {
+    const ts = typeof item.ts_ms === 'number' ? item.ts_ms : _nowMs()
+    progressLog.value.push({ ...item, ts_ms: ts })
+    // cap
+    if (progressLog.value.length > 200) {
+      progressLog.value = progressLog.value.slice(-200)
+    }
+    progressLastUpdatedMs.value = ts
+  }
+
+  function _upsertPipelineStage(next: PipelineStageState) {
+    const key = next.stage
+    const prev = pipelineStages.value[key]
+    if (!prev) {
+      pipelineStageOrder.value.push(key)
+      pipelineStages.value[key] = { ...next }
+      return
+    }
+    pipelineStages.value[key] = { ...prev, ...next }
+  }
+
   async function consumeStream(request: ReactRequest, controller: AbortController) {
     try {
       for await (const event of text2sqlApi.reactStream(request, { signal: controller.signal })) {
@@ -246,6 +365,121 @@ export const useReactStore = defineStore('react', () => {
               streamingText.value += event.token
               currentIteration.value = event.iteration
             }
+            break
+          }
+          case 'prefetch': {
+            _pushProgressLog({
+              kind: 'prefetch',
+              message: `문맥 수집 완료 (${(event.elapsed_ms / 1000).toFixed(1)}초)`,
+              details: {
+                tool_name: event.tool_name,
+                remaining_tool_calls: event.remaining_tool_calls
+              }
+            })
+            break
+          }
+          case 'prefetch_error': {
+            _pushProgressLog({
+              kind: 'prefetch_error',
+              message: `문맥 수집 중 오류: ${event.error}`,
+              details: { tool_name: event.tool_name, elapsed_ms: event.elapsed_ms }
+            })
+            break
+          }
+          case 'context_refresh': {
+            const delta = event.context_delta || {}
+            const deltaParts: string[] = []
+            if (typeof delta.tables_added === 'number') deltaParts.push(`테이블 +${delta.tables_added}`)
+            if (typeof delta.values_added === 'number') deltaParts.push(`값 +${delta.values_added}`)
+            if (typeof delta.relationships_added === 'number') deltaParts.push(`관계 +${delta.relationships_added}`)
+
+            const suffix = deltaParts.length ? ` · ${deltaParts.join(', ')}` : ''
+            const idx = typeof event.enrichment_index === 'number' ? `(${event.enrichment_index})` : ''
+            _pushProgressLog({
+              kind: 'context_refresh',
+              message: `문맥 보강 완료${idx} (${(event.elapsed_ms / 1000).toFixed(1)}초)${suffix}`,
+              details: {
+                tool_name: event.tool_name,
+                remaining_tool_calls: event.remaining_tool_calls,
+                mode: event.mode
+              }
+            })
+            break
+          }
+          case 'context_refresh_error': {
+            _pushProgressLog({
+              kind: 'context_refresh_error',
+              message: `문맥 보강 중 오류: ${event.error}`,
+              details: {
+                tool_name: event.tool_name,
+                mode: event.mode
+              }
+            })
+            break
+          }
+          case 'pipeline_stage': {
+            const ts = typeof event.ts_ms === 'number' ? event.ts_ms : _nowMs()
+            _upsertPipelineStage({
+              stage: event.stage,
+              seq: event.seq,
+              status: event.status,
+              started_at_ms: event.status === 'start' ? ts : pipelineStages.value[event.stage]?.started_at_ms,
+              done_at_ms: event.status === 'done' || event.status === 'error' ? ts : pipelineStages.value[event.stage]?.done_at_ms,
+              elapsed_ms: typeof event.elapsed_ms === 'number' ? event.elapsed_ms : pipelineStages.value[event.stage]?.elapsed_ms,
+              counts: event.counts || pipelineStages.value[event.stage]?.counts,
+              notes: event.notes || pipelineStages.value[event.stage]?.notes,
+              error: event.error || pipelineStages.value[event.stage]?.error
+            })
+
+            _pushProgressLog({
+              kind: 'pipeline_stage',
+              ts_ms: ts,
+              message:
+                event.status === 'start'
+                  ? `${getText2SqlStageLabelKo(event.stage)}…`
+                  : event.status === 'done'
+                    ? `${getText2SqlStageLabelKo(event.stage)} 완료`
+                    : `${getText2SqlStageLabelKo(event.stage)} 오류`,
+              details: {
+                stage: event.stage,
+                status: event.status,
+                elapsed_ms: event.elapsed_ms,
+                counts: event.counts,
+                notes: event.notes,
+                error: event.error
+              }
+            })
+            break
+          }
+          case 'pipeline_item': {
+            const ts = typeof event.ts_ms === 'number' ? event.ts_ms : _nowMs()
+            // currently only light_queries
+            if (String(event.stage) === 'light_queries') {
+              const total = Math.max(1, Number(event.total || 1))
+              const idx = Math.max(1, Number(event.index || 1))
+              const prev = lightQueryProgress.value || { index: 0, total, pass: 0, fail: 0 }
+              const verdict = String(event.verdict || '').toUpperCase()
+              const passInc = verdict === 'PASS' ? 1 : 0
+              const failInc = verdict === 'FAIL' ? 1 : 0
+              lightQueryProgress.value = {
+                index: idx,
+                total,
+                pass: prev.pass + passInc,
+                fail: prev.fail + failInc
+              }
+            }
+            _pushProgressLog({
+              kind: 'pipeline_item',
+              ts_ms: ts,
+              message: `${getText2SqlStageLabelKo(event.stage)} (${event.index}/${event.total})`,
+              details: {
+                stage: event.stage,
+                item_type: event.item_type,
+                verdict: event.verdict,
+                row_count: event.row_count,
+                elapsed_ms: event.elapsed_ms
+              }
+            })
             break
           }
           case 'section_delta': {
@@ -539,6 +773,13 @@ export const useReactStore = defineStore('react', () => {
     liveByIteration,
     debugStreamRawXmlTokens,
     setExploringOpen,
+    // 진행 상황(문맥 수집/보강)
+    pipelineStageList,
+    currentPipelineStage,
+    progressHeadline,
+    progressDetails,
+    progressLog,
+    progressLastUpdatedMs,
     // 일시정지 상태
     isPaused,
     pauseFeedback,
