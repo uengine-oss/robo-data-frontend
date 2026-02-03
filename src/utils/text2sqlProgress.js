@@ -15,6 +15,12 @@ const STAGE_LABEL_KO = {
   resolved_values: '필터 후보를 확인하는 중',
   suggestions: '정리 중',
   light_queries: '샘플로 빠르게 검증 중',
+  // Controller (post-context): LLM-heavy parts after light_queries
+  controller_requirements: '요구사항을 정리하는 중',
+  controller_candidates: '여러 답안을 만드는 중',
+  controller_validate: '최종 안전 검증',
+  controller_rubric: '정확도를 점검하는 중',
+  controller_repair: '답안을 다듬는 중',
   finalize: '정리 중'
 }
 
@@ -52,6 +58,9 @@ export function formatCountsSummaryKo(counts) {
   pushIf('관계', 'fk_relationships')
   pushIf('샘플 쿼리', 'light_queries_total')
   pushIf('샘플 통과', 'light_queries_pass')
+  pushIf('요구사항', 'requirements_total')
+  pushIf('후보 답안', 'candidates_total')
+  pushIf('수정 라운드', 'repair_rounds_total')
 
   return out
 }
@@ -106,7 +115,7 @@ export function estimateProgressPercent(args) {
   const cur = String(args?.currentStage || '').trim()
   let partial = 0
   if (cur) {
-    if (cur === 'light_queries') {
+    if (cur === 'light_queries' || cur === 'controller_validate' || cur === 'controller_repair') {
       const idx = args?.light?.index
       const total = args?.light?.total
       if (typeof idx === 'number' && typeof total === 'number' && total > 0) {

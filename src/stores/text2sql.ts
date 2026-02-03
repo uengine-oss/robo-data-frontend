@@ -93,6 +93,7 @@ export const useReactStore = defineStore('react', () => {
 
   type PipelineStageStatus = 'start' | 'done' | 'error'
   interface PipelineStageState {
+    pipeline: string
     stage: string
     seq: number
     status: PipelineStageStatus
@@ -105,6 +106,20 @@ export const useReactStore = defineStore('react', () => {
   }
 
   interface LightQueryProgressState {
+    index: number
+    total: number
+    pass: number
+    fail: number
+  }
+
+  interface ControllerCandidateProgressState {
+    index: number
+    total: number
+    pass: number
+    fail: number
+  }
+
+  interface ControllerRepairProgressState {
     index: number
     total: number
     pass: number
@@ -124,9 +139,12 @@ export const useReactStore = defineStore('react', () => {
     details?: Record<string, unknown>
   }
 
+  // key: `${pipeline}:${stage}`
   const pipelineStages = ref<Record<string, PipelineStageState>>({})
   const pipelineStageOrder = ref<string[]>([])
   const lightQueryProgress = ref<LightQueryProgressState | null>(null)
+  const controllerCandidateProgress = ref<ControllerCandidateProgressState | null>(null)
+  const controllerRepairProgress = ref<ControllerRepairProgressState | null>(null)
   const progressLog = ref<ProgressLogItem[]>([])
   const progressLastUpdatedMs = ref<number>(0)
   const pipelineStageOrderFixed = [
@@ -137,7 +155,11 @@ export const useReactStore = defineStore('react', () => {
     'fk_relationships',
     'resolved_values',
     'suggestions',
-    'light_queries'
+    'light_queries',
+    'controller_requirements',
+    'controller_candidates',
+    'controller_validate',
+    'controller_repair'
   ]
   const pipelineDetailsMinElapsedMs = 500
 
@@ -165,6 +187,8 @@ export const useReactStore = defineStore('react', () => {
     return out
   })
 
+  const _alwaysShowStages = new Set(['light_queries', 'controller_validate', 'controller_repair'])
+
   const visiblePipelineStageList = computed(() => {
     const all = pipelineStageList.value
     if (!all.length) return []
@@ -176,7 +200,7 @@ export const useReactStore = defineStore('react', () => {
       if (!st) return false
       if (st.status === 'error') return true
       if (st.status === 'start') return true // always show current in-progress
-      if (st.stage === 'light_queries') return true // user-facing “검증”은 항상 유의미
+      if (_alwaysShowStages.has(st.stage)) return true // user-facing “검증/안전검증”은 항상 유의미
       if (typeof st.elapsed_ms === 'number') return st.elapsed_ms >= minMs
       // If elapsed is missing, default to hiding unless it’s the current stage.
       if (currentStage && st.stage === currentStage) return true
@@ -205,13 +229,21 @@ export const useReactStore = defineStore('react', () => {
 
   const progressHeadline = computed(() => {
     const st = currentPipelineStage.value
-    const light = lightQueryProgress.value
     if (st) {
+      // Reuse headline format (i/N) for both light_queries and controller candidate/repair progress.
+      const light =
+        st.pipeline === 'build_sql_context' && st.stage === 'light_queries'
+          ? (lightQueryProgress.value ? { index: lightQueryProgress.value.index, total: lightQueryProgress.value.total } : null)
+          : st.pipeline === 'controller' && st.stage === 'controller_validate'
+            ? (controllerCandidateProgress.value ? { index: controllerCandidateProgress.value.index, total: controllerCandidateProgress.value.total } : null)
+            : st.pipeline === 'controller' && st.stage === 'controller_repair'
+              ? (controllerRepairProgress.value ? { index: controllerRepairProgress.value.index, total: controllerRepairProgress.value.total } : null)
+              : null
       return buildProgressHeadlineKo({
         stage: st.stage,
         status: st.status,
         elapsed_ms: st.elapsed_ms,
-        light: light ? { index: light.index, total: light.total } : null
+        light
       })
     }
     // Fallback for older servers (no pipeline_stage)
@@ -231,11 +263,24 @@ export const useReactStore = defineStore('react', () => {
 
     const st = currentPipelineStage.value
     const currentStage = st?.stage || null
+    const stagesByName: Record<string, { status?: 'start' | 'done' | 'error' } | undefined> = {}
+    for (const stageName of pipelineStageOrderFixed) {
+      const pipeline = stageName.startsWith('controller_') ? 'controller' : 'build_sql_context'
+      const key = `${pipeline}:${stageName}`
+      stagesByName[stageName] = pipelineStages.value[key]
+    }
     const pct = estimateProgressPercent({
       stageOrder: pipelineStageOrderFixed,
-      stagesByName: pipelineStages.value,
+      stagesByName,
       currentStage,
-      light: lightQueryProgress.value ? { index: lightQueryProgress.value.index, total: lightQueryProgress.value.total } : null,
+      light:
+        currentStage === 'light_queries'
+          ? (lightQueryProgress.value ? { index: lightQueryProgress.value.index, total: lightQueryProgress.value.total } : null)
+          : currentStage === 'controller_validate'
+            ? (controllerCandidateProgress.value ? { index: controllerCandidateProgress.value.index, total: controllerCandidateProgress.value.total } : null)
+            : currentStage === 'controller_repair'
+              ? (controllerRepairProgress.value ? { index: controllerRepairProgress.value.index, total: controllerRepairProgress.value.total } : null)
+              : null,
       inProgressPartial: 0.3
     })
     // Avoid showing 100% while running.
@@ -267,6 +312,8 @@ export const useReactStore = defineStore('react', () => {
     pipelineStages.value = {}
     pipelineStageOrder.value = []
     lightQueryProgress.value = null
+    controllerCandidateProgress.value = null
+    controllerRepairProgress.value = null
     progressLog.value = []
     progressLastUpdatedMs.value = 0
   }
@@ -400,7 +447,7 @@ export const useReactStore = defineStore('react', () => {
   }
 
   function _upsertPipelineStage(next: PipelineStageState) {
-    const key = next.stage
+    const key = `${next.pipeline}:${next.stage}`
     const prev = pipelineStages.value[key]
     if (!prev) {
       pipelineStageOrder.value.push(key)
@@ -479,22 +526,28 @@ export const useReactStore = defineStore('react', () => {
           case 'pipeline_stage': {
             const ts = typeof event.ts_ms === 'number' ? event.ts_ms : _nowMs()
             // A new build_sql_context run starts from embedding(seq=1). Reset progress state to avoid noisy duplicates.
-            if (event.stage === 'embedding' && event.status === 'start' && event.seq === 1) {
+            if (event.pipeline === 'build_sql_context' && event.stage === 'embedding' && event.status === 'start' && event.seq === 1) {
               pipelineStages.value = {}
               pipelineStageOrder.value = []
               lightQueryProgress.value = null
+              controllerCandidateProgress.value = null
+              controllerRepairProgress.value = null
               progressLog.value = []
             }
+            const key = `${event.pipeline}:${event.stage}`
+            const prev = pipelineStages.value[key]
             _upsertPipelineStage({
+              pipeline: event.pipeline,
               stage: event.stage,
               seq: event.seq,
               status: event.status,
-              started_at_ms: event.status === 'start' ? ts : pipelineStages.value[event.stage]?.started_at_ms,
-              done_at_ms: event.status === 'done' || event.status === 'error' ? ts : pipelineStages.value[event.stage]?.done_at_ms,
-              elapsed_ms: typeof event.elapsed_ms === 'number' ? event.elapsed_ms : pipelineStages.value[event.stage]?.elapsed_ms,
-              counts: event.counts || pipelineStages.value[event.stage]?.counts,
-              notes: event.notes || pipelineStages.value[event.stage]?.notes,
-              error: event.error || pipelineStages.value[event.stage]?.error
+              // Preserve started_at_ms on repeated "start" events (heartbeat).
+              started_at_ms: event.status === 'start' ? (prev?.started_at_ms ?? ts) : prev?.started_at_ms,
+              done_at_ms: event.status === 'done' || event.status === 'error' ? ts : prev?.done_at_ms,
+              elapsed_ms: typeof event.elapsed_ms === 'number' ? event.elapsed_ms : prev?.elapsed_ms,
+              counts: event.counts || prev?.counts,
+              notes: event.notes || prev?.notes,
+              error: event.error || prev?.error
             })
 
             _pushProgressLog({
@@ -519,8 +572,7 @@ export const useReactStore = defineStore('react', () => {
           }
           case 'pipeline_item': {
             const ts = typeof event.ts_ms === 'number' ? event.ts_ms : _nowMs()
-            // currently only light_queries
-            if (String(event.stage) === 'light_queries') {
+            if (String(event.pipeline) === 'build_sql_context' && String(event.stage) === 'light_queries') {
               const total = Math.max(1, Number(event.total || 1))
               const idx = Math.max(1, Number(event.index || 1))
               const prev = lightQueryProgress.value || { index: 0, total, pass: 0, fail: 0 }
@@ -528,6 +580,40 @@ export const useReactStore = defineStore('react', () => {
               const passInc = verdict === 'PASS' ? 1 : 0
               const failInc = verdict === 'FAIL' ? 1 : 0
               lightQueryProgress.value = {
+                index: idx,
+                total,
+                pass: prev.pass + passInc,
+                fail: prev.fail + failInc
+              }
+            } else if (
+              String(event.pipeline) === 'controller' &&
+              String(event.stage) === 'controller_validate' &&
+              String(event.item_type) === 'candidate'
+            ) {
+              const total = Math.max(1, Number(event.total || 1))
+              const idx = Math.max(1, Number(event.index || 1))
+              const prev = controllerCandidateProgress.value || { index: 0, total, pass: 0, fail: 0 }
+              const verdict = String(event.verdict || '').toUpperCase()
+              const passInc = verdict === 'PASS' ? 1 : 0
+              const failInc = verdict === 'FAIL' ? 1 : 0
+              controllerCandidateProgress.value = {
+                index: idx,
+                total,
+                pass: prev.pass + passInc,
+                fail: prev.fail + failInc
+              }
+            } else if (
+              String(event.pipeline) === 'controller' &&
+              String(event.stage) === 'controller_repair' &&
+              String(event.item_type) === 'repair_round'
+            ) {
+              const total = Math.max(1, Number(event.total || 1))
+              const idx = Math.max(1, Number(event.index || 1))
+              const prev = controllerRepairProgress.value || { index: 0, total, pass: 0, fail: 0 }
+              const verdict = String(event.verdict || '').toUpperCase()
+              const passInc = verdict === 'PASS' ? 1 : 0
+              const failInc = verdict === 'FAIL' ? 1 : 0
+              controllerRepairProgress.value = {
                 index: idx,
                 total,
                 pass: prev.pass + passInc,
@@ -702,7 +788,6 @@ export const useReactStore = defineStore('react', () => {
             console.log('Cache hit:', event.message, 'Hit count:', event.hit_count)
             break
           }
-          case 'complete':
           case 'completed': {
             applyResponse(event.response)
             status.value = 'completed'
@@ -715,8 +800,17 @@ export const useReactStore = defineStore('react', () => {
             currentPhase.value = 'idle'
             return
           }
-          default:
+          default: {
+            // Backward/forward compatibility: some servers may send "complete".
+            const anyEv = event as unknown as { event?: string; response?: ReactResponseModel }
+            if (anyEv?.event === 'complete' && anyEv.response) {
+              applyResponse(anyEv.response)
+              status.value = 'completed'
+              currentPhase.value = 'idle'
+              return
+            }
             break
+          }
         }
       }
     } catch (err: unknown) {

@@ -448,6 +448,12 @@ export type ReactStreamEvent =
       state: Record<string, unknown>
     }
   | {
+      /** (호환) 일부 서버에서 completed 대신 complete를 보낼 수 있음 */
+      event: 'complete'
+      response: ReactResponseModel
+      state: Record<string, unknown>
+    }
+  | {
       event: 'needs_user_input'
       response: ReactResponseModel
       state: Record<string, unknown>
