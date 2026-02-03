@@ -235,6 +235,20 @@
             </div>
 
             <div v-if="progressExpanded" class="progress-expanded">
+              <details v-if="progressDetailsHiddenCount > 0" class="progress-counts-more">
+                <summary class="progress-counts-summary">
+                  전체 지표 보기 ({{ progressDetailsAll.length }}개)
+                </summary>
+                <div v-if="progressDetailsAll.length" class="progress-details progress-details-all">
+                  <span
+                    v-for="(d, idx) in progressDetailsAll"
+                    :key="idx"
+                    class="progress-detail-chip"
+                  >
+                    {{ d }}
+                  </span>
+                </div>
+              </details>
               <div v-if="reactStore.visiblePipelineStageList.length" class="progress-stages">
                 <div
                   v-for="st in reactStore.visiblePipelineStageList"
@@ -623,6 +637,8 @@ const latestCompleteness = computed(() =>
 
 const progressHeadline = computed(() => reactStore.progressHeadline)
 const progressDetails = computed(() => reactStore.progressDetails)
+const progressDetailsAll = computed(() => reactStore.progressDetailsAll)
+const progressDetailsHiddenCount = computed(() => reactStore.progressDetailsHiddenCount)
 const estimatedProgressPercent = computed(() => reactStore.estimatedProgressPercent)
 
 function getStageLabel(stage: string): string {
@@ -1725,6 +1741,30 @@ $badge-error: #f87171;
   background: rgba(56, 189, 248, 0.08);
   border: 1px solid rgba(56, 189, 248, 0.18);
   color: #38bdf8;
+}
+
+.progress-counts-more {
+  margin-top: 10px;
+}
+
+.progress-counts-summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  user-select: none;
+  outline: none;
+
+  &:hover {
+    color: var(--color-text);
+  }
+}
+
+.progress-counts-summary::-webkit-details-marker {
+  display: none;
+}
+
+.progress-details-all {
+  margin-top: 8px;
 }
 
 .progress-expanded {

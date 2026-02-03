@@ -165,6 +165,84 @@ export const useReactStore = defineStore('react', () => {
     'controller_repair'
   ]
   const pipelineDetailsMinElapsedMs = 500
+  // UX: count chips can get too noisy/wide when many appear (sticky).
+  // Keep only a small “primary” set by default; allow the UI to show all in details.
+  const progressDetailMaxPrimary = 3
+  const _countChipLabelByKey: Record<string, string> = {
+    table_candidates: '후보 테이블',
+    selected_tables: '선정 테이블',
+    column_candidates: '후보 컬럼',
+    resolved_values: '해결된 값',
+    fk_relationships: '관계',
+    light_queries_total: '샘플 쿼리',
+    light_queries_pass: '샘플 통과',
+    requirements_total: '요구사항',
+    candidates_total: '후보 답안',
+    repair_rounds_total: '수정 라운드'
+  }
+  const _countChipDefaultOrder: string[] = [
+    'table_candidates',
+    'selected_tables',
+    'column_candidates',
+    'resolved_values',
+    'fk_relationships',
+    'light_queries_pass',
+    'light_queries_total',
+    'requirements_total',
+    'candidates_total',
+    'repair_rounds_total'
+  ]
+  const _stageToPreferredCountKeys: Record<string, string[]> = {
+    table_search: ['table_candidates', 'selected_tables'],
+    column_search: ['column_candidates', 'selected_tables'],
+    fk_relationships: ['fk_relationships'],
+    resolved_values: ['resolved_values'],
+    suggestions: ['selected_tables', 'column_candidates'],
+    light_queries: ['light_queries_pass', 'light_queries_total'],
+    controller_requirements: ['requirements_total'],
+    controller_candidates: ['candidates_total'],
+    controller_validate: ['candidates_total'],
+    controller_repair: ['repair_rounds_total']
+  }
+
+  function _formatCountChip(counts: Record<string, number>, key: string): string | null {
+    const label = _countChipLabelByKey[key]
+    if (!label) return null
+    const v = counts?.[key]
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return null
+    return `${label} ${v}개`
+  }
+
+  function _buildPrimaryCountChips(counts: Record<string, number>, stage: string | null): string[] {
+    const c = counts && typeof counts === 'object' ? counts : {}
+    const s = String(stage || '').trim()
+
+    const preferred = _stageToPreferredCountKeys[s] || []
+    const out: string[] = []
+    const used = new Set<string>()
+
+    for (const k of preferred) {
+      const chip = _formatCountChip(c, k)
+      if (chip) {
+        out.push(chip)
+        used.add(k)
+        if (out.length >= progressDetailMaxPrimary) return out
+      }
+    }
+
+    // Fill the remaining slots from the default order for stability.
+    for (const k of _countChipDefaultOrder) {
+      if (used.has(k)) continue
+      const chip = _formatCountChip(c, k)
+      if (chip) {
+        out.push(chip)
+        used.add(k)
+        if (out.length >= progressDetailMaxPrimary) break
+      }
+    }
+
+    return out
+  }
 
   // 일시정지 상태
   const isPaused = ref<boolean>(false)
@@ -253,9 +331,18 @@ export const useReactStore = defineStore('react', () => {
     return isRunning.value ? '문맥을 수집하는 중' : ''
   })
 
-  const progressDetails = computed(() => {
+  const progressDetailsAll = computed(() => {
     // Use sticky snapshot to avoid “appears then disappears” flicker.
     return formatCountsSummaryKo(stickyCounts.value)
+  })
+
+  const progressDetails = computed(() => {
+    // Primary chips only (avoid very long chip rows). Full list is available via progressDetailsAll.
+    return _buildPrimaryCountChips(stickyCounts.value, currentPipelineStage.value?.stage || null)
+  })
+
+  const progressDetailsHiddenCount = computed(() => {
+    return Math.max(0, progressDetailsAll.value.length - progressDetails.value.length)
   })
 
   const estimatedProgressPercent = computed(() => {
@@ -971,6 +1058,8 @@ export const useReactStore = defineStore('react', () => {
     currentPipelineStage,
     progressHeadline,
     progressDetails,
+    progressDetailsAll,
+    progressDetailsHiddenCount,
     estimatedProgressPercent,
     progressLog,
     progressLastUpdatedMs,
