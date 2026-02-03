@@ -145,6 +145,9 @@ export const useReactStore = defineStore('react', () => {
   const lightQueryProgress = ref<LightQueryProgressState | null>(null)
   const controllerCandidateProgress = ref<ControllerCandidateProgressState | null>(null)
   const controllerRepairProgress = ref<ControllerRepairProgressState | null>(null)
+  // UX: sticky counts snapshot to avoid flicker when stages transition quickly.
+  // This holds the latest known counts across stages within a single run.
+  const stickyCounts = ref<Record<string, number>>({})
   const progressLog = ref<ProgressLogItem[]>([])
   const progressLastUpdatedMs = ref<number>(0)
   const pipelineStageOrderFixed = [
@@ -251,10 +254,8 @@ export const useReactStore = defineStore('react', () => {
   })
 
   const progressDetails = computed(() => {
-    const st = currentPipelineStage.value
-    if (!st) return []
-    const pieces = formatCountsSummaryKo(st.counts)
-    return pieces
+    // Use sticky snapshot to avoid “appears then disappears” flicker.
+    return formatCountsSummaryKo(stickyCounts.value)
   })
 
   const estimatedProgressPercent = computed(() => {
@@ -314,6 +315,7 @@ export const useReactStore = defineStore('react', () => {
     lightQueryProgress.value = null
     controllerCandidateProgress.value = null
     controllerRepairProgress.value = null
+    stickyCounts.value = {}
     progressLog.value = []
     progressLastUpdatedMs.value = 0
   }
@@ -532,6 +534,7 @@ export const useReactStore = defineStore('react', () => {
               lightQueryProgress.value = null
               controllerCandidateProgress.value = null
               controllerRepairProgress.value = null
+              stickyCounts.value = {}
               progressLog.value = []
             }
             const key = `${event.pipeline}:${event.stage}`
@@ -549,6 +552,17 @@ export const useReactStore = defineStore('react', () => {
               notes: event.notes || prev?.notes,
               error: event.error || prev?.error
             })
+
+            // Merge counts into sticky snapshot (best-effort).
+            if (event.counts && typeof event.counts === 'object') {
+              const next: Record<string, number> = { ...stickyCounts.value }
+              for (const [k, v] of Object.entries(event.counts)) {
+                if (typeof v === 'number' && Number.isFinite(v) && v >= 0) {
+                  next[String(k)] = v
+                }
+              }
+              stickyCounts.value = next
+            }
 
             _pushProgressLog({
               kind: 'pipeline_stage',
@@ -579,11 +593,18 @@ export const useReactStore = defineStore('react', () => {
               const verdict = String(event.verdict || '').toUpperCase()
               const passInc = verdict === 'PASS' ? 1 : 0
               const failInc = verdict === 'FAIL' ? 1 : 0
-              lightQueryProgress.value = {
+              const nextLq = {
                 index: idx,
                 total,
                 pass: prev.pass + passInc,
                 fail: prev.fail + failInc
+              }
+              lightQueryProgress.value = nextLq
+              // Keep sticky counts stable across stage transitions.
+              stickyCounts.value = {
+                ...stickyCounts.value,
+                light_queries_total: nextLq.total,
+                light_queries_pass: nextLq.pass
               }
             } else if (
               String(event.pipeline) === 'controller' &&
@@ -596,11 +617,16 @@ export const useReactStore = defineStore('react', () => {
               const verdict = String(event.verdict || '').toUpperCase()
               const passInc = verdict === 'PASS' ? 1 : 0
               const failInc = verdict === 'FAIL' ? 1 : 0
-              controllerCandidateProgress.value = {
+              const nextCand = {
                 index: idx,
                 total,
                 pass: prev.pass + passInc,
                 fail: prev.fail + failInc
+              }
+              controllerCandidateProgress.value = nextCand
+              stickyCounts.value = {
+                ...stickyCounts.value,
+                candidates_total: nextCand.total
               }
             } else if (
               String(event.pipeline) === 'controller' &&
@@ -613,11 +639,16 @@ export const useReactStore = defineStore('react', () => {
               const verdict = String(event.verdict || '').toUpperCase()
               const passInc = verdict === 'PASS' ? 1 : 0
               const failInc = verdict === 'FAIL' ? 1 : 0
-              controllerRepairProgress.value = {
+              const nextRepair = {
                 index: idx,
                 total,
                 pass: prev.pass + passInc,
                 fail: prev.fail + failInc
+              }
+              controllerRepairProgress.value = nextRepair
+              stickyCounts.value = {
+                ...stickyCounts.value,
+                repair_rounds_total: nextRepair.total
               }
             }
             _pushProgressLog({
