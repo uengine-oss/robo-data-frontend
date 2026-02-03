@@ -139,6 +139,7 @@ export const useReactStore = defineStore('react', () => {
     'suggestions',
     'light_queries'
   ]
+  const pipelineDetailsMinElapsedMs = 500
 
   // 일시정지 상태
   const isPaused = ref<boolean>(false)
@@ -162,6 +163,35 @@ export const useReactStore = defineStore('react', () => {
       if (st) out.push(st)
     }
     return out
+  })
+
+  const visiblePipelineStageList = computed(() => {
+    const all = pipelineStageList.value
+    if (!all.length) return []
+
+    const currentStage = currentPipelineStage.value?.stage || null
+    const minMs = pipelineDetailsMinElapsedMs
+
+    const visible = all.filter(st => {
+      if (!st) return false
+      if (st.status === 'error') return true
+      if (st.status === 'start') return true // always show current in-progress
+      if (st.stage === 'light_queries') return true // user-facing “검증”은 항상 유의미
+      if (typeof st.elapsed_ms === 'number') return st.elapsed_ms >= minMs
+      // If elapsed is missing, default to hiding unless it’s the current stage.
+      if (currentStage && st.stage === currentStage) return true
+      return false
+    })
+
+    // Never show an empty list if we have progress; keep the last known stage.
+    if (!visible.length) return [all[all.length - 1]]
+    return visible
+  })
+
+  const hiddenPipelineStageCount = computed(() => {
+    const total = pipelineStageList.value.length
+    const visible = visiblePipelineStageList.value.length
+    return Math.max(0, total - visible)
   })
 
   const currentPipelineStage = computed(() => {
@@ -811,6 +841,8 @@ export const useReactStore = defineStore('react', () => {
     setExploringOpen,
     // 진행 상황(문맥 수집/보강)
     pipelineStageList,
+    visiblePipelineStageList,
+    hiddenPipelineStageCount,
     currentPipelineStage,
     progressHeadline,
     progressDetails,

@@ -235,9 +235,9 @@
             </div>
 
             <div v-if="progressExpanded" class="progress-expanded">
-              <div v-if="reactStore.pipelineStageList.length" class="progress-stages">
+              <div v-if="reactStore.visiblePipelineStageList.length" class="progress-stages">
                 <div
-                  v-for="st in reactStore.pipelineStageList"
+                  v-for="st in reactStore.visiblePipelineStageList"
                   :key="st.stage"
                   class="progress-stage-row"
                 >
@@ -246,7 +246,7 @@
                     {{ st.status === 'start' ? '진행 중' : st.status === 'done' ? '완료' : '오류' }}
                   </span>
                   <span v-if="typeof st.elapsed_ms === 'number'" class="stage-elapsed">
-                    {{ (st.elapsed_ms / 1000).toFixed(1) }}s
+                    {{ (st.elapsed_ms / 1000).toFixed(1) }}초
                   </span>
                 </div>
               </div>
