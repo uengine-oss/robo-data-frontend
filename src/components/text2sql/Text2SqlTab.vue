@@ -211,12 +211,17 @@
             <div class="message-header">
               <span class="phase-label thinking">진행 상황</span>
               <span class="progress-headline">{{ progressHeadline }}</span>
+              <span v-if="estimatedProgressPercent" class="progress-percent">추정 {{ estimatedProgressPercent }}%</span>
               <button
                 class="progress-toggle-btn"
                 @click="progressExpanded = !progressExpanded"
               >
                 {{ progressExpanded ? '세부 정보 접기' : '세부 정보 보기' }}
               </button>
+            </div>
+
+            <div class="progress-bar" aria-hidden="true">
+              <div class="progress-bar-fill" :style="{ width: `${estimatedProgressPercent}%` }"></div>
             </div>
 
             <div v-if="progressDetails.length" class="progress-details">
@@ -243,16 +248,6 @@
                   <span v-if="typeof st.elapsed_ms === 'number'" class="stage-elapsed">
                     {{ (st.elapsed_ms / 1000).toFixed(1) }}s
                   </span>
-                </div>
-              </div>
-
-              <div v-if="reactStore.progressLog.length" class="progress-log">
-                <div
-                  v-for="item in reactStore.progressLog.slice(-8)"
-                  :key="item.ts_ms + '-' + item.kind"
-                  class="progress-log-row"
-                >
-                  <span class="log-text">{{ item.message }}</span>
                 </div>
               </div>
             </div>
@@ -501,7 +496,7 @@ const debugRawXml = ref(false)
 const expandedMessages = ref<Set<string>>(new Set())
 
 // 진행 카드(요약 기본) 토글
-const progressExpanded = ref(false)
+const progressExpanded = ref(true)
 
 // DOM 최적화: 메시지 윈도우링
 const MAX_VISIBLE_MESSAGES = 30  // 최대 표시 메시지 수
@@ -628,6 +623,7 @@ const latestCompleteness = computed(() =>
 
 const progressHeadline = computed(() => reactStore.progressHeadline)
 const progressDetails = computed(() => reactStore.progressDetails)
+const estimatedProgressPercent = computed(() => reactStore.estimatedProgressPercent)
 
 function getStageLabel(stage: string): string {
   return getText2SqlStageLabelKo(stage)
@@ -955,7 +951,12 @@ watch(() => reactStore.liveByIteration, () => {
 }, { deep: true })
 
 // 실행 종료 시 진행 카드 접기
-watch(() => reactStore.status, (s) => {
+watch(() => reactStore.status, (s, prev) => {
+  if (s === 'running' && prev !== 'running') {
+    // running 시작 시 기본으로 열어둠
+    progressExpanded.value = true
+    return
+  }
   if (s !== 'running') {
     progressExpanded.value = false
   }
@@ -1669,6 +1670,30 @@ $badge-error: #f87171;
   color: var(--color-text);
 }
 
+.progress-percent {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(0, 212, 170, 0.9), rgba(56, 189, 248, 0.9));
+  transition: width 0.25s ease;
+}
+
 .progress-toggle-btn {
   margin-left: auto;
   padding: 4px 10px;
@@ -1762,16 +1787,6 @@ $badge-error: #f87171;
   font-family: 'JetBrains Mono', monospace;
 }
 
-.progress-log {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.progress-log-row {
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
 
 .live-content {
   width: 100%;

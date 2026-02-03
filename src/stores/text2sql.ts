@@ -8,6 +8,7 @@ import { computed, ref } from 'vue'
 import { text2sqlApi } from '@/services/api'
 import {
   buildProgressHeadlineKo,
+  estimateProgressPercent,
   formatCountsSummaryKo,
   getText2SqlStageLabelKo
 } from '@/utils/text2sqlProgress'
@@ -128,6 +129,16 @@ export const useReactStore = defineStore('react', () => {
   const lightQueryProgress = ref<LightQueryProgressState | null>(null)
   const progressLog = ref<ProgressLogItem[]>([])
   const progressLastUpdatedMs = ref<number>(0)
+  const pipelineStageOrderFixed = [
+    'embedding',
+    'enrich',
+    'table_search',
+    'column_search',
+    'fk_relationships',
+    'resolved_values',
+    'suggestions',
+    'light_queries'
+  ]
 
   // 일시정지 상태
   const isPaused = ref<boolean>(false)
@@ -182,6 +193,24 @@ export const useReactStore = defineStore('react', () => {
     if (!st) return []
     const pieces = formatCountsSummaryKo(st.counts)
     return pieces
+  })
+
+  const estimatedProgressPercent = computed(() => {
+    // If no pipeline info yet, keep it low but non-zero to reduce “stuck” feeling.
+    if (!pipelineStageOrder.value.length && isRunning.value) return 1
+
+    const st = currentPipelineStage.value
+    const currentStage = st?.stage || null
+    const pct = estimateProgressPercent({
+      stageOrder: pipelineStageOrderFixed,
+      stagesByName: pipelineStages.value,
+      currentStage,
+      light: lightQueryProgress.value ? { index: lightQueryProgress.value.index, total: lightQueryProgress.value.total } : null,
+      inProgressPartial: 0.3
+    })
+    // Avoid showing 100% while running.
+    if (isRunning.value) return Math.min(99, Math.max(1, pct))
+    return pct
   })
 
   // 내부 함수
@@ -419,6 +448,13 @@ export const useReactStore = defineStore('react', () => {
           }
           case 'pipeline_stage': {
             const ts = typeof event.ts_ms === 'number' ? event.ts_ms : _nowMs()
+            // A new build_sql_context run starts from embedding(seq=1). Reset progress state to avoid noisy duplicates.
+            if (event.stage === 'embedding' && event.status === 'start' && event.seq === 1) {
+              pipelineStages.value = {}
+              pipelineStageOrder.value = []
+              lightQueryProgress.value = null
+              progressLog.value = []
+            }
             _upsertPipelineStage({
               stage: event.stage,
               seq: event.seq,
@@ -778,6 +814,7 @@ export const useReactStore = defineStore('react', () => {
     currentPipelineStage,
     progressHeadline,
     progressDetails,
+    estimatedProgressPercent,
     progressLog,
     progressLastUpdatedMs,
     // 일시정지 상태

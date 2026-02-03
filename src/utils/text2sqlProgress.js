@@ -77,3 +77,51 @@ export function buildProgressHeadlineKo(args) {
   return base
 }
 
+/**
+ * Heuristic progress estimation.
+ * - Uses stage completion ratio (done/total) as the primary signal.
+ * - For light_queries: uses item progress (index/total) when available.
+ * - For other in-progress stages: uses a small fixed partial (default 0.3).
+ *
+ * @param {{
+ *   stageOrder: string[],
+ *   stagesByName: Record<string, { status?: 'start'|'done'|'error' } | undefined>,
+ *   currentStage?: string | null,
+ *   light?: { index?: number, total?: number } | null,
+ *   inProgressPartial?: number
+ * }} args
+ * @returns {number} percent 0..100
+ */
+export function estimateProgressPercent(args) {
+  const order = Array.isArray(args?.stageOrder) ? args.stageOrder : []
+  const stagesByName = args?.stagesByName && typeof args.stagesByName === 'object' ? args.stagesByName : {}
+  if (!order.length) return 0
+
+  let done = 0
+  for (const st of order) {
+    const s = stagesByName?.[st]?.status
+    if (s === 'done') done += 1
+  }
+
+  const cur = String(args?.currentStage || '').trim()
+  let partial = 0
+  if (cur) {
+    if (cur === 'light_queries') {
+      const idx = args?.light?.index
+      const total = args?.light?.total
+      if (typeof idx === 'number' && typeof total === 'number' && total > 0) {
+        partial = Math.max(0, Math.min(1, idx / total))
+      } else if (stagesByName?.[cur]?.status === 'start') {
+        partial = typeof args?.inProgressPartial === 'number' ? args.inProgressPartial : 0.3
+      }
+    } else if (stagesByName?.[cur]?.status === 'start') {
+      partial = typeof args?.inProgressPartial === 'number' ? args.inProgressPartial : 0.3
+    }
+  }
+
+  const raw = (done + partial) / order.length
+  const pct = Math.round(Math.max(0, Math.min(1, raw)) * 100)
+  // Avoid showing 100% before completion in running state (caller can override on completed).
+  return Math.max(0, Math.min(100, pct))
+}
+

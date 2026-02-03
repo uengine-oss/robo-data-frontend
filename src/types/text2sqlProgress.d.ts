@@ -7,5 +7,12 @@ declare module '@/utils/text2sqlProgress' {
     elapsed_ms?: number
     light?: { index?: number; total?: number } | null
   }): string
+  export function estimateProgressPercent(args: {
+    stageOrder: string[]
+    stagesByName: Record<string, { status?: 'start' | 'done' | 'error' } | undefined>
+    currentStage?: string | null
+    light?: { index?: number; total?: number } | null
+    inProgressPartial?: number
+  }): number
 }
 
