@@ -1081,6 +1081,24 @@ export const text2sqlApi = {
   },
 
   /**
+   * Text2SQL 결과 피드백 제출
+   */
+  async submitFeedback(payload: {
+    prompt_snapshot_id?: string
+    question?: string
+    react_run_id?: string
+    conversation_state?: string
+    original_sql: string
+    corrected_sql?: string | null
+    rating: number
+    notes?: string | null
+    approved: boolean
+    source?: string
+  }): Promise<{ feedback_id: string; message: string }> {
+    return postJson(`${TEXT2SQL_BASE_URL}/feedback`, payload, {})
+  },
+
+  /**
    * 헬스체크
    */
   async healthCheck(): Promise<unknown> {

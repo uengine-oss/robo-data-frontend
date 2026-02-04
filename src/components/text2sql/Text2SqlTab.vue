@@ -55,7 +55,16 @@
         </div>
 
         <div v-for="msg in visibleMessages" :key="msg.id" :class="['chat-message', msg.type]"
-          v-memo="[msg.id, msg.type, msg.content, msg.isStreaming, msg.isExecuting, expandedMessages.has(msg.id)]">
+          v-memo="[
+            msg.id,
+            msg.type,
+            msg.content,
+            msg.isStreaming,
+            msg.isExecuting,
+            expandedMessages.has(msg.id),
+            msg.type === 'result' ? hasFeedbackSubmitted(msg) : false,
+            msg.type === 'result' ? isFeedbackDisabled(msg) : false
+          ]">
           <!-- 사용자 메시지 -->
           <template v-if="msg.type === 'user'">
             <div class="message-avatar user">👤</div>
@@ -159,9 +168,21 @@
               <div class="message-header">
                 <span class="phase-label result">실행 결과</span>
                 <span class="result-meta">{{ msg.rowCount }}행 · {{ msg.execTime }}ms</span>
-                <button v-if="getResultSql(msg)" class="olap-export-btn" @click="exportToOlapFromMsg(msg)">
-                  📊 OLAP
-                </button>
+                <div class="result-actions">
+                  <template v-if="!hasFeedbackSubmitted(msg)">
+                    <button class="feedback-btn approve" :disabled="isFeedbackDisabled(msg)"
+                      @click="submitFeedbackFromMsg(msg, true)">
+                      맞아요
+                    </button>
+                    <button class="feedback-btn reject" :disabled="isFeedbackDisabled(msg)"
+                      @click="submitFeedbackFromMsg(msg, false)">
+                      틀려요
+                    </button>
+                  </template>
+                  <button v-if="getResultSql(msg)" class="olap-export-btn" @click="exportToOlapFromMsg(msg)">
+                    📊 OLAP
+                  </button>
+                </div>
               </div>
               <ResultTable v-if="msg.data" :data="msg.data" :max-rows="20" />
             </div>
@@ -359,6 +380,7 @@ import { useLangChainStore } from '@/stores/langchain'
 import type { ReactExecutionResult } from '@/types'
 import { buildSqlLineDiff, type PreviousSqlLine, type SqlDiffLine } from '@/utils/sqlLineDiff'
 import { getText2SqlStageLabelKo } from '@/utils/text2sqlProgress'
+import { text2sqlApi } from '@/services/api'
 import {
   IconPlay, IconUpload, IconSettings, IconChevronDown, IconCopy
 } from '@/components/icons'
@@ -447,6 +469,74 @@ function exportToOlapFromMsg(msg: ChatMessage) {
     return
   }
   sessionStore.navigateToOlapWithSQL(question, sql)
+}
+
+// ============================================================================
+// Feedback (정답/오답) - 오염 방지 목적
+// ============================================================================
+
+const feedbackSubmitting = ref(false)
+const submittedFeedbackKeys = ref<Set<string>>(new Set())
+
+function _feedbackKey(msg: ChatMessage): string {
+  const q = (msg.question || reactStore.currentQuestion || '').trim()
+  const sql = (getResultSql(msg) || '').trim()
+  return `${q}||${sql}`
+}
+
+function hasFeedbackSubmitted(msg: ChatMessage): boolean {
+  return submittedFeedbackKeys.value.has(_feedbackKey(msg))
+}
+
+function isFeedbackDisabled(msg: ChatMessage): boolean {
+  const sql = getResultSql(msg)
+  if (!sql) return true
+  if (feedbackSubmitting.value) return true
+  return submittedFeedbackKeys.value.has(_feedbackKey(msg))
+}
+
+async function submitFeedbackFromMsg(msg: ChatMessage, approved: boolean) {
+  const sql = getResultSql(msg)
+  const q = (msg.question || reactStore.currentQuestion || '').trim()
+
+  if (!sql) {
+    alert('SQL 쿼리가 없습니다.')
+    return
+  }
+
+  const key = _feedbackKey(msg)
+  if (submittedFeedbackKeys.value.has(key)) return
+
+  let notes: string | undefined
+  if (!approved) {
+    const v = window.prompt('틀린 이유/추가 정보를 간단히 적어주세요 (선택)')
+    notes = v !== null ? v : undefined
+  }
+
+  // Optimistic UI: 클릭 즉시 버튼 숨김(실패 시 롤백)
+  submittedFeedbackKeys.value.add(key)
+  feedbackSubmitting.value = true
+  try {
+    await text2sqlApi.submitFeedback({
+      question: q || undefined,
+      conversation_state: reactStore.conversationState || undefined,
+      original_sql: sql,
+      rating: approved ? 5 : 1,
+      notes: notes || undefined,
+      approved,
+      source: 'react_ui'
+    })
+    addMessage({
+      type: 'system',
+      content: approved ? '피드백(맞아요)이 저장되었습니다.' : '피드백(틀려요)이 저장되었습니다.'
+    })
+  } catch (e) {
+    console.error('Failed to submit feedback:', e)
+    submittedFeedbackKeys.value.delete(key)
+    alert('피드백 저장에 실패했습니다.')
+  } finally {
+    feedbackSubmitting.value = false
+  }
 }
 
 // Refs
@@ -2469,6 +2559,54 @@ $badge-error: #f87171;
     color: $text-muted;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
   }
+}
+
+// 실행 결과 액션 영역 (피드백/OLAP)
+.result-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  .olap-export-btn {
+    margin-left: 0;
+  }
+}
+
+// 결과 피드백 버튼
+.feedback-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--color-text);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+.feedback-btn.approve {
+  border-color: rgba(52, 211, 153, 0.25);
+  color: #34d399;
+}
+
+.feedback-btn.reject {
+  border-color: rgba(248, 113, 113, 0.25);
+  color: #f87171;
 }
 
 // OLAP 내보내기 버튼
