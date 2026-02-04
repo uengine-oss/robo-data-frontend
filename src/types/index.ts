@@ -281,6 +281,24 @@ export interface ReactExecutionResult {
   execution_time_ms: number
 }
 
+export interface QueryQualityGateRound {
+  accept: boolean
+  confidence: number
+  reasons: string[]
+  risk_flags: string[]
+  summary: string
+}
+
+export interface QueryQualityGate {
+  policy: string
+  threshold: number
+  rounds: number
+  ok: boolean
+  verified_confidence?: number | null
+  results: QueryQualityGateRound[]
+  error?: string | null
+}
+
 /** ReAct 응답 모델 */
 export interface ReactResponseModel {
   status: 'completed' | 'needs_user_input'
@@ -295,6 +313,9 @@ export interface ReactResponseModel {
   conversation_state?: string | null
   question_to_user?: string | null
   warnings?: string[] | null
+  from_cache?: boolean
+  quality_gate?: QueryQualityGate | null
+  feedback_required?: boolean
 }
 
 /** ReAct 요청 */

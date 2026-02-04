@@ -56,6 +56,10 @@ export const useReactStore = defineStore('react', () => {
   const finalSql = ref<string | null>(null)
   const validatedSql = ref<string | null>(null)
   const executionResult = ref<ReactExecutionResult | null>(null)
+  // UI feedback gating (backend query-quality gate)
+  const fromCache = ref<boolean>(false)
+  const qualityGate = ref<ReactResponseModel['quality_gate'] | null>(null)
+  const feedbackRequired = ref<boolean>(false)
   const collectedMetadata = ref<string>('')
   const warnings = ref<string[]>([])
   const error = ref<string | null>(null)
@@ -383,6 +387,9 @@ export const useReactStore = defineStore('react', () => {
     finalSql.value = null
     validatedSql.value = null
     executionResult.value = null
+    fromCache.value = false
+    qualityGate.value = null
+    feedbackRequired.value = false
     collectedMetadata.value = ''
     warnings.value = []
     error.value = null
@@ -503,6 +510,21 @@ export const useReactStore = defineStore('react', () => {
       validatedSql.value = response.validated_sql ?? null
     }
     executionResult.value = response.execution_result ?? null
+    if (typeof response.from_cache === 'boolean') {
+      fromCache.value = response.from_cache
+    } else {
+      fromCache.value = false
+    }
+    if (response.quality_gate !== undefined) {
+      qualityGate.value = response.quality_gate ?? null
+    } else {
+      qualityGate.value = null
+    }
+    if (typeof response.feedback_required === 'boolean') {
+      feedbackRequired.value = response.feedback_required
+    } else {
+      feedbackRequired.value = false
+    }
   }
 
   function ensureLiveIteration(iter: number) {
@@ -1033,6 +1055,9 @@ export const useReactStore = defineStore('react', () => {
     finalSql,
     validatedSql,
     executionResult,
+    fromCache,
+    qualityGate,
+    feedbackRequired,
     collectedMetadata,
     warnings,
     error,

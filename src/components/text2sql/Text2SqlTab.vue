@@ -62,6 +62,8 @@
             msg.isStreaming,
             msg.isExecuting,
             expandedMessages.has(msg.id),
+            msg.type === 'result' ? (msg.feedbackRequired === true) : false,
+            msg.type === 'result' ? (msg.fromCache === true) : false,
             msg.type === 'result' ? hasFeedbackSubmitted(msg) : false,
             msg.type === 'result' ? isFeedbackDisabled(msg) : false
           ]">
@@ -169,7 +171,7 @@
                 <span class="phase-label result">실행 결과</span>
                 <span class="result-meta">{{ msg.rowCount }}행 · {{ msg.execTime }}ms</span>
                 <div class="result-actions">
-                  <template v-if="!hasFeedbackSubmitted(msg)">
+                  <template v-if="shouldShowFeedbackButtons(msg) && !hasFeedbackSubmitted(msg)">
                     <button class="feedback-btn approve" :disabled="isFeedbackDisabled(msg)"
                       @click="submitFeedbackFromMsg(msg, true)">
                       맞아요
@@ -409,6 +411,9 @@ interface ChatMessage {
   icon?: string
   sql?: string  // 결과에 연결된 SQL (히스토리 선택 시 사용)
   question?: string  // 원본 질문 (OLAP 내보내기 시 사용)
+  // UI feedback gating (backend query-quality gate)
+  feedbackRequired?: boolean
+  fromCache?: boolean
   toolInfo?: ToolInfo  // 도구 호출 세부 정보 (디버깅용)
 }
 
@@ -486,6 +491,13 @@ function _feedbackKey(msg: ChatMessage): string {
 
 function hasFeedbackSubmitted(msg: ChatMessage): boolean {
   return submittedFeedbackKeys.value.has(_feedbackKey(msg))
+}
+
+function shouldShowFeedbackButtons(msg: ChatMessage): boolean {
+  // 정책: 자동 검증 실패(feedbackRequired=true)에서만 노출하며, 캐시/히스토리는 노출하지 않는다.
+  if (msg.type !== 'result') return false
+  if (msg.fromCache) return false
+  return msg.feedbackRequired === true
 }
 
 function isFeedbackDisabled(msg: ChatMessage): boolean {
@@ -1134,7 +1146,9 @@ watch(() => reactStore.status, (status) => {
         execTime: Math.round(reactStore.executionResult.execution_time_ms),
         data: reactStore.executionResult,
         sql: reactStore.finalSql || undefined,
-        question: reactStore.currentQuestion
+        question: reactStore.currentQuestion,
+        feedbackRequired: reactStore.feedbackRequired,
+        fromCache: reactStore.fromCache
       })
     }
   } else if (status === 'error' && reactStore.error) {
