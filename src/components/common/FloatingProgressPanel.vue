@@ -43,6 +43,19 @@ const progress = computed(() => {
 
 const isCompleted = computed(() => progress.value >= 100)
 
+// 최근 오류 메시지 확인 (오류가 있으면 패널 유지)
+const hasRecentError = computed(() => {
+  if (!consoleMessages.value.length) return false
+  // 최근 10개 메시지 중 오류가 있는지 확인
+  const recentMessages = consoleMessages.value.slice(-10)
+  return recentMessages.some(msg => msg.type === 'error')
+})
+
+// 패널 표시 여부: 처리 중이거나 최근 오류가 있으면 표시
+const shouldShowPanel = computed(() => {
+  return isProcessing.value || hasRecentError.value
+})
+
 // 그래프 통계
 const graphStats = computed(() => {
   const nodes = projectStore.graphData?.nodes || []
@@ -62,9 +75,9 @@ const togglePause = async () => {
   }
 }
 
-// 패널 닫기 (완료 후에만)
+// 패널 닫기 (완료 후에만, 오류가 없을 때만)
 const closePanel = () => {
-  if (isCompleted.value) {
+  if (isCompleted.value && !hasRecentError.value) {
     isMinimized.value = true
   }
 }
@@ -81,26 +94,37 @@ watch(isProcessing, (processing) => {
     isCollapsed.value = false
   }
 })
+
+// 오류 발생 시 자동으로 패널 열기 및 콘솔 탭으로 전환
+watch(hasRecentError, (hasError) => {
+  if (hasError) {
+    isMinimized.value = false
+    isCollapsed.value = false
+    activeTab.value = 'console' // 오류가 있으면 콘솔 탭으로 자동 전환
+  }
+})
 </script>
 
 <template>
   <!-- 최소화된 상태: 작은 배지만 표시 -->
   <Transition name="fade">
     <button 
-      v-if="isMinimized && isProcessing"
+      v-if="isMinimized && shouldShowPanel"
       class="minimized-badge"
+      :class="{ 'has-error': hasRecentError }"
       @click="openPanel"
     >
-      <span class="pulse-dot"></span>
+      <span v-if="isProcessing" class="pulse-dot"></span>
+      <span v-else-if="hasRecentError" class="error-dot">⚠️</span>
       <span class="badge-icon">📊</span>
-      <span class="badge-text">인제스천 중...</span>
+      <span class="badge-text">{{ isProcessing ? '인제스천 중...' : '오류 발생' }}</span>
     </button>
   </Transition>
 
   <!-- 플로팅 패널 -->
   <Transition name="slide-fade">
     <div 
-      v-if="!isMinimized && isProcessing"
+      v-if="!isMinimized && shouldShowPanel"
       class="floating-progress-panel"
       :class="{ 
         'is-collapsed': isCollapsed, 
@@ -117,9 +141,10 @@ watch(isProcessing, (processing) => {
       >
         <div class="header-left">
           <span v-if="isProcessing" class="status-indicator pulse"></span>
+          <span v-else-if="hasRecentError" class="status-indicator error">⚠</span>
           <span v-else-if="isCompleted" class="status-indicator completed">✓</span>
           <span class="header-title">
-            {{ isProcessing ? '📦 인제스천 진행 중' : '📊 분석 완료' }}
+            {{ isProcessing ? '📦 인제스천 진행 중' : hasRecentError ? '⚠️ 오류 발생' : '📊 분석 완료' }}
           </span>
         </div>
         <div class="header-actions">
@@ -134,7 +159,7 @@ watch(isProcessing, (processing) => {
             />
           </button>
           <button 
-            v-if="!isProcessing"
+            v-if="!isProcessing && !hasRecentError"
             class="action-btn close-btn"
             @click.stop="closePanel"
             title="닫기"
@@ -239,6 +264,10 @@ watch(isProcessing, (processing) => {
           <div v-if="!consoleMessages.length" class="empty-state">
             로그가 없습니다
           </div>
+          <!-- 오류가 있을 때 자동으로 콘솔 탭으로 전환 -->
+          <div v-if="hasRecentError && activeTab !== 'console'" class="error-notice">
+            ⚠️ 오류 메시지를 확인하려면 콘솔 탭을 클릭하세요
+          </div>
         </div>
       </div>
     </div>
@@ -269,6 +298,11 @@ watch(isProcessing, (processing) => {
 
   &.is-paused {
     border-color: var(--color-warning);
+  }
+
+  &:has(.status-indicator.error) {
+    border-color: var(--color-error);
+    box-shadow: 0 0 0 2px rgba(255, 59, 48, 0.2), 0 8px 32px rgba(0, 0, 0, 0.4);
   }
 }
 
@@ -310,6 +344,16 @@ watch(isProcessing, (processing) => {
     height: auto;
     padding: 2px;
     font-size: 0.6rem;
+  }
+
+  &.error {
+    background: var(--color-error);
+    color: white;
+    width: auto;
+    height: auto;
+    padding: 2px 4px;
+    font-size: 0.7rem;
+    border-radius: 4px;
   }
 }
 
@@ -541,11 +585,26 @@ watch(isProcessing, (processing) => {
   font-family: var(--font-mono);
   color: var(--color-text-light);
   border-radius: var(--radius-sm);
+  margin-bottom: 2px;
 
   &.error {
     color: var(--color-error);
-    background: rgba(255, 59, 48, 0.1);
+    background: rgba(255, 59, 48, 0.15);
+    border-left: 2px solid var(--color-error);
+    padding-left: 10px;
+    font-weight: 500;
   }
+}
+
+.error-notice {
+  padding: 8px 12px;
+  margin: 8px;
+  background: rgba(255, 59, 48, 0.1);
+  border: 1px solid rgba(255, 59, 48, 0.3);
+  border-radius: var(--radius-sm);
+  color: var(--color-error);
+  font-size: 0.7rem;
+  text-align: center;
 }
 
 .empty-state {
@@ -578,6 +637,20 @@ watch(isProcessing, (processing) => {
     box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
     border-color: var(--color-accent);
   }
+
+  &.has-error {
+    border-color: var(--color-error);
+    background: rgba(255, 59, 48, 0.1);
+
+    &:hover {
+      border-color: var(--color-error);
+      box-shadow: 0 6px 24px rgba(255, 59, 48, 0.3);
+    }
+  }
+}
+
+.error-dot {
+  font-size: 0.7rem;
 }
 
 .pulse-dot {

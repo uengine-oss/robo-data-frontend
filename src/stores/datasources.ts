@@ -198,7 +198,8 @@ export function getAllDataSourceTypes(): DataSourceTypeConfig[] {
         { name: 'port', label: 'Port', type: 'number', required: true, default: 5432 },
         { name: 'user', label: 'Username', type: 'text', required: true },
         { name: 'password', label: 'Password', type: 'password', required: true },
-        { name: 'database', label: 'Database', type: 'text', required: true }
+        { name: 'database', label: 'Database', type: 'text', required: true },
+        { name: 'schema', label: 'Schema', type: 'text', required: false, default: '', placeholder: '비워두면 모든 스키마 접근' }
       ]
     },
     {
@@ -212,7 +213,8 @@ export function getAllDataSourceTypes(): DataSourceTypeConfig[] {
         { name: 'port', label: 'Port', type: 'number', required: true, default: 3306 },
         { name: 'user', label: 'Username', type: 'text', required: true },
         { name: 'password', label: 'Password', type: 'password', required: true },
-        { name: 'database', label: 'Database', type: 'text', required: true }
+        { name: 'database', label: 'Database', type: 'text', required: true },
+        { name: 'schema', label: 'Schema', type: 'text', required: false, default: '', placeholder: '비워두면 모든 스키마 접근' }
       ]
     },
     {
@@ -226,7 +228,8 @@ export function getAllDataSourceTypes(): DataSourceTypeConfig[] {
         { name: 'port', label: 'Port', type: 'number', required: true, default: 3306 },
         { name: 'user', label: 'Username', type: 'text', required: true },
         { name: 'password', label: 'Password', type: 'password', required: true },
-        { name: 'database', label: 'Database', type: 'text', required: true }
+        { name: 'database', label: 'Database', type: 'text', required: true },
+        { name: 'schema', label: 'Schema', type: 'text', required: false, default: '', placeholder: '비워두면 모든 스키마 접근' }
       ]
     },
     {
@@ -451,7 +454,7 @@ export function getAllDataSourceTypes(): DataSourceTypeConfig[] {
         { name: 'password', label: 'Password', type: 'password', required: true },
         { name: 'warehouse', label: 'Warehouse', type: 'text', required: true },
         { name: 'database', label: 'Database', type: 'text', required: true },
-        { name: 'schema', label: 'Schema', type: 'text', required: false, default: 'PUBLIC' }
+        { name: 'schema', label: 'Schema', type: 'text', required: false, default: '', placeholder: '비워두면 모든 스키마 접근' }
       ]
     },
     {
