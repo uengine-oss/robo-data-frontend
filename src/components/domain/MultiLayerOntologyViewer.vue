@@ -4,8 +4,11 @@
     <div class="viewer-header">
       <h2>🌐 온톨로지 관리</h2>
       <div class="header-actions">
-        <button class="action-btn" @click="showGenerateDialog = true">
+        <button class="action-btn" @click="openGenerateDialog('document')">
           <span>📄</span> 문서에서 생성
+        </button>
+        <button class="action-btn" @click="openGenerateDialog('schema')">
+          <span>🗃️</span> DB 스키마에서 생성
         </button>
         <div class="ontology-list-dropdown" :class="{ 'dropdown-open': showOntologyListDropdown }">
           <button 
@@ -112,6 +115,90 @@
         >
           <span>🔗</span> 데이터 소스 자동 연결
         </button>
+      </div>
+    </div>
+
+    <!-- 필터 바 (노드 선택 시 표시) -->
+    <div v-if="selectedNode" class="filter-bar">
+      <div class="filter-bar-header">
+        <span class="filter-icon">🔍</span>
+        <span class="filter-title">{{ selectedNode.name }} 필터</span>
+        <button 
+          v-if="hasActiveFilters" 
+          class="clear-all-filters-btn"
+          @click="clearAllFilters"
+        >
+          모두 초기화
+        </button>
+      </div>
+      
+      <!-- 필터 필드가 없는 경우 -->
+      <div v-if="!selectedNode.filterFields || selectedNode.filterFields.length === 0" class="no-filter-fields">
+        <span>📋 이 노드에는 필터 가능한 필드가 없습니다.</span>
+        <span class="hint">(DB 스키마에서 새로 생성한 온톨로지에만 필터 필드가 포함됩니다)</span>
+      </div>
+      
+      <!-- 필터 필드가 있는 경우 -->
+      <div v-else class="filter-fields">
+        <div 
+          v-for="field in selectedNode.filterFields.slice(0, 6)" 
+          :key="field.column"
+          class="filter-field"
+        >
+          <label>{{ field.label }}</label>
+          
+          <!-- 날짜 범위 필터 -->
+          <div v-if="field.type === 'date_range'" class="date-range-filter">
+            <input 
+              type="date" 
+              v-model="activeFilters[`${selectedNode.id}.${field.column}.from`]"
+              @change="onFilterChange"
+            />
+            <span>~</span>
+            <input 
+              type="date" 
+              v-model="activeFilters[`${selectedNode.id}.${field.column}.to`]"
+              @change="onFilterChange"
+            />
+          </div>
+          
+          <!-- 선택/카테고리 필터 -->
+          <select 
+            v-else-if="field.type === 'select' || field.type === 'category'"
+            v-model="activeFilters[`${selectedNode.id}.${field.column}`]"
+            @change="onFilterChange"
+            class="select-filter"
+          >
+            <option value="">전체</option>
+          </select>
+          
+          <!-- 범위 필터 -->
+          <div v-else-if="field.type === 'range'" class="range-filter">
+            <input 
+              type="number" 
+              v-model="activeFilters[`${selectedNode.id}.${field.column}.min`]"
+              @change="onFilterChange"
+              placeholder="최소"
+            />
+            <span>~</span>
+            <input 
+              type="number" 
+              v-model="activeFilters[`${selectedNode.id}.${field.column}.max`]"
+              @change="onFilterChange"
+              placeholder="최대"
+            />
+          </div>
+          
+          <!-- 검색 필터 -->
+          <input 
+            v-else-if="field.type === 'search'"
+            type="text" 
+            v-model="activeFilters[`${selectedNode.id}.${field.column}`]"
+            @input="onFilterChange"
+            placeholder="검색..."
+            class="search-filter"
+          />
+        </div>
       </div>
     </div>
 
@@ -465,12 +552,36 @@
     <div v-if="showGenerateDialog" class="dialog-overlay" @click.self="!generating && !generateError && (showGenerateDialog = false)">
       <div class="generate-dialog" :class="{ 'dialog-expanded': generating || !!generateError }">
         <div class="dialog-header">
-          <h3>📄 문서에서 온톨로지 생성</h3>
+          <h3>{{ generationMode === 'schema' ? '🗃️ DB 스키마에서 온톨로지 생성' : '📄 문서에서 온톨로지 생성' }}</h3>
           <button class="close-btn" @click="onCloseGenerateDialog" :disabled="generating">✕</button>
         </div>
         
+        <!-- 생성 모드 탭 -->
+        <div class="generation-mode-tabs" v-if="!generating && !generateError">
+          <button 
+            :class="['mode-tab', { active: generationMode === 'document' }]"
+            @click="generationMode = 'document'"
+          >
+            <span>📄</span> 문서 기반
+          </button>
+          <button 
+            :class="['mode-tab', { active: generationMode === 'schema' }]"
+            @click="generationMode = 'schema'"
+          >
+            <span>🗃️</span> DB 스키마 기반
+          </button>
+        </div>
+        
+        <!-- 스키마 기반 생성 모드 -->
+        <div v-if="generationMode === 'schema' && !generating && !generateError" class="schema-generation-content">
+          <SchemaBasedGenerator 
+            @generated="handleSchemaBasedGenerated"
+            @cancel="showGenerateDialog = false"
+          />
+        </div>
+        
         <!-- 오류 전용 화면 (폼으로 돌아가지 않고 먼저 표시) -->
-        <div class="error-result-view" v-if="generateError && !generating">
+        <div class="error-result-view" v-else-if="generateError && !generating">
           <div class="error-result-icon">⚠️</div>
           <h4 class="error-result-title">온톨로지 생성 오류</h4>
           <p class="error-result-message">{{ generateError }}</p>
@@ -480,8 +591,8 @@
           </div>
         </div>
         
-        <!-- 입력 폼 (생성 중도 아니고 오류도 아닐 때만) -->
-        <div class="dialog-content" v-else-if="!generating">
+        <!-- 문서 기반 입력 폼 (생성 중도 아니고 오류도 아닐 때만) -->
+        <div class="dialog-content" v-else-if="generationMode === 'document' && !generating">
           <div class="form-group">
             <label>입력 방식</label>
             <div class="input-type-tabs">
@@ -1264,6 +1375,7 @@ import edgehandles from 'cytoscape-edgehandles'
 import * as echarts from 'echarts'
 import LineChart from '@/components/charts/LineChart.vue'
 import CausalAnalysisPanel from '@/components/domain/CausalAnalysisPanel.vue'
+import SchemaBasedGenerator from '@/components/ontology/SchemaBasedGenerator.vue'
 import { text2sqlApi } from '@/services/api'
 import type { ReactRequest, ReactStreamEvent } from '@/types'
 
@@ -1271,6 +1383,13 @@ import type { ReactRequest, ReactStreamEvent } from '@/types'
 cytoscape.use(edgehandles)
 
 // Types
+interface FilterField {
+  column: string
+  label: string
+  type: string
+  dataType: string
+}
+
 interface OntologyNode {
   id: string
   name: string
@@ -1283,6 +1402,7 @@ interface OntologyNode {
   thresholds?: Record<string, number>
   dataSource?: string
   dataSourceSchema?: any
+  filterFields?: FilterField[]
 }
 
 interface OntologyRelationship {
@@ -1337,7 +1457,27 @@ const nodes = ref<OntologyNode[]>([])
 const relationships = ref<OntologyRelationship[]>([])
 const collapsedLayers = ref(new Set<string>())
 const selectedNodeId = ref<string | null>(null)
-const currentLayout = ref('hierarchical')
+const currentLayout = ref('cose')  // 물리 기반 레이아웃을 기본값으로
+
+// 필터 관련 상태
+const activeFilters = ref<Record<string, any>>({})
+const hasActiveFilters = computed(() => {
+  return Object.values(activeFilters.value).some(v => v !== '' && v !== null && v !== undefined)
+})
+
+function onFilterChange() {
+  // 필터 변경 시 데이터 새로고침
+  if (selectedNodeId.value) {
+    fetchNodeData(selectedNodeId.value)
+  }
+}
+
+function clearAllFilters() {
+  activeFilters.value = {}
+  if (selectedNodeId.value) {
+    fetchNodeData(selectedNodeId.value)
+  }
+}
 
 // 스키마 로드 중 플래그 (watch가 initCytoscape를 덮어쓰지 않도록)
 const isLoadingSchema = ref(false)
@@ -1357,8 +1497,15 @@ const edgeToDelete = ref<{ id: string; source: string; target: string; type: str
 
 // Generate dialog
 const showGenerateDialog = ref(false)
+const generationMode = ref<'document' | 'schema'>('document')
 const generating = ref(false)
 const generationLogs = ref<{ time: string; message: string; type?: string }[]>([])
+
+// 온톨로지 생성 다이얼로그 열기
+function openGenerateDialog(mode: 'document' | 'schema') {
+  generationMode.value = mode
+  showGenerateDialog.value = true
+}
 const generateForm = ref({
   inputType: 'text',
   text: '',
@@ -2996,6 +3143,55 @@ function onCloseGenerateDialog() {
     generateError.value = ''
     showGenerateDialog.value = false
   }
+}
+
+// 스키마 기반 온톨로지 생성 완료 핸들러
+interface NodeFilterField {
+  column: string
+  label: string
+  type: string
+  dataType: string
+}
+
+function handleSchemaBasedGenerated(generatedSchema: any) {
+  console.log('📊 스키마 기반 온톨로지 생성 완료:', generatedSchema)
+  
+  if (generatedSchema && generatedSchema.nodes) {
+    // 노드 변환 및 추가 (filterFields 포함)
+    const newNodes: OntologyNode[] = generatedSchema.nodes.map((node: any) => ({
+      id: node.id,
+      name: node.name,
+      label: node.label || node.layer || 'Resource',
+      layer: node.layer,
+      description: node.description || '',
+      dataSource: node.dataSource || '',
+      filterFields: node.filterFields || []
+    }))
+    
+    // 관계 변환 및 추가
+    const newRelationships: OntologyRelationship[] = (generatedSchema.relationships || []).map((rel: any) => ({
+      id: rel.id,
+      source: rel.source,
+      target: rel.target,
+      type: rel.type || 'RELATED_TO',
+      description: rel.description || ''
+    }))
+    
+    // 새 노드/관계로 교체 (기존 것 덮어쓰기)
+    nodes.value = newNodes
+    relationships.value = newRelationships
+    
+    // Cytoscape 갱신
+    nextTick(() => {
+      if (cy) {
+        renderGraph()
+      }
+    })
+    
+    addLog(`✅ 스키마 기반 온톨로지 생성 완료: ${newNodes.length}개 노드, ${newRelationships.length}개 관계`, 'success')
+  }
+  
+  showGenerateDialog.value = false
 }
 
 // Cytoscape 스타일 생성 (다크/라이트 모드 지원)
@@ -5988,6 +6184,148 @@ watch(detailPanelTab, (newTab, oldTab) => {
   font-size: 1.25rem;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.95);
+}
+
+/* 필터 바 스타일 */
+.filter-bar {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(147, 51, 234, 0.08));
+  border-bottom: 1px solid rgba(59, 130, 246, 0.25);
+  padding: 12px 24px;
+}
+
+.filter-bar-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.filter-icon { font-size: 1rem; }
+
+.filter-title {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 0.95rem;
+}
+
+.clear-all-filters-btn {
+  margin-left: auto;
+  padding: 4px 12px;
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 6px;
+  color: #fca5a5;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.filter-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 140px;
+}
+
+.filter-field label {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 500;
+}
+
+.filter-field input,
+.filter-field select {
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.8rem;
+}
+
+.filter-field input:focus,
+.filter-field select:focus {
+  outline: none;
+  border-color: rgba(59, 130, 246, 0.6);
+}
+
+.date-range-filter,
+.range-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.date-range-filter span,
+.range-filter span {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.8rem;
+}
+
+.date-range-filter input,
+.range-filter input {
+  flex: 1;
+  min-width: 90px;
+}
+
+.no-filter-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.85rem;
+}
+
+.no-filter-fields .hint {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* 생성 모드 탭 */
+.generation-mode-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.mode-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+}
+
+.mode-tab:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.mode-tab.active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: white;
+}
+
+.schema-generation-content {
+  padding: 0;
+  max-height: 60vh;
+  overflow-y: auto;
 }
 
 .header-actions {
@@ -9327,6 +9665,36 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 .light-mode .viewer-header h2 {
   color: #1e293b !important;
+}
+
+/* 라이트 모드 필터 바 */
+.light-mode .filter-bar {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.06), rgba(147, 51, 234, 0.04)) !important;
+  border-bottom: 1px solid rgba(59, 130, 246, 0.15) !important;
+}
+
+.light-mode .filter-title {
+  color: #1e293b !important;
+}
+
+.light-mode .filter-field label {
+  color: #64748b !important;
+}
+
+.light-mode .filter-field input,
+.light-mode .filter-field select {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border: 1px solid rgba(0, 0, 0, 0.15) !important;
+  color: #1e293b !important;
+}
+
+.light-mode .no-filter-fields {
+  background: rgba(0, 0, 0, 0.05) !important;
+  color: #64748b !important;
+}
+
+.light-mode .no-filter-fields .hint {
+  color: #94a3b8 !important;
 }
 
 .light-mode .action-btn {
