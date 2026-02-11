@@ -7,6 +7,7 @@ import { ref, computed, watch } from 'vue'
 import type { OntologyNode, ReactExecutionResult } from '@/types'
 import { useSessionStore } from '@/stores/session'
 import { useOntologyStore } from '@/stores/ontology'
+import { useDatasourcesStore } from '@/stores/datasources'
 import { IconPlay, IconRefresh, IconDatabase, IconSearch, IconLink, IconCheck } from '@/components/icons'
 import ResultTable from '@/components/text2sql/ResultTable.vue'
 
@@ -22,6 +23,7 @@ const emit = defineEmits<{
 
 const sessionStore = useSessionStore()
 const ontologyStore = useOntologyStore()
+const datasourcesStore = useDatasourcesStore()
 
 // 상태
 const query = ref('')
@@ -77,12 +79,16 @@ async function executeQuery() {
   showInstanceConfig.value = false
   
   try {
+    const selectedDs = datasourcesStore.selectedDatasource
+    if (!selectedDs?.name) {
+      throw new Error('데이터소스를 선택해주세요')
+    }
     const response = await fetch('/api/gateway/text2sql/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         question: query.value,
-        db_key: 'default',
+        datasource: selectedDs.name,
         limit: 1000
       })
     })
@@ -149,6 +155,10 @@ async function createInstances() {
   successMessage.value = null
   
   try {
+    const selectedDs = datasourcesStore.selectedDatasource
+    if (!selectedDs?.name) {
+      throw new Error('데이터소스를 선택해주세요')
+    }
     // 1. Materialized View 생성 (선택된 경우)
     let viewFullName = null
     if (createMaterializedView.value && mvViewName.value) {
@@ -156,6 +166,7 @@ async function createInstances() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          datasource: selectedDs.name,
           view_name: mvViewName.value,
           sql_query: generatedSql.value,
           schema_name: 'public',

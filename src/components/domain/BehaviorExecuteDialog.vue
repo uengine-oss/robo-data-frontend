@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { IconX, IconDatabase } from '@/components/icons'
+import { useDatasourcesStore } from '@/stores/datasources'
 
 interface Behavior {
   name: string
@@ -32,6 +33,8 @@ const selectedInstance = ref<Record<string, any> | null>(null)
 const executionResult = ref<any>(null)
 const error = ref<string | null>(null)
 
+const datasourcesStore = useDatasourcesStore()
+
 // 결과 저장 관련
 const showSaveOptions = ref(false)
 const saveTableName = ref('')
@@ -50,11 +53,15 @@ async function loadInstances() {
   columns.value = []
   
   try {
+    const selectedDs = datasourcesStore.selectedDatasource
+    if (!selectedDs?.name) {
+      throw new Error('데이터소스를 선택해주세요')
+    }
     // SQL 실행하여 인스턴스 조회
     const response = await fetch('/api/gateway/text2sql/direct-sql/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sql: props.query })
+      body: JSON.stringify({ sql: props.query, datasource: selectedDs.name })
     })
     
     if (!response.ok) {
@@ -68,7 +75,13 @@ async function loadInstances() {
     for (const line of lines) {
       try {
         const chunk = JSON.parse(line)
-        if (chunk.type === 'columns' && chunk.columns) {
+        if (chunk.event === 'result') {
+          columns.value = chunk.columns || []
+          instances.value = chunk.rows || []
+        } else if (chunk.event === 'error') {
+          throw new Error(chunk.message || 'SQL 실행 오류')
+        } else if (chunk.type === 'columns' && chunk.columns) {
+          // legacy best-effort
           columns.value = chunk.columns
         } else if (chunk.type === 'row' && chunk.row) {
           instances.value.push(chunk.row)

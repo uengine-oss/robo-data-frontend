@@ -578,46 +578,6 @@ export interface PipelineControlResponse {
 }
 
 // ============================================================================
-// Ingest API
-// ============================================================================
-
-const INGEST_BASE_URL = `${API_GATEWAY_URL}/text2sql`
-
-export interface IngestRequest {
-  db_name?: string
-  schema?: string | null
-  clear_existing?: boolean
-}
-
-export interface IngestResponse {
-  message: string
-  status: string
-  tables_loaded: number
-  columns_loaded: number
-  fks_loaded: number
-}
-
-export const ingestApi = {
-  /**
-   * 데이터베이스 스키마를 Neo4j에 인제스천
-   */
-  async ingest(request: IngestRequest = {}): Promise<IngestResponse> {
-    const response = await fetch(`${INGEST_BASE_URL}/ingest`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request)
-    })
-    
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '')
-      throw new Error(errorText || `HTTP ${response.status}`)
-    }
-    
-    return response.json()
-  }
-}
-
-// ============================================================================
 // ROBO Schema API (ERD 모델링용 - Neo4j 직접 조회)
 // ============================================================================
 
@@ -910,8 +870,12 @@ export const text2sqlApi = {
   /**
    * 테이블 목록 조회
    */
-  async getTables(search?: string, schema?: string, limit: number = 50): Promise<Text2SqlTableInfo[]> {
+  async getTables(datasource: string, search?: string, schema?: string, limit: number = 50): Promise<Text2SqlTableInfo[]> {
+    if (!datasource) {
+      throw new Error('datasource is required')
+    }
     const params = new URLSearchParams()
+    params.append('datasource', datasource)
     if (search) params.append('search', search)
     if (schema) params.append('schema', schema)
     params.append('limit', limit.toString())
@@ -926,8 +890,12 @@ export const text2sqlApi = {
   /**
    * 테이블 컬럼 조회
    */
-  async getTableColumns(tableName: string, schema: string = 'public'): Promise<Text2SqlColumnInfo[]> {
+  async getTableColumns(datasource: string, tableName: string, schema: string = 'public'): Promise<Text2SqlColumnInfo[]> {
+    if (!datasource) {
+      throw new Error('datasource is required')
+    }
     const params = new URLSearchParams({ schema })
+    params.append('datasource', datasource)
     const response = await fetch(`${TEXT2SQL_BASE_URL}/meta/tables/${tableName}/columns?${params}`)
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`)
@@ -938,8 +906,12 @@ export const text2sqlApi = {
   /**
    * 컬럼 검색
    */
-  async searchColumns(search: string, limit: number = 50): Promise<Text2SqlColumnInfo[]> {
+  async searchColumns(datasource: string, search: string, limit: number = 50): Promise<Text2SqlColumnInfo[]> {
+    if (!datasource) {
+      throw new Error('datasource is required')
+    }
     const params = new URLSearchParams({ search, limit: limit.toString() })
+    params.append('datasource', datasource)
     const response = await fetch(`${TEXT2SQL_BASE_URL}/meta/columns?${params}`)
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`)
@@ -1121,6 +1093,24 @@ export const text2sqlApi = {
   },
 
   /**
+   * Text2SQL 결과 피드백 제출
+   */
+  async submitFeedback(payload: {
+    prompt_snapshot_id?: string
+    question?: string
+    react_run_id?: string
+    conversation_state?: string
+    original_sql: string
+    corrected_sql?: string | null
+    rating: number
+    notes?: string | null
+    approved: boolean
+    source?: string
+  }): Promise<{ feedback_id: string; message: string }> {
+    return postJson(`${TEXT2SQL_BASE_URL}/feedback`, payload, {})
+  },
+
+  /**
    * 헬스체크
    */
   async healthCheck(): Promise<unknown> {
@@ -1139,6 +1129,7 @@ export const text2sqlApi = {
    * Materialized View 생성
    */
   async createMaterializedView(request: {
+    datasource: string
     view_name: string
     schema_name?: string
     source_sql: string
@@ -1152,10 +1143,14 @@ export const text2sqlApi = {
     message: string
     error_message?: string
   }> {
+    if (!request.datasource) {
+      throw new Error('datasource is required')
+    }
     const response = await fetch(`${TEXT2SQL_BASE_URL}/direct-sql/materialized-view`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        datasource: request.datasource,
         view_name: request.view_name,
         schema_name: request.schema_name || 'public',
         source_sql: request.source_sql,
@@ -1174,6 +1169,7 @@ export const text2sqlApi = {
    */
   async refreshMaterializedView(
     viewName: string, 
+    datasource: string,
     schemaName: string = 'public'
   ): Promise<{
     status: string
@@ -1182,8 +1178,11 @@ export const text2sqlApi = {
     message: string
     error_message?: string
   }> {
+    if (!datasource) {
+      throw new Error('datasource is required')
+    }
     const response = await fetch(
-      `${TEXT2SQL_BASE_URL}/direct-sql/materialized-view/${viewName}/refresh?schema_name=${schemaName}`,
+      `${TEXT2SQL_BASE_URL}/direct-sql/materialized-view/${viewName}/refresh?datasource=${encodeURIComponent(datasource)}&schema_name=${schemaName}`,
       { method: 'POST' }
     )
     if (!response.ok) {
@@ -1208,8 +1207,28 @@ export const text2sqlApi = {
     count: number
     error_message?: string
   }> {
+  // NOTE: datasource is required by backend; call sites must provide it via the overload below.
+    throw new Error('Use listMaterializedViewsForDatasource(datasource, schemaName)')
+  },
+
+  async listMaterializedViewsForDatasource(datasource: string, schemaName: string = 'public'): Promise<{
+    status: string
+    views: Array<{
+      schema: string
+      name: string
+      owner: string
+      is_populated: boolean
+      size: string
+      description: string | null
+    }>
+    count: number
+    error_message?: string
+  }> {
+    if (!datasource) {
+      throw new Error('datasource is required')
+    }
     const response = await fetch(
-      `${TEXT2SQL_BASE_URL}/direct-sql/materialized-views?schema_name=${schemaName}`
+      `${TEXT2SQL_BASE_URL}/direct-sql/materialized-views?datasource=${encodeURIComponent(datasource)}&schema_name=${schemaName}`
     )
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`)

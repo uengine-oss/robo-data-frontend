@@ -13,8 +13,10 @@ import { IconX, IconRefresh, IconDatabase, IconSearch, IconCheck } from '@/compo
 import { ontologyApi } from '@/services/api'
 import Text2SqlTab from '@/components/text2sql/Text2SqlTab.vue'
 import { useReactStore } from '@/stores/text2sql'
+import { useDatasourcesStore } from '@/stores/datasources'
 
 const sessionStore = useSessionStore()
+const datasourcesStore = useDatasourcesStore()
 
 const props = defineProps<{
   node: OntologyNode
@@ -159,6 +161,10 @@ async function createInstances() {
   createSuccess.value = null
   
   try {
+    const selectedDs = datasourcesStore.selectedDatasource
+    if (!selectedDs?.name) {
+      throw new Error('데이터소스를 선택해주세요')
+    }
     // 1. Materialized View 생성 (선택된 경우)
     let viewFullName = null
     if (createMaterializedView.value && mvViewName.value) {
@@ -166,6 +172,7 @@ async function createInstances() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          datasource: selectedDs.name,
           view_name: mvViewName.value,
           sql_query: reactStore.finalSql,
           schema_name: 'public',

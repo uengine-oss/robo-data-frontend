@@ -350,8 +350,17 @@ function selectSource(source: DataSource) {
 }
 
 async function testConnection() {
-  if (!connectionName.value) return
-  testResult.value = await store.testConnection(connectionName.value)
+  if (!connectionName.value || !selectedType.value) return
+  
+  // 생성 폼에서는 입력된 파라미터로 직접 DB 연결 테스트
+  testResult.value = await store.testConnectionWithParams({
+    engine: selectedType.value.type,
+    host: formData.value.host || '',
+    port: formData.value.port ? Number(formData.value.port) : undefined,
+    user: formData.value.user || '',
+    password: formData.value.password || '',
+    database: formData.value.database || '',
+  })
 }
 
 // ========================================

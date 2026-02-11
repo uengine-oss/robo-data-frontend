@@ -2129,17 +2129,31 @@ async function fetchDataViaText2SQL(node: OntologyNode, nodeId: string) {
     }
   } else {
     // 기본 SELECT 쿼리
-    const tableName = node.dataSource.includes('.') 
-      ? node.dataSource  // 스키마.테이블 형식
-      : `"${node.dataSource}"`  // 테이블만 있는 경우
+    const dsTable = node.dataSource
+    if (!dsTable) {
+      throw new Error('데이터소스 테이블 바인딩이 없습니다')
+    }
+    const tableName = dsTable.includes('.')
+      ? dsTable // (스키마.)테이블 또는 datasource.schema.table 형식
+      : `\`${dsTable}\`` // 테이블만 있는 경우(최소한의 MySQL 호환 quoting)
     sql = `SELECT * FROM ${tableName} LIMIT 200`
   }
   
   try {
+    // MindsDB-only: datasource is mandatory for /direct-sql
+    const ds =
+      selectedDatasource.value && selectedDatasource.value !== '__ontology__'
+        ? selectedDatasource.value
+        : (node.dataSource || '').split('.').length === 3
+          ? (node.dataSource || '').split('.')[0]
+          : ''
+    if (!ds) {
+      throw new Error('데이터소스를 선택해주세요')
+    }
     const response = await fetch('/api/gateway/text2sql/direct-sql', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sql })
+      body: JSON.stringify({ sql, datasource: ds })
     })
     
     if (!response.ok) {
@@ -4419,6 +4433,10 @@ async function searchNodeDataSource() {
   selectedSearchResult.value = null
   
   try {
+    if (!selectedDatasource.value) {
+      nodeSearchStatus.value = '❌ 데이터소스를 선택해주세요'
+      return
+    }
     // Text2SQL /ask API 호출
     nodeSearchStatus.value = '🤖 AI가 SQL 쿼리 생성 중...'
     const response = await fetch('/api/gateway/text2sql/ask', {
@@ -4426,6 +4444,7 @@ async function searchNodeDataSource() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         question: nodeSearchQuery.value,
+        datasource: selectedDatasource.value,
         limit: 10
       })
     })
@@ -4679,7 +4698,10 @@ async function loadObjectTypes() {
   selectedSchema.value = ''
   
   try {
-    const response = await fetch('/api/gateway/text2sql/meta/objecttypes?limit=500')
+    if (!selectedDatasource.value) {
+      return
+    }
+    const response = await fetch(`/api/gateway/text2sql/meta/objecttypes?datasource=${encodeURIComponent(selectedDatasource.value)}&limit=500`)
     
     if (response.ok) {
       const objectTypes = await response.json()
@@ -4800,15 +4822,16 @@ async function confirmNodeDataSource() {
       // 테이블 컬럼 정보 가져오기
       try {
         const schema = table.schema || 'public'
-        // datasource가 있으면 쿼리 파라미터에 포함 (필요시)
-        const colUrl = `/api/gateway/text2sql/meta/tables/${table.name}/columns?schema=${schema}`
-        const colResponse = await fetch(colUrl)
-        if (colResponse.ok) {
-          const columns = await colResponse.json()
-          candidate.columns = columns.map((c: any) => c.name)
-          console.log(`✅ 컬럼 정보 조회 성공: ${candidate.columns.length}개 컬럼 (테이블: ${cleanTableName})`)
-        } else {
-          console.warn('컬럼 정보 조회 실패:', await colResponse.text())
+        if (selectedDatasource.value !== '__ontology__') {
+          const colUrl = `/api/gateway/text2sql/meta/tables/${table.name}/columns?datasource=${encodeURIComponent(selectedDatasource.value)}&schema=${schema}`
+          const colResponse = await fetch(colUrl)
+          if (colResponse.ok) {
+            const columns = await colResponse.json()
+            candidate.columns = columns.map((c: any) => c.name)
+            console.log(`✅ 컬럼 정보 조회 성공: ${candidate.columns.length}개 컬럼 (테이블: ${cleanTableName})`)
+          } else {
+            console.warn('컬럼 정보 조회 실패:', await colResponse.text())
+          }
         }
       } catch (err) {
         console.warn('컬럼 정보 조회 오류:', err)

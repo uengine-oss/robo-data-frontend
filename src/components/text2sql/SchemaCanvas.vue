@@ -1360,7 +1360,7 @@ async function handleRefresh() {
                 <option :value="100">100</option>
               </select>
             </label>
-            <button class="refresh-btn" @click="store.queryTableData(store.tableDataPanel.tableName, store.tableDataPanel.schema, store.tableDataPanel.limit)" title="새로고침">
+            <button class="refresh-btn" @click="store.queryTableData(store.tableDataPanel.tableName, store.tableDataPanel.schema, store.tableDataPanel.limit, store.tableDataPanel.datasource)" title="새로고침">
               <IconRefresh :size="14" />
             </button>
             <button class="close-btn" @click="store.closeTableDataPanel" title="닫기">×</button>

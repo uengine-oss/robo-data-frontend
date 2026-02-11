@@ -6,6 +6,13 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { text2sqlApi } from '@/services/api'
+import { useDatasourcesStore } from '@/stores/datasources'
+import {
+  buildProgressHeadlineKo,
+  estimateProgressPercent,
+  formatCountsSummaryKo,
+  getText2SqlStageLabelKo
+} from '@/utils/text2sqlProgress'
 import type {
   ReactStatus,
   ReactPhase,
@@ -50,10 +57,16 @@ export const useReactStore = defineStore('react', () => {
   const finalSql = ref<string | null>(null)
   const validatedSql = ref<string | null>(null)
   const executionResult = ref<ReactExecutionResult | null>(null)
+  // UI feedback gating (backend query-quality gate)
+  const fromCache = ref<boolean>(false)
+  const qualityGate = ref<ReactResponseModel['quality_gate'] | null>(null)
+  const feedbackRequired = ref<boolean>(false)
   const collectedMetadata = ref<string>('')
   const warnings = ref<string[]>([])
   const error = ref<string | null>(null)
   const sessionState = ref<string | null>(null)
+  // completed 이후 follow-up 연속질문용 (ask_user session_state와 분리)
+  const conversationState = ref<string | null>(null)
   const questionToUser = ref<string | null>(null)
   const remainingToolCalls = ref<number>(0)
   const abortController = ref<AbortController | null>(null)
@@ -79,6 +92,163 @@ export const useReactStore = defineStore('react', () => {
   const liveByIteration = ref<Record<number, LiveIterationState>>({})
   const debugStreamRawXmlTokens = ref<boolean>(false)
 
+  // ============================================================================
+  // 진행 상황(문맥 수집/보강) - 비기술 사용자용
+  // ============================================================================
+
+  type PipelineStageStatus = 'start' | 'done' | 'error'
+  interface PipelineStageState {
+    pipeline: string
+    stage: string
+    seq: number
+    status: PipelineStageStatus
+    started_at_ms?: number
+    done_at_ms?: number
+    elapsed_ms?: number
+    counts?: Record<string, number>
+    notes?: string[]
+    error?: string
+  }
+
+  interface LightQueryProgressState {
+    index: number
+    total: number
+    pass: number
+    fail: number
+  }
+
+  interface ControllerCandidateProgressState {
+    index: number
+    total: number
+    pass: number
+    fail: number
+  }
+
+  interface ControllerRepairProgressState {
+    index: number
+    total: number
+    pass: number
+    fail: number
+  }
+
+  interface ProgressLogItem {
+    ts_ms: number
+    kind:
+      | 'prefetch'
+      | 'prefetch_error'
+      | 'context_refresh'
+      | 'context_refresh_error'
+      | 'pipeline_stage'
+      | 'pipeline_item'
+    message: string
+    details?: Record<string, unknown>
+  }
+
+  // key: `${pipeline}:${stage}`
+  const pipelineStages = ref<Record<string, PipelineStageState>>({})
+  const pipelineStageOrder = ref<string[]>([])
+  const lightQueryProgress = ref<LightQueryProgressState | null>(null)
+  const controllerCandidateProgress = ref<ControllerCandidateProgressState | null>(null)
+  const controllerRepairProgress = ref<ControllerRepairProgressState | null>(null)
+  // UX: sticky counts snapshot to avoid flicker when stages transition quickly.
+  // This holds the latest known counts across stages within a single run.
+  const stickyCounts = ref<Record<string, number>>({})
+  const progressLog = ref<ProgressLogItem[]>([])
+  const progressLastUpdatedMs = ref<number>(0)
+  const pipelineStageOrderFixed = [
+    'embedding',
+    'enrich',
+    'table_search',
+    'column_search',
+    'fk_relationships',
+    'resolved_values',
+    'suggestions',
+    'light_queries',
+    'controller_requirements',
+    'controller_candidates',
+    'controller_validate',
+    'controller_repair'
+  ]
+  const pipelineDetailsMinElapsedMs = 500
+  // UX: count chips can get too noisy/wide when many appear (sticky).
+  // Keep only a small “primary” set by default; allow the UI to show all in details.
+  const progressDetailMaxPrimary = 3
+  const _countChipLabelByKey: Record<string, string> = {
+    table_candidates: '후보 테이블',
+    selected_tables: '선정 테이블',
+    column_candidates: '후보 컬럼',
+    resolved_values: '해결된 값',
+    fk_relationships: '관계',
+    light_queries_total: '샘플 쿼리',
+    light_queries_pass: '샘플 통과',
+    requirements_total: '요구사항',
+    candidates_total: '후보 답안',
+    repair_rounds_total: '수정 라운드'
+  }
+  const _countChipDefaultOrder: string[] = [
+    'table_candidates',
+    'selected_tables',
+    'column_candidates',
+    'resolved_values',
+    'fk_relationships',
+    'light_queries_pass',
+    'light_queries_total',
+    'requirements_total',
+    'candidates_total',
+    'repair_rounds_total'
+  ]
+  const _stageToPreferredCountKeys: Record<string, string[]> = {
+    table_search: ['table_candidates', 'selected_tables'],
+    column_search: ['column_candidates', 'selected_tables'],
+    fk_relationships: ['fk_relationships'],
+    resolved_values: ['resolved_values'],
+    suggestions: ['selected_tables', 'column_candidates'],
+    light_queries: ['light_queries_pass', 'light_queries_total'],
+    controller_requirements: ['requirements_total'],
+    controller_candidates: ['candidates_total'],
+    controller_validate: ['candidates_total'],
+    controller_repair: ['repair_rounds_total']
+  }
+
+  function _formatCountChip(counts: Record<string, number>, key: string): string | null {
+    const label = _countChipLabelByKey[key]
+    if (!label) return null
+    const v = counts?.[key]
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return null
+    return `${label} ${v}개`
+  }
+
+  function _buildPrimaryCountChips(counts: Record<string, number>, stage: string | null): string[] {
+    const c = counts && typeof counts === 'object' ? counts : {}
+    const s = String(stage || '').trim()
+
+    const preferred = _stageToPreferredCountKeys[s] || []
+    const out: string[] = []
+    const used = new Set<string>()
+
+    for (const k of preferred) {
+      const chip = _formatCountChip(c, k)
+      if (chip) {
+        out.push(chip)
+        used.add(k)
+        if (out.length >= progressDetailMaxPrimary) return out
+      }
+    }
+
+    // Fill the remaining slots from the default order for stability.
+    for (const k of _countChipDefaultOrder) {
+      if (used.has(k)) continue
+      const chip = _formatCountChip(c, k)
+      if (chip) {
+        out.push(chip)
+        used.add(k)
+        if (out.length >= progressDetailMaxPrimary) break
+      }
+    }
+
+    return out
+  }
+
   // 일시정지 상태
   const isPaused = ref<boolean>(false)
   const pausedSessionState = ref<string | null>(null)
@@ -94,6 +264,123 @@ export const useReactStore = defineStore('react', () => {
   )
   const latestPartialSql = computed(() => latestStep.value?.partial_sql || partialSql.value)
 
+  const pipelineStageList = computed(() => {
+    const out: PipelineStageState[] = []
+    for (const key of pipelineStageOrder.value) {
+      const st = pipelineStages.value[key]
+      if (st) out.push(st)
+    }
+    return out
+  })
+
+  const _alwaysShowStages = new Set(['light_queries', 'controller_validate', 'controller_repair'])
+
+  const visiblePipelineStageList = computed(() => {
+    const all = pipelineStageList.value
+    if (!all.length) return []
+
+    const currentStage = currentPipelineStage.value?.stage || null
+    const minMs = pipelineDetailsMinElapsedMs
+
+    const visible = all.filter(st => {
+      if (!st) return false
+      if (st.status === 'error') return true
+      if (st.status === 'start') return true // always show current in-progress
+      if (_alwaysShowStages.has(st.stage)) return true // user-facing “검증/안전검증”은 항상 유의미
+      if (typeof st.elapsed_ms === 'number') return st.elapsed_ms >= minMs
+      // If elapsed is missing, default to hiding unless it’s the current stage.
+      if (currentStage && st.stage === currentStage) return true
+      return false
+    })
+
+    // Never show an empty list if we have progress; keep the last known stage.
+    if (!visible.length) return [all[all.length - 1]]
+    return visible
+  })
+
+  const hiddenPipelineStageCount = computed(() => {
+    const total = pipelineStageList.value.length
+    const visible = visiblePipelineStageList.value.length
+    return Math.max(0, total - visible)
+  })
+
+  const currentPipelineStage = computed(() => {
+    // Prefer running stage; else last stage in order.
+    const ordered = pipelineStageList.value
+    for (let i = ordered.length - 1; i >= 0; i--) {
+      if (ordered[i]?.status === 'start') return ordered[i]
+    }
+    return ordered.length ? ordered[ordered.length - 1] : null
+  })
+
+  const progressHeadline = computed(() => {
+    const st = currentPipelineStage.value
+    if (st) {
+      // Reuse headline format (i/N) for both light_queries and controller candidate/repair progress.
+      const light =
+        st.pipeline === 'build_sql_context' && st.stage === 'light_queries'
+          ? (lightQueryProgress.value ? { index: lightQueryProgress.value.index, total: lightQueryProgress.value.total } : null)
+          : st.pipeline === 'controller' && st.stage === 'controller_validate'
+            ? (controllerCandidateProgress.value ? { index: controllerCandidateProgress.value.index, total: controllerCandidateProgress.value.total } : null)
+            : st.pipeline === 'controller' && st.stage === 'controller_repair'
+              ? (controllerRepairProgress.value ? { index: controllerRepairProgress.value.index, total: controllerRepairProgress.value.total } : null)
+              : null
+      return buildProgressHeadlineKo({
+        stage: st.stage,
+        status: st.status,
+        elapsed_ms: st.elapsed_ms,
+        light
+      })
+    }
+    // Fallback for older servers (no pipeline_stage)
+    return isRunning.value ? '문맥을 수집하는 중' : ''
+  })
+
+  const progressDetailsAll = computed(() => {
+    // Use sticky snapshot to avoid “appears then disappears” flicker.
+    return formatCountsSummaryKo(stickyCounts.value)
+  })
+
+  const progressDetails = computed(() => {
+    // Primary chips only (avoid very long chip rows). Full list is available via progressDetailsAll.
+    return _buildPrimaryCountChips(stickyCounts.value, currentPipelineStage.value?.stage || null)
+  })
+
+  const progressDetailsHiddenCount = computed(() => {
+    return Math.max(0, progressDetailsAll.value.length - progressDetails.value.length)
+  })
+
+  const estimatedProgressPercent = computed(() => {
+    // If no pipeline info yet, keep it low but non-zero to reduce “stuck” feeling.
+    if (!pipelineStageOrder.value.length && isRunning.value) return 1
+
+    const st = currentPipelineStage.value
+    const currentStage = st?.stage || null
+    const stagesByName: Record<string, { status?: 'start' | 'done' | 'error' } | undefined> = {}
+    for (const stageName of pipelineStageOrderFixed) {
+      const pipeline = stageName.startsWith('controller_') ? 'controller' : 'build_sql_context'
+      const key = `${pipeline}:${stageName}`
+      stagesByName[stageName] = pipelineStages.value[key]
+    }
+    const pct = estimateProgressPercent({
+      stageOrder: pipelineStageOrderFixed,
+      stagesByName,
+      currentStage,
+      light:
+        currentStage === 'light_queries'
+          ? (lightQueryProgress.value ? { index: lightQueryProgress.value.index, total: lightQueryProgress.value.total } : null)
+          : currentStage === 'controller_validate'
+            ? (controllerCandidateProgress.value ? { index: controllerCandidateProgress.value.index, total: controllerCandidateProgress.value.total } : null)
+            : currentStage === 'controller_repair'
+              ? (controllerRepairProgress.value ? { index: controllerRepairProgress.value.index, total: controllerRepairProgress.value.total } : null)
+              : null,
+      inProgressPartial: 0.3
+    })
+    // Avoid showing 100% while running.
+    if (isRunning.value) return Math.min(99, Math.max(1, pct))
+    return pct
+  })
+
   // 내부 함수
   function resetState() {
     steps.value = []
@@ -101,10 +388,14 @@ export const useReactStore = defineStore('react', () => {
     finalSql.value = null
     validatedSql.value = null
     executionResult.value = null
+    fromCache.value = false
+    qualityGate.value = null
+    feedbackRequired.value = false
     collectedMetadata.value = ''
     warnings.value = []
     error.value = null
     sessionState.value = null
+    // NOTE: conversationState는 follow-up을 위해 유지한다.
     questionToUser.value = null
     remainingToolCalls.value = 0
     currentPhase.value = 'idle'
@@ -113,6 +404,15 @@ export const useReactStore = defineStore('react', () => {
     streamingText.value = ''
     isStreaming.value = false
     liveByIteration.value = {}
+
+    pipelineStages.value = {}
+    pipelineStageOrder.value = []
+    lightQueryProgress.value = null
+    controllerCandidateProgress.value = null
+    controllerRepairProgress.value = null
+    stickyCounts.value = {}
+    progressLog.value = []
+    progressLastUpdatedMs.value = 0
   }
 
   function cancelOngoing() {
@@ -142,6 +442,15 @@ export const useReactStore = defineStore('react', () => {
     const resumeSessionState = pausedSessionState.value || sessionState.value
     pausedSessionState.value = null
     
+    const datasourcesStore = useDatasourcesStore()
+    const selectedDs = datasourcesStore.selectedDatasource
+    if (!selectedDs?.name) {
+      error.value = '데이터소스를 선택해주세요'
+      status.value = 'error'
+      currentPhase.value = 'idle'
+      return
+    }
+
     const controller = new AbortController()
     abortController.value = controller
     
@@ -154,8 +463,10 @@ export const useReactStore = defineStore('react', () => {
       await consumeStream(
         {
           question: currentQuestion.value,
+          datasource: selectedDs.name,
           session_state: resumeSessionState,
           user_response: feedbackText || undefined,
+          conversation_state: conversationState.value,
         },
         controller
       )
@@ -167,6 +478,8 @@ export const useReactStore = defineStore('react', () => {
       await consumeStream(
         {
           question: enhancedQuestion,
+          datasource: selectedDs.name,
+          conversation_state: conversationState.value,
         },
         controller
       )
@@ -197,6 +510,9 @@ export const useReactStore = defineStore('react', () => {
     partialSql.value = response.partial_sql
     remainingToolCalls.value = response.remaining_tool_calls
     sessionState.value = response.session_state ?? null
+    if (response.conversation_state !== undefined) {
+      conversationState.value = response.conversation_state ?? null
+    }
     questionToUser.value = response.question_to_user ?? null
     warnings.value = response.warnings ?? []
     if (response.final_sql !== undefined) {
@@ -206,6 +522,21 @@ export const useReactStore = defineStore('react', () => {
       validatedSql.value = response.validated_sql ?? null
     }
     executionResult.value = response.execution_result ?? null
+    if (typeof response.from_cache === 'boolean') {
+      fromCache.value = response.from_cache
+    } else {
+      fromCache.value = false
+    }
+    if (response.quality_gate !== undefined) {
+      qualityGate.value = response.quality_gate ?? null
+    } else {
+      qualityGate.value = null
+    }
+    if (typeof response.feedback_required === 'boolean') {
+      feedbackRequired.value = response.feedback_required
+    } else {
+      feedbackRequired.value = false
+    }
   }
 
   function ensureLiveIteration(iter: number) {
@@ -224,6 +555,31 @@ export const useReactStore = defineStore('react', () => {
     liveByIteration.value[iteration].exploringOpen = open
   }
 
+  function _nowMs(): number {
+    return Date.now()
+  }
+
+  function _pushProgressLog(item: Omit<ProgressLogItem, 'ts_ms'> & { ts_ms?: number }) {
+    const ts = typeof item.ts_ms === 'number' ? item.ts_ms : _nowMs()
+    progressLog.value.push({ ...item, ts_ms: ts })
+    // cap
+    if (progressLog.value.length > 200) {
+      progressLog.value = progressLog.value.slice(-200)
+    }
+    progressLastUpdatedMs.value = ts
+  }
+
+  function _upsertPipelineStage(next: PipelineStageState) {
+    const key = `${next.pipeline}:${next.stage}`
+    const prev = pipelineStages.value[key]
+    if (!prev) {
+      pipelineStageOrder.value.push(key)
+      pipelineStages.value[key] = { ...next }
+      return
+    }
+    pipelineStages.value[key] = { ...prev, ...next }
+  }
+
   async function consumeStream(request: ReactRequest, controller: AbortController) {
     try {
       for await (const event of text2sqlApi.reactStream(request, { signal: controller.signal })) {
@@ -238,6 +594,196 @@ export const useReactStore = defineStore('react', () => {
               streamingText.value += event.token
               currentIteration.value = event.iteration
             }
+            break
+          }
+          case 'prefetch': {
+            _pushProgressLog({
+              kind: 'prefetch',
+              message: `문맥 수집 완료 (${(event.elapsed_ms / 1000).toFixed(1)}초)`,
+              details: {
+                tool_name: event.tool_name,
+                remaining_tool_calls: event.remaining_tool_calls
+              }
+            })
+            break
+          }
+          case 'prefetch_error': {
+            _pushProgressLog({
+              kind: 'prefetch_error',
+              message: `문맥 수집 중 오류: ${event.error}`,
+              details: { tool_name: event.tool_name, elapsed_ms: event.elapsed_ms }
+            })
+            break
+          }
+          case 'context_refresh': {
+            const delta = event.context_delta || {}
+            const deltaParts: string[] = []
+            if (typeof delta.tables_added === 'number') deltaParts.push(`테이블 +${delta.tables_added}`)
+            if (typeof delta.values_added === 'number') deltaParts.push(`값 +${delta.values_added}`)
+            if (typeof delta.relationships_added === 'number') deltaParts.push(`관계 +${delta.relationships_added}`)
+
+            const suffix = deltaParts.length ? ` · ${deltaParts.join(', ')}` : ''
+            const idx = typeof event.enrichment_index === 'number' ? `(${event.enrichment_index})` : ''
+            _pushProgressLog({
+              kind: 'context_refresh',
+              message: `문맥 보강 완료${idx} (${(event.elapsed_ms / 1000).toFixed(1)}초)${suffix}`,
+              details: {
+                tool_name: event.tool_name,
+                remaining_tool_calls: event.remaining_tool_calls,
+                mode: event.mode
+              }
+            })
+            break
+          }
+          case 'context_refresh_error': {
+            _pushProgressLog({
+              kind: 'context_refresh_error',
+              message: `문맥 보강 중 오류: ${event.error}`,
+              details: {
+                tool_name: event.tool_name,
+                mode: event.mode
+              }
+            })
+            break
+          }
+          case 'pipeline_stage': {
+            const ts = typeof event.ts_ms === 'number' ? event.ts_ms : _nowMs()
+            // A new build_sql_context run starts from embedding(seq=1). Reset progress state to avoid noisy duplicates.
+            if (event.pipeline === 'build_sql_context' && event.stage === 'embedding' && event.status === 'start' && event.seq === 1) {
+              pipelineStages.value = {}
+              pipelineStageOrder.value = []
+              lightQueryProgress.value = null
+              controllerCandidateProgress.value = null
+              controllerRepairProgress.value = null
+              stickyCounts.value = {}
+              progressLog.value = []
+            }
+            const key = `${event.pipeline}:${event.stage}`
+            const prev = pipelineStages.value[key]
+            _upsertPipelineStage({
+              pipeline: event.pipeline,
+              stage: event.stage,
+              seq: event.seq,
+              status: event.status,
+              // Preserve started_at_ms on repeated "start" events (heartbeat).
+              started_at_ms: event.status === 'start' ? (prev?.started_at_ms ?? ts) : prev?.started_at_ms,
+              done_at_ms: event.status === 'done' || event.status === 'error' ? ts : prev?.done_at_ms,
+              elapsed_ms: typeof event.elapsed_ms === 'number' ? event.elapsed_ms : prev?.elapsed_ms,
+              counts: event.counts || prev?.counts,
+              notes: event.notes || prev?.notes,
+              error: event.error || prev?.error
+            })
+
+            // Merge counts into sticky snapshot (best-effort).
+            if (event.counts && typeof event.counts === 'object') {
+              const next: Record<string, number> = { ...stickyCounts.value }
+              for (const [k, v] of Object.entries(event.counts)) {
+                if (typeof v === 'number' && Number.isFinite(v) && v >= 0) {
+                  next[String(k)] = v
+                }
+              }
+              stickyCounts.value = next
+            }
+
+            _pushProgressLog({
+              kind: 'pipeline_stage',
+              ts_ms: ts,
+              message:
+                event.status === 'start'
+                  ? `${getText2SqlStageLabelKo(event.stage)}…`
+                  : event.status === 'done'
+                    ? `${getText2SqlStageLabelKo(event.stage)} 완료`
+                    : `${getText2SqlStageLabelKo(event.stage)} 오류`,
+              details: {
+                stage: event.stage,
+                status: event.status,
+                elapsed_ms: event.elapsed_ms,
+                counts: event.counts,
+                notes: event.notes,
+                error: event.error
+              }
+            })
+            break
+          }
+          case 'pipeline_item': {
+            const ts = typeof event.ts_ms === 'number' ? event.ts_ms : _nowMs()
+            if (String(event.pipeline) === 'build_sql_context' && String(event.stage) === 'light_queries') {
+              const total = Math.max(1, Number(event.total || 1))
+              const idx = Math.max(1, Number(event.index || 1))
+              const prev = lightQueryProgress.value || { index: 0, total, pass: 0, fail: 0 }
+              const verdict = String(event.verdict || '').toUpperCase()
+              const passInc = verdict === 'PASS' ? 1 : 0
+              const failInc = verdict === 'FAIL' ? 1 : 0
+              const nextLq = {
+                index: idx,
+                total,
+                pass: prev.pass + passInc,
+                fail: prev.fail + failInc
+              }
+              lightQueryProgress.value = nextLq
+              // Keep sticky counts stable across stage transitions.
+              stickyCounts.value = {
+                ...stickyCounts.value,
+                light_queries_total: nextLq.total,
+                light_queries_pass: nextLq.pass
+              }
+            } else if (
+              String(event.pipeline) === 'controller' &&
+              String(event.stage) === 'controller_validate' &&
+              String(event.item_type) === 'candidate'
+            ) {
+              const total = Math.max(1, Number(event.total || 1))
+              const idx = Math.max(1, Number(event.index || 1))
+              const prev = controllerCandidateProgress.value || { index: 0, total, pass: 0, fail: 0 }
+              const verdict = String(event.verdict || '').toUpperCase()
+              const passInc = verdict === 'PASS' ? 1 : 0
+              const failInc = verdict === 'FAIL' ? 1 : 0
+              const nextCand = {
+                index: idx,
+                total,
+                pass: prev.pass + passInc,
+                fail: prev.fail + failInc
+              }
+              controllerCandidateProgress.value = nextCand
+              stickyCounts.value = {
+                ...stickyCounts.value,
+                candidates_total: nextCand.total
+              }
+            } else if (
+              String(event.pipeline) === 'controller' &&
+              String(event.stage) === 'controller_repair' &&
+              String(event.item_type) === 'repair_round'
+            ) {
+              const total = Math.max(1, Number(event.total || 1))
+              const idx = Math.max(1, Number(event.index || 1))
+              const prev = controllerRepairProgress.value || { index: 0, total, pass: 0, fail: 0 }
+              const verdict = String(event.verdict || '').toUpperCase()
+              const passInc = verdict === 'PASS' ? 1 : 0
+              const failInc = verdict === 'FAIL' ? 1 : 0
+              const nextRepair = {
+                index: idx,
+                total,
+                pass: prev.pass + passInc,
+                fail: prev.fail + failInc
+              }
+              controllerRepairProgress.value = nextRepair
+              stickyCounts.value = {
+                ...stickyCounts.value,
+                repair_rounds_total: nextRepair.total
+              }
+            }
+            _pushProgressLog({
+              kind: 'pipeline_item',
+              ts_ms: ts,
+              message: `${getText2SqlStageLabelKo(event.stage)} (${event.index}/${event.total})`,
+              details: {
+                stage: event.stage,
+                item_type: event.item_type,
+                verdict: event.verdict,
+                row_count: event.row_count,
+                elapsed_ms: event.elapsed_ms
+              }
+            })
             break
           }
           case 'section_delta': {
@@ -394,7 +940,6 @@ export const useReactStore = defineStore('react', () => {
             console.log('Cache hit:', event.message, 'Hit count:', event.hit_count)
             break
           }
-          case 'complete':
           case 'completed': {
             applyResponse(event.response)
             status.value = 'completed'
@@ -407,8 +952,17 @@ export const useReactStore = defineStore('react', () => {
             currentPhase.value = 'idle'
             return
           }
-          default:
+          default: {
+            // Backward/forward compatibility: some servers may send "complete".
+            const anyEv = event as unknown as { event?: string; response?: ReactResponseModel }
+            if (anyEv?.event === 'complete' && anyEv.response) {
+              applyResponse(anyEv.response)
+              status.value = 'completed'
+              currentPhase.value = 'idle'
+              return
+            }
             break
+          }
         }
       }
     } catch (err: unknown) {
@@ -437,7 +991,6 @@ export const useReactStore = defineStore('react', () => {
         columns: Array<{ name: string; type: string }>
         description?: string
       }>
-      preferFormula?: boolean  // 계리수식/공식 우선 검색 모드
     }
   ) {
     cancelOngoing()
@@ -446,20 +999,41 @@ export const useReactStore = defineStore('react', () => {
     status.value = 'running'
     error.value = null
 
+    const datasourcesStore = useDatasourcesStore()
+    // 자동 로드/선택 fallback: DataSources 탭을 거치지 않아도 동작하도록 보장
+    if (!datasourcesStore.selectedDatasource) {
+      if (!datasourcesStore.hasDatasources) {
+        await datasourcesStore.fetchDatasources()
+      }
+      if (!datasourcesStore.selectedDatasource && datasourcesStore.datasources.length > 0) {
+        await datasourcesStore.selectDatasource(datasourcesStore.datasources[0])
+      }
+    }
+    const selectedDs = datasourcesStore.selectedDatasource
+    if (!selectedDs?.name) {
+      error.value = '데이터소스를 선택해주세요. 데이터소스 관리 탭에서 데이터소스를 등록해주세요.'
+      status.value = 'error'
+      currentPhase.value = 'idle'
+      return
+    }
+
     const controller = new AbortController()
     abortController.value = controller
     debugStreamRawXmlTokens.value = !!options?.debugStreamRawXmlTokens
+    const isFollowup = !!conversationState.value
     await consumeStream(
       {
         question,
+        datasource: selectedDs.name,
         max_tool_calls: options?.maxToolCalls,
         max_sql_seconds: options?.maxSqlSeconds,
         debug_stream_xml_tokens: debugStreamRawXmlTokens.value,
-        use_cache: options?.useCache ?? true,
+        // 정책: follow-up 연속질문에서는 캐시 사용하지 않음
+        use_cache: isFollowup ? false : (options?.useCache ?? true),
+        conversation_state: conversationState.value,
         schema_filter: options?.schemaFilter,
         object_type_only: options?.objectTypeOnly,
-        linked_object_types: options?.linkedObjectTypes,  // 백엔드에 전달
-        prefer_formula: options?.preferFormula  // 계리수식 우선 검색
+        linked_object_types: options?.linkedObjectTypes  // 백엔드에 전달
       },
       controller
     )
@@ -477,13 +1051,24 @@ export const useReactStore = defineStore('react', () => {
     error.value = null
     questionToUser.value = null
 
+    const datasourcesStore = useDatasourcesStore()
+    const selectedDs = datasourcesStore.selectedDatasource
+    if (!selectedDs?.name) {
+      error.value = '데이터소스를 선택해주세요'
+      status.value = 'error'
+      currentPhase.value = 'idle'
+      return
+    }
+
     const controller = new AbortController()
     abortController.value = controller
     await consumeStream(
       {
         question: currentQuestion.value,
+        datasource: selectedDs.name,
         session_state: sessionState.value,
         user_response: userResponse,
+        conversation_state: conversationState.value,
         debug_stream_xml_tokens: debugStreamRawXmlTokens.value
       },
       controller
@@ -502,7 +1087,13 @@ export const useReactStore = defineStore('react', () => {
     cancelOngoing()
     resetState()
     currentQuestion.value = ''
+    conversationState.value = null
     status.value = 'idle'
+  }
+
+  // 새 대화(새 쿼리) 시작 시 명시적으로 conversationState 초기화
+  function clearConversationState() {
+    conversationState.value = null
   }
 
   return {
@@ -513,10 +1104,14 @@ export const useReactStore = defineStore('react', () => {
     finalSql,
     validatedSql,
     executionResult,
+    fromCache,
+    qualityGate,
+    feedbackRequired,
     collectedMetadata,
     warnings,
     error,
     sessionState,
+    conversationState,
     questionToUser,
     remainingToolCalls,
     // Phase 상태
@@ -530,6 +1125,18 @@ export const useReactStore = defineStore('react', () => {
     liveByIteration,
     debugStreamRawXmlTokens,
     setExploringOpen,
+    // 진행 상황(문맥 수집/보강)
+    pipelineStageList,
+    visiblePipelineStageList,
+    hiddenPipelineStageCount,
+    currentPipelineStage,
+    progressHeadline,
+    progressDetails,
+    progressDetailsAll,
+    progressDetailsHiddenCount,
+    estimatedProgressPercent,
+    progressLog,
+    progressLastUpdatedMs,
     // 일시정지 상태
     isPaused,
     pauseFeedback,
@@ -545,6 +1152,7 @@ export const useReactStore = defineStore('react', () => {
     continueWithResponse,
     cancel,
     clear,
+    clearConversationState,
     pause,
     resume
   }
@@ -601,8 +1209,8 @@ export const useHistoryStore = defineStore('text2sql-history', () => {
   const error = ref<string | null>(null)
   const selectedItem = ref<QueryHistoryItem | null>(null)
 
-  // API base URL
-  const API_BASE = 'http://localhost:9000/text2sql/history'
+  // Use gateway-relative path to avoid localhost/127.0.0.1 cross-origin issues.
+  const API_BASE = '/api/gateway/text2sql/history'
 
   // 히스토리 목록 불러오기
   async function fetchHistory(options?: { page?: number; search?: string; status?: string }) {
@@ -754,7 +1362,12 @@ export const useText2SqlSchemaStore = defineStore('text2sql-schema', () => {
     error.value = null
 
     try {
-      tables.value = await text2sqlApi.getTables(search, schema)
+      const datasourcesStore = useDatasourcesStore()
+      const selectedDs = datasourcesStore.selectedDatasource
+      if (!selectedDs?.name) {
+        throw new Error('데이터소스를 선택해주세요')
+      }
+      tables.value = await text2sqlApi.getTables(selectedDs.name, search, schema)
     } catch (err: unknown) {
       // 에러 상태만 저장하고 다시 throw하지 않음 (조용히 처리)
       error.value = err instanceof Error ? err.message : 'Failed to load tables'
@@ -771,7 +1384,12 @@ export const useText2SqlSchemaStore = defineStore('text2sql-schema', () => {
     error.value = null
 
     try {
-      selectedTableColumns.value = await text2sqlApi.getTableColumns(tableName, schema)
+      const datasourcesStore = useDatasourcesStore()
+      const selectedDs = datasourcesStore.selectedDatasource
+      if (!selectedDs?.name) {
+        throw new Error('데이터소스를 선택해주세요')
+      }
+      selectedTableColumns.value = await text2sqlApi.getTableColumns(selectedDs.name, tableName, schema)
       allColumnsMap.value[tableName] = selectedTableColumns.value
       return selectedTableColumns.value
     } catch (err: unknown) {
@@ -784,9 +1402,14 @@ export const useText2SqlSchemaStore = defineStore('text2sql-schema', () => {
 
   // 모든 테이블의 컬럼 로드 (ERD용)
   async function loadAllColumns() {
+    const datasourcesStore = useDatasourcesStore()
+    const selectedDs = datasourcesStore.selectedDatasource
+    if (!selectedDs?.name) {
+      throw new Error('데이터소스를 선택해주세요')
+    }
     for (const table of tables.value) {
       try {
-        const columns = await text2sqlApi.getTableColumns(table.name, table.schema)
+        const columns = await text2sqlApi.getTableColumns(selectedDs.name, table.name, table.schema)
         allColumnsMap.value[table.name] = columns
       } catch (err) {
         console.error(`Failed to load columns for ${table.name}:`, err)

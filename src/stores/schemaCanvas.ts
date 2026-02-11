@@ -269,6 +269,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     isOpen: boolean
     tableName: string
     schema: string
+    datasource: string
     columns: string[]
     rows: any[][]
     rowCount: number
@@ -286,6 +287,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     isOpen: false,
     tableName: '',
     schema: '',
+    datasource: '',
     columns: [],
     rows: [],
     rowCount: 0,
@@ -752,7 +754,31 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     isSemanticSearching.value = false
   }
   
-  async function loadTableColumns(tableName: string, schema: string = ''): Promise<Text2SqlColumnInfo[]> {
+  function getTableColumnsCacheKey(tableName: string, schema?: string, datasource?: string): string {
+    const ds = (datasource || '').trim()
+    const sch = (schema || '').trim()
+    return `${ds}::${sch}::${tableName}`
+  }
+
+  async function loadTableColumns(
+    tableName: string,
+    schema: string = '',
+    datasource: string = ''
+  ): Promise<Text2SqlColumnInfo[]> {
+    const matchedTable = allTables.value.find(
+      t =>
+        t.name === tableName &&
+        (!schema || (t.schema || 'public') === schema) &&
+        (!datasource || (t.datasource || '') === datasource)
+    ) || allTables.value.find(t => t.name === tableName)
+
+    const resolvedSchema = (schema || matchedTable?.schema || 'public').trim()
+    const resolvedDatasource = (datasource || matchedTable?.datasource || '').trim()
+    const cacheKey = getTableColumnsCacheKey(tableName, resolvedSchema, resolvedDatasource)
+
+    if (tableColumnsCache.value[cacheKey]) {
+      return tableColumnsCache.value[cacheKey]
+    }
     if (tableColumnsCache.value[tableName]) {
       return tableColumnsCache.value[tableName]
     }
@@ -762,7 +788,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       
       if (dataSource.value === 'robo') {
         const roboColumns = await roboSchemaApi.getTableColumns(tableName, {
-          schema
+          schema: resolvedSchema
         })
         columns = roboColumns.map(c => ({
           name: c.name,
@@ -776,9 +802,14 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
           analyzed_description: c.analyzed_description
         }))
       } else {
-        columns = await text2sqlApi.getTableColumns(tableName, schema || 'public')
+        if (!resolvedDatasource) {
+          throw new Error(`Text2SQL 컬럼 조회에는 datasource가 필요합니다: ${tableName}`)
+        }
+        columns = await text2sqlApi.getTableColumns(resolvedDatasource, tableName, resolvedSchema || 'public')
       }
       
+      tableColumnsCache.value[cacheKey] = columns
+      // Backward compatibility for legacy lookups by tableName
       tableColumnsCache.value[tableName] = columns
       return columns
     } catch (error) {
@@ -842,7 +873,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       columns = options.columns
       console.log(`[SchemaCanvas] 직접 전달된 컬럼 사용: ${columns.length}개`)
     } else {
-      columns = await loadTableColumns(table.name, table.schema)
+      columns = await loadTableColumns(table.name, table.schema, table.datasource || '')
     }
     
     // Calculate position
@@ -1068,13 +1099,21 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     }
   }
   
-  function selectNode(nodeId: string) {
+  async function selectNode(nodeId: string) {
     selectedNodeId.value = nodeId
     
     const node = nodes.value.find(n => n.id === nodeId)
     if (node && node.data) {
       // allTables에서 찾거나, 없으면 노드 데이터로 직접 생성 (ObjectType 등)
-      let table = allTables.value.find(t => t.name === node.data!.tableName)
+      let table = allTables.value.find(
+        t =>
+          t.name === node.data!.tableName &&
+          (t.schema || 'public') === (node.data!.schema || 'public') &&
+          ((t.datasource || '') === (node.data!.datasource || ''))
+      )
+      if (!table) {
+        table = allTables.value.find(t => t.name === node.data!.tableName)
+      }
       
       if (!table) {
         // ObjectType 등 allTables에 없는 경우 노드 데이터로 테이블 정보 생성
@@ -1088,6 +1127,19 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       
       selectedTable.value = table
       selectedTableColumns.value = node.data.columns || []
+      // 상세 패널에서 컬럼 0개로 보이는 경우를 방지하기 위해 지연 로딩 보강
+      if ((selectedTableColumns.value?.length || 0) === 0) {
+        const loadedColumns = await loadTableColumns(
+          node.data.tableName,
+          node.data.schema || 'public',
+          node.data.datasource || ''
+        )
+        if (loadedColumns.length > 0) {
+          node.data.columns = loadedColumns
+          node.data.columnCount = loadedColumns.length
+          selectedTableColumns.value = loadedColumns
+        }
+      }
       isDetailPanelOpen.value = true
     }
   }
@@ -1201,15 +1253,24 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
    * 
    * 멀티 데이터소스 지원:
    * - SQL 쿼리가 datasource.schema.table 형식으로 생성됨
-   * - 예: SELECT * FROM robo_postgres.ins.t_contract_base
+   * - 예: SELECT * FROM postgresql.`RWIS`.`RDISAUP_TB` LIMIT 25
    */
   async function queryTableData(tableName: string, schema: string = 'public', limit: number = 25, datasource?: string) {
     const schemaName = schema || 'public'
-    const dsName = datasource || ''
+    const normalizedInputDatasource = (datasource || '').trim()
+    const matchedTable = allTables.value.find(
+      t => t.name === tableName && (t.schema || 'public') === schemaName
+    )
+    let resolvedDatasource = normalizedInputDatasource || (matchedTable?.datasource || '').trim()
+    const extractDatasourceFromSql = (query: string): string => {
+      const fromMatch = query.match(/\bFROM\s+([A-Za-z0-9_`"]+)\./i)
+      if (!fromMatch?.[1]) return ''
+      return fromMatch[1].replace(/[`"]/g, '').trim()
+    }
     let sql: string
     
     // ObjectType인 경우 Neo4j에서 materializedView 또는 query 가져오기
-    if (schemaName === 'ObjectType' || dsName === 'ontology') {
+    if (schemaName === 'ObjectType' || normalizedInputDatasource === 'ontology') {
       try {
         // ObjectType의 상세 정보 조회
         const response = await fetch(`${import.meta.env.VITE_GATEWAY_URL || ''}/api/gateway/ontology/object-types/${encodeURIComponent(tableName)}`)
@@ -1218,9 +1279,16 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
           if (otData.materializedView) {
             // Materialized View가 있으면 해당 뷰에서 조회
             sql = `SELECT * FROM ${otData.materializedView} LIMIT ${limit}`
+            if (!resolvedDatasource) {
+              const mvDatasource = String(otData.materializedView).split('.')[0]?.replace(/[`"]/g, '').trim()
+              resolvedDatasource = mvDatasource || ''
+            }
           } else if (otData.query) {
             // query가 있으면 서브쿼리로 사용
             sql = `SELECT * FROM (${otData.query}) AS subq LIMIT ${limit}`
+            if (!resolvedDatasource) {
+              resolvedDatasource = extractDatasourceFromSql(String(otData.query))
+            }
           } else {
             throw new Error(`ObjectType '${tableName}'에 조회 가능한 데이터가 없습니다.`)
           }
@@ -1234,6 +1302,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
           isOpen: true,
           tableName,
           schema: schemaName,
+          datasource: resolvedDatasource,
           columns: [],
           rows: [],
           rowCount: 0,
@@ -1249,26 +1318,24 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       // 일반 테이블 - 대문자가 포함된 경우 식별자 감싸기
       // MindsDB를 통할 경우: 백틱(`) 사용 (예: rwis.`AA_GET_MIN_STATUS`)
       // 직접 PostgreSQL일 경우: 큰따옴표(") 사용
-      // 멀티 데이터소스: datasource.table 형식 사용 (MindsDB 데이터소스에 스키마 설정됨)
+      // 멀티 데이터소스: datasource.schema.table 형식 사용
       let fullTableName: string
       
       // 대문자 포함 여부 확인
       const hasUpperCase = (str: string) => /[A-Z]/.test(str)
+      const quoteMysqlIdent = (str: string) => `\`${str.replace(/`/g, '``')}\``
       const needsQuoting = hasUpperCase(tableName)
+      const needsSchemaQuoting = hasUpperCase(schemaName)
       
-      if (dsName) {
+      if (resolvedDatasource) {
         // 데이터소스 프리픽스 포함 (MindsDB를 통한 쿼리)
-        // MindsDB 데이터소스에 스키마가 설정되어 있으므로 datasource.table 형식 사용
-        // 테이블명이 대문자면 백틱(`)으로 감싸기
-        if (needsQuoting) {
-          fullTableName = `${dsName}.\`${tableName}\``
-        } else {
-          fullTableName = `${dsName}.${tableName}`
-        }
+        // datasource.schema.table 형식으로 명시해 public 스키마로 잘못 해석되는 케이스를 방지한다.
+        const schemaIdent = needsSchemaQuoting ? quoteMysqlIdent(schemaName) : schemaName
+        const tableIdent = needsQuoting ? quoteMysqlIdent(tableName) : tableName
+        fullTableName = `${resolvedDatasource}.${schemaIdent}.${tableIdent}`
       } else {
         // 데이터소스 없이 스키마.테이블만 사용 (직접 PostgreSQL)
         // PostgreSQL에서는 큰따옴표(")로 대문자 식별자 감싸기
-        const needsSchemaQuoting = hasUpperCase(schemaName)
         if (needsSchemaQuoting || needsQuoting) {
           fullTableName = `"${schemaName}"."${tableName}"`
         } else {
@@ -1277,6 +1344,29 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       }
       sql = `SELECT * FROM ${fullTableName} LIMIT ${limit}`
     }
+
+    if (!resolvedDatasource) {
+      resolvedDatasource = extractDatasourceFromSql(sql)
+    }
+
+    if (!resolvedDatasource) {
+      tableDataPanel.value = {
+        ...tableDataPanel.value,
+        isOpen: true,
+        tableName,
+        schema: schemaName,
+        datasource: '',
+        columns: [],
+        rows: [],
+        rowCount: 0,
+        executionTimeMs: 0,
+        isLoading: false,
+        error: '데이터소스를 확인할 수 없습니다. 테이블의 datasource를 먼저 선택/확인해주세요.',
+        limit,
+        executedSql: sql
+      }
+      return
+    }
     
     // 패널 열기 및 로딩 상태 설정 (behaviorMode 상태 유지)
     tableDataPanel.value = {
@@ -1284,6 +1374,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       isOpen: true,
       tableName,
       schema: schemaName,
+      datasource: resolvedDatasource,
       columns: [],
       rows: [],
       rowCount: 0,
@@ -1300,6 +1391,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sql,
+          datasource: resolvedDatasource,
           max_sql_seconds: 30,
           format_with_ai: false
         })
@@ -1359,6 +1451,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       isOpen: false,
       tableName: '',
       schema: '',
+      datasource: '',
       columns: [],
       rows: [],
       rowCount: 0,
@@ -1378,7 +1471,12 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
    */
   function changeTableDataLimit(limit: number) {
     if (tableDataPanel.value.tableName) {
-      queryTableData(tableDataPanel.value.tableName, tableDataPanel.value.schema, limit)
+      queryTableData(
+        tableDataPanel.value.tableName,
+        tableDataPanel.value.schema,
+        limit,
+        tableDataPanel.value.datasource
+      )
     }
   }
   
@@ -1801,7 +1899,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         }
         
         // Load columns
-        const columns = await loadTableColumns(table.name, table.schema)
+        const columns = await loadTableColumns(table.name, table.schema, table.datasource || '')
         
         const newNode: Node<TableNodeData> = {
           id: `table-${table.name}`,

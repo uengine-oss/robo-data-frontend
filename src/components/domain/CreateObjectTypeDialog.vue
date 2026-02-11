@@ -12,6 +12,7 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { Teleport } from 'vue'
 import Text2SqlTab from '@/components/text2sql/Text2SqlTab.vue'
 import { useReactStore } from '@/stores/text2sql'
+import { useDatasourcesStore } from '@/stores/datasources'
 import { IconX, IconCheck, IconDatabase, IconLink, IconPlus, IconTrash } from '@/components/icons'
 import { objectExplorerApi } from '@/services/api'
 
@@ -56,6 +57,7 @@ const emit = defineEmits<{
 }>()
 
 const reactStore = useReactStore()
+const datasourcesStore = useDatasourcesStore()
 
 // 상태
 const step = ref<'source-select' | 'query' | 'sql-input' | 'manual-input' | 'configure'>('source-select')
@@ -170,12 +172,16 @@ async function executeSql() {
   sqlExecutionError.value = null
   
   try {
+    const selectedDs = datasourcesStore.selectedDatasource
+    if (!selectedDs?.name) {
+      throw new Error('데이터소스를 선택해주세요')
+    }
     const response = await fetch('/api/gateway/text2sql/direct-sql/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         sql: directSqlInput.value,
-        limit: 100
+        datasource: selectedDs.name
       })
     })
     
@@ -201,7 +207,12 @@ async function executeSql() {
       if (!line.trim()) continue
       try {
         const chunk = JSON.parse(line)
-        if (chunk.type === 'columns' && chunk.data) {
+        if (chunk.event === 'result') {
+          columns = chunk.columns || []
+          rows = chunk.rows || []
+        } else if (chunk.event === 'error') {
+          throw new Error(chunk.message || 'SQL 실행 오류')
+        } else if (chunk.type === 'columns' && chunk.data) {
           columns = chunk.data
         } else if (chunk.type === 'row' && chunk.data) {
           rows.push(chunk.data)

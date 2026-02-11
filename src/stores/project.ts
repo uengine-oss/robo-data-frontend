@@ -39,7 +39,7 @@ export interface GraphEvent {
 
 import { useSessionStore } from './session'
 import { useSchemaCanvasStore } from './schemaCanvas'
-import { antlrApi, roboApi, ingestApi, type PipelineStatus, type PipelinePhaseInfo } from '@/services/api'
+import { antlrApi, roboApi, type PipelineStatus, type PipelinePhaseInfo } from '@/services/api'
 
 // ============================================================================
 // 타입 정의
@@ -600,23 +600,6 @@ export const useProjectStore = defineStore('project', () => {
     
     addMessage('message', '✅ 분석 완료')
     completedSteps.value = totalSteps.value  // 전체 단계 완료
-  }
-  
-  /**
-   * 인제스천 실행 (내부용)
-   */
-  async function doIngest(): Promise<void> {
-    currentStep.value = '[4단계] 인제스천 중...'
-    addMessage('message', '📦 스키마 인제스천 시작...')
-    
-    const result = await ingestApi.ingest({
-      db_name: 'postgres',
-      schema: 'rwis',
-      clear_existing: false
-    })
-    
-    addMessage('message', `✅ 인제스천 완료: 테이블 ${result.tables_loaded}개, 컬럼 ${result.columns_loaded}개, FK ${result.fks_loaded}개`)
-    completedSteps.value = 4
   }
   
   // ==========================================================================
