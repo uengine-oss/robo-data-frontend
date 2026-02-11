@@ -20,7 +20,7 @@ interface Props {
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
-  confirm: [metadata: { sourceType: SourceType; datasource?: DataSource | null }]
+  confirm: [metadata: { sourceType: SourceType; datasource?: DataSource | null; inferFkRelations?: boolean }]
   cancel: []
   'add-files': [files: File[], reanalyze: boolean]
   'files-updated': [files: File[]]
@@ -37,6 +37,9 @@ const newDatasourceType = ref<any>(null)
 const newDatasourceForm = ref<Record<string, any>>({})
 const newDatasourceName = ref('')
 const isCreatingDatasource = ref(false)
+
+// FK 관계 자동 추론 옵션 (기본: false - 시간이 오래 걸릴 수 있음)
+const inferFkRelations = ref(false)
 
 // 데이터 소스 아이콘
 const datasourceIcons: Record<string, string> = {
@@ -376,7 +379,8 @@ const handleConfirm = () => {
   }
   emit('confirm', {
     sourceType: sourceType.value,
-    datasource: selectedDatasource.value
+    datasource: selectedDatasource.value,
+    inferFkRelations: inferFkRelations.value
   })
 }
 
@@ -618,6 +622,15 @@ const moveFileRelPath = (sourceRelPath: string, targetFolderRelPath: string) => 
           </div>
         </div>
         
+        <!-- FK 관계 자동 추론 옵션 -->
+        <div class="options-row">
+          <label class="checkbox-option" :title="'컬럼명 유사도와 샘플 데이터를 분석하여 FK 관계를 자동으로 추론합니다.\n⚠️ 테이블이 많을 경우 시간이 오래 걸릴 수 있습니다.'">
+            <input type="checkbox" v-model="inferFkRelations" />
+            <span class="checkbox-label">FK 관계 자동 추론</span>
+            <span class="option-hint">(시간이 오래 걸릴 수 있음)</span>
+          </label>
+        </div>
+        
         <!-- 시스템 개념은 UI에 노출하지 않음 -->
         <!-- 안내문은 하단 요약 영역에 표시 (가독성 위해 상단은 최소화) -->
 
@@ -822,6 +835,45 @@ const moveFileRelPath = (sourceRelPath: string, targetFolderRelPath: string) => 
   display: flex;
   align-items: flex-end;
   gap: var(--spacing-md);
+}
+
+.options-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+  padding: 8px 12px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+}
+
+.checkbox-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--color-text);
+  
+  input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--color-accent);
+    cursor: pointer;
+  }
+  
+  .checkbox-label {
+    font-weight: 500;
+  }
+  
+  .option-hint {
+    font-size: 11px;
+    color: var(--color-text-muted);
+  }
+  
+  &:hover {
+    color: var(--color-text-bright);
+  }
 }
 
 .source-type-group {

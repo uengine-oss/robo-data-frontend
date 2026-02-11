@@ -32,6 +32,7 @@ export interface BackendRequestMetadata {
   target: SourceType
   nameCase?: NameCaseOption
   datasourceName?: string | null  // 타겟 데이터 소스 이름
+  inferFkRelations?: boolean  // FK 관계 자동 추론 여부 (기본: false)
 }
 
 // ============================================================================

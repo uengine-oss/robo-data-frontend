@@ -202,7 +202,7 @@ const handleFilesUpdated = (updatedFiles: File[]) => {
 }
 
 // 업로드 확인
-const handleUploadConfirm = async (metadata: { sourceType: import('@/types').SourceType; datasource?: any }) => {
+const handleUploadConfirm = async (metadata: { sourceType: import('@/types').SourceType; datasource?: any; inferFkRelations?: boolean }) => {
   showModal.value = false
   
   if (pendingFiles.value.length === 0) {
@@ -217,6 +217,9 @@ const handleUploadConfirm = async (metadata: { sourceType: import('@/types').Sou
   if (metadata.datasource) {
     projectStore.setDatasourceName(metadata.datasource.name)
   }
+  
+  // FK 관계 자동 추론 옵션 설정
+  projectStore.setInferFkRelations(metadata.inferFkRelations ?? false)
   
   try {
     await projectStore.uploadFiles(pendingFiles.value, projectStore.analyzeMeta)

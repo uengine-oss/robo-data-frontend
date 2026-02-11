@@ -221,11 +221,15 @@ export const useProjectStore = defineStore('project', () => {
   // 데이터 소스 이름
   const datasourceName = ref<string | null>(null)
   
+  // FK 관계 자동 추론 옵션 (기본: false)
+  const inferFkRelations = ref(false)
+  
   const analyzeMeta = computed<BackendRequestMetadata>(() => ({
     strategy: (sourceType.value === 'oracle' || sourceType.value === 'postgresql') ? 'dbms' : 'framework',
     target: sourceType.value,
     nameCase: nameCaseOption.value,
-    datasourceName: datasourceName.value
+    datasourceName: datasourceName.value,
+    inferFkRelations: inferFkRelations.value
   }))
   
   const isValidConfig = computed(() => 
@@ -386,6 +390,10 @@ export const useProjectStore = defineStore('project', () => {
   
   function setDatasourceName(name: string | null): void {
     datasourceName.value = name
+  }
+  
+  function setInferFkRelations(value: boolean): void {
+    inferFkRelations.value = value
   }
   
   function setDdl(d: string[]): void {
@@ -1057,6 +1065,7 @@ export const useProjectStore = defineStore('project', () => {
     // Actions - Setters
     setSourceType,
     setDatasourceName,
+    setInferFkRelations,
     setDdl,
     
     // Actions - Messages

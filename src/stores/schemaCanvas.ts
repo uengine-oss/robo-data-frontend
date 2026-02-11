@@ -14,6 +14,7 @@ import type { Edge, Node } from '@vue-flow/core'
 import { text2sqlApi, roboSchemaApi } from '@/services/api'
 import type { Text2SqlTableInfo, Text2SqlColumnInfo } from '@/types'
 import { useSessionStore } from './session'
+import { useDatasourcesStore } from './datasources'
 import ELK from 'elkjs/lib/elk.bundled.js'
 
 export type SchemaDataSource = 'robo' | 'text2sql'
@@ -695,7 +696,22 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         }))
       } else {
         // PostgreSQL 인제스천 (text2sql)
-        allTables.value = await text2sqlApi.getTables()
+        const datasourcesStore = useDatasourcesStore()
+        let datasourceName = (datasourcesStore.selectedDatasource?.name || '').trim()
+
+        if (!datasourceName) {
+          if (datasourcesStore.datasources.length === 0) {
+            await datasourcesStore.fetchDatasources()
+          }
+          datasourceName = (datasourcesStore.selectedDatasource?.name || datasourcesStore.datasources[0]?.name || '').trim()
+        }
+
+        if (!datasourceName) {
+          allTables.value = []
+          return
+        }
+
+        allTables.value = await text2sqlApi.getTables(datasourceName)
       }
     } catch (error) {
       console.error('Failed to load tables:', error)
@@ -1316,27 +1332,27 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       }
     } else {
       // 일반 테이블 - 대문자가 포함된 경우 식별자 감싸기
-      // MindsDB를 통할 경우: 백틱(`) 사용 (예: rwis.`AA_GET_MIN_STATUS`)
+      // MindsDB를 통할 경우: 백틱(`) 사용 (예: posgres.`RWIS`.`AA_GET_MIN_STATUS`)
       // 직접 PostgreSQL일 경우: 큰따옴표(") 사용
-      // 멀티 데이터소스: datasource.schema.table 형식 사용
+      // 멀티 데이터소스: datasource.schema.table 형식 사용 (3단계)
       let fullTableName: string
       
       // 대문자 포함 여부 확인
       const hasUpperCase = (str: string) => /[A-Z]/.test(str)
       const quoteMysqlIdent = (str: string) => `\`${str.replace(/`/g, '``')}\``
-      const needsQuoting = hasUpperCase(tableName)
       const needsSchemaQuoting = hasUpperCase(schemaName)
+      const needsTableQuoting = hasUpperCase(tableName)
       
       if (resolvedDatasource) {
         // 데이터소스 프리픽스 포함 (MindsDB를 통한 쿼리)
         // datasource.schema.table 형식으로 명시해 public 스키마로 잘못 해석되는 케이스를 방지한다.
         const schemaIdent = needsSchemaQuoting ? quoteMysqlIdent(schemaName) : schemaName
-        const tableIdent = needsQuoting ? quoteMysqlIdent(tableName) : tableName
+        const tableIdent = needsTableQuoting ? quoteMysqlIdent(tableName) : tableName
         fullTableName = `${resolvedDatasource}.${schemaIdent}.${tableIdent}`
       } else {
         // 데이터소스 없이 스키마.테이블만 사용 (직접 PostgreSQL)
         // PostgreSQL에서는 큰따옴표(")로 대문자 식별자 감싸기
-        if (needsSchemaQuoting || needsQuoting) {
+        if (needsSchemaQuoting || needsTableQuoting) {
           fullTableName = `"${schemaName}"."${tableName}"`
         } else {
           fullTableName = `${schemaName}.${tableName}`
