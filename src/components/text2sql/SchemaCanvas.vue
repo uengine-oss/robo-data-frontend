@@ -801,28 +801,6 @@ async function handleRefresh() {
         </button>
       </div>
       
-      <!-- Data Source Selector -->
-      <div class="data-source-selector">
-        <label>
-          <input 
-            type="radio" 
-            value="robo"
-            :checked="store.dataSource === 'robo'"
-            @change="() => store.setDataSource('robo')"
-          />
-          <span>Neo4j (분석결과)</span>
-        </label>
-        <label>
-          <input 
-            type="radio" 
-            value="text2sql"
-            :checked="store.dataSource === 'text2sql'"
-            @change="() => store.setDataSource('text2sql')"
-          />
-          <span>PostgreSQL</span>
-        </label>
-      </div>
-      
       <!-- Search -->
       <div class="search-box">
         <IconSearch :size="14" />
@@ -836,7 +814,7 @@ async function handleRefresh() {
       </div>
       
       <!-- 시멘틱 검색 결과 섹션 -->
-      <div v-if="searchQuery && store.dataSource === 'robo'" class="semantic-search-section">
+      <div v-if="searchQuery" class="semantic-search-section">
         <!-- 시멘틱 검색 중 표시 -->
         <div v-if="store.isSemanticSearching" class="semantic-loading">
           <span class="semantic-spinner"></span>
@@ -1783,32 +1761,6 @@ async function handleRefresh() {
 }
 
 /* Search */
-.data-source-selector {
-  display: flex;
-  gap: 12px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg-tertiary);
-  
-  label {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: var(--color-text-secondary);
-    cursor: pointer;
-    
-    input[type="radio"] {
-      margin: 0;
-      accent-color: var(--color-primary);
-    }
-    
-    &:hover {
-      color: var(--color-text);
-    }
-  }
-}
-
 .search-box {
   display: flex;
   align-items: center;
