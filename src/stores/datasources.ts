@@ -150,6 +150,13 @@ const datasourcesApi = {
       method: 'POST',
     }),
   
+  // 파라미터 기반 연결 테스트 (생성 전 사용)
+  testConnectionWithParams: (params: { engine: string; host: string; port?: number; user?: string; password?: string; database?: string }) =>
+    fetchApi<{ success: boolean; message: string }>(`/api/datasources/test-connection`, {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+  
   // 헬스체크 - 데이터소스 연결 상태 확인
   checkHealth: (name: string) =>
     fetchApi<HealthCheckResult>(`/api/datasources/${name}/health`),
@@ -1508,6 +1515,14 @@ export const useDatasourcesStore = defineStore('datasources', () => {
     }
   }
 
+  async function testConnectionWithParams(params: { engine: string; host: string; port?: number; user?: string; password?: string; database?: string }): Promise<{ success: boolean; message: string }> {
+    try {
+      return await datasourcesApi.testConnectionWithParams(params)
+    } catch (e: any) {
+      return { success: false, message: e.message || 'Connection test failed' }
+    }
+  }
+
   function clearError() {
     error.value = null
   }
@@ -1666,6 +1681,7 @@ export const useDatasourcesStore = defineStore('datasources', () => {
     fetchSchemas,
     selectSchema,
     testConnection,
+    testConnectionWithParams,
     checkHealth,
     checkAllHealth,
     clearError,

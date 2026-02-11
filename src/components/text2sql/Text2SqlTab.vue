@@ -1,9 +1,9 @@
 <template>
   <div class="text2sql-tab" :class="{ embedded: props.embedded }">
     <!-- 히스토리 패널 (임베드 모드에서는 숨김) -->
-    <HistoryPanel 
+    <HistoryPanel
       v-if="!props.embedded"
-      :is-open="historyOpen" 
+      :is-open="historyOpen"
       @toggle="historyOpen = !historyOpen"
       @select="handleHistorySelect"
     />
@@ -11,28 +11,19 @@
     <!-- Direct SQL 모드 -->
     <DirectSqlInput v-if="mode === 'direct'" class="direct-sql-full" @change-mode="(m) => mode = m" />
 
-    <!-- 채팅 컨테이너 (자연어/LangChain 모드) -->
+    <!-- 채팅 컨테이너 (자연어 모드) -->
     <div v-else class="chat-container">
       <!-- 우상단 모드 선택기 및 새 쿼리 버튼 -->
       <div class="top-controls">
-        <button 
-          v-if="chatMessages.length > 0 || reactStore.isRunning || langchainStore.isRunning"
-          class="new-query-btn"
-          @click="startNewQuery"
-          title="새 쿼리 시작"
-        >
+        <button v-if="chatMessages.length > 0 || reactStore.isRunning" class="new-query-btn"
+          @click="startNewQuery" title="새 쿼리 시작">
           <span class="btn-icon">✨</span>
           <span class="btn-label">새 쿼리</span>
         </button>
-        
+
         <div class="mode-selector-container">
-          <button 
-            v-for="opt in modeOptions" 
-            :key="opt.value"
-            :class="['mode-option', { active: mode === opt.value }]"
-            @click="mode = opt.value"
-            :title="opt.desc"
-          >
+          <button v-for="opt in modeOptions" :key="opt.value" :class="['mode-option', { active: mode === opt.value }]"
+            @click="mode = opt.value" :title="opt.desc">
             <span class="opt-icon">{{ opt.icon }}</span>
             <span class="opt-label">{{ opt.label }}</span>
           </button>
@@ -50,15 +41,15 @@
               ? 'ObjectType(Materialized View) 테이블만 대상으로 AI가 쿼리를 생성합니다' 
               : '질문을 입력하면 AI가 최적의 SQL 쿼리를 생성합니다' }}
           </p>
-          
           <!-- 최근 쿼리가 있으면 표시 -->
           <div v-if="recentQueries.length > 0" class="examples recent">
             <p class="examples-label">최근 질문</p>
-            <button v-for="query in recentQueries.slice(0, 5)" :key="query" class="example-btn recent" @click="setQuestion(query)">
+            <button v-for="query in recentQueries.slice(0, 5)" :key="query" class="example-btn recent"
+              @click="setQuestion(query)">
               {{ query.length > 40 ? query.slice(0, 40) + '...' : query }}
             </button>
           </div>
-          
+
           <!-- 기본 예시 -->
           <div class="examples">
             <p class="examples-label">예시 질문</p>
@@ -72,13 +63,20 @@
         <div v-if="hiddenMessageCount > 0" class="hidden-messages-indicator" @click="showAllMessages = true">
           <span>{{ hiddenMessageCount }}개의 이전 메시지 보기...</span>
         </div>
-        
-        <div 
-          v-for="msg in visibleMessages" 
-          :key="msg.id" 
-          :class="['chat-message', msg.type]"
-          v-memo="[msg.id, msg.type, msg.content, msg.isStreaming, msg.isExecuting, expandedMessages.has(msg.id)]"
-        >
+
+        <div v-for="msg in visibleMessages" :key="msg.id" :class="['chat-message', msg.type]"
+          v-memo="[
+            msg.id,
+            msg.type,
+            msg.content,
+            msg.isStreaming,
+            msg.isExecuting,
+            expandedMessages.has(msg.id),
+            msg.type === 'result' ? (msg.feedbackRequired === true) : false,
+            msg.type === 'result' ? (msg.fromCache === true) : false,
+            msg.type === 'result' ? hasFeedbackSubmitted(msg) : false,
+            msg.type === 'result' ? isFeedbackDisabled(msg) : false
+          ]">
           <!-- 사용자 메시지 -->
           <template v-if="msg.type === 'user'">
             <div class="message-avatar user">👤</div>
@@ -105,11 +103,7 @@
                 <span class="step-badge">Step {{ msg.step }}</span>
                 <span class="phase-label reasoning">{{ msg.toolInfo?.name || '추론' }}</span>
                 <!-- 세부 정보 토글 버튼 -->
-                <button 
-                  v-if="msg.toolInfo" 
-                  class="details-toggle-btn"
-                  @click="toggleMessageExpand(msg.id)"
-                >
+                <button v-if="msg.toolInfo" class="details-toggle-btn" @click="toggleMessageExpand(msg.id)">
                   {{ expandedMessages.has(msg.id) ? '세부 정보 접기' : '세부 정보 보기' }}
                 </button>
               </div>
@@ -147,10 +141,10 @@
                 <span v-if="msg.isExecuting" class="spinner-small"></span>
                 <span v-else class="completed-indicator">✓</span>
               </div>
-              
+
               <!-- 파라미터 -->
               <code v-if="msg.params" class="tool-params-compact">{{ msg.params }}</code>
-              
+
               <!-- 결과 - 항상 표시 -->
               <div v-if="msg.result" class="tool-result-display">
                 <pre class="result-code"><code>{{ truncateResult(msg.result, 800) }}</code></pre>
@@ -186,27 +180,27 @@
               <div class="message-header">
                 <span class="phase-label result">실행 결과</span>
                 <span class="result-meta">{{ msg.rowCount }}행 · {{ msg.execTime }}ms</span>
-                <button 
-                  v-if="getResultSql(msg)"
-                  class="ontology-export-btn"
-                  @click="exportToOntologyFromMsg(msg)"
-                >
-                  🧩 온톨로지
-                </button>
-                <button 
-                  v-if="getResultSql(msg)"
-                  class="olap-export-btn"
-                  @click="exportToOlapFromMsg(msg)"
-                >
-                  📊 OLAP
-                </button>
-                <button 
-                  v-if="getResultSql(msg)"
-                  class="ontology-instance-btn"
-                  @click="openOntologyInstanceModal(msg)"
-                >
-                  🔮 감시 에이전트
-                </button>
+                <div class="result-actions">
+                  <template v-if="shouldShowFeedbackButtons(msg) && !hasFeedbackSubmitted(msg)">
+                    <button class="feedback-btn approve" :disabled="isFeedbackDisabled(msg)"
+                      @click="submitFeedbackFromMsg(msg, true)">
+                      맞아요
+                    </button>
+                    <button class="feedback-btn reject" :disabled="isFeedbackDisabled(msg)"
+                      @click="submitFeedbackFromMsg(msg, false)">
+                      틀려요
+                    </button>
+                  </template>
+                  <button v-if="getResultSql(msg)" class="ontology-export-btn" @click="exportToOntologyFromMsg(msg)">
+                    🧩 온톨로지
+                  </button>
+                  <button v-if="getResultSql(msg)" class="olap-export-btn" @click="exportToOlapFromMsg(msg)">
+                    📊 OLAP
+                  </button>
+                  <button v-if="getResultSql(msg)" class="ontology-instance-btn" @click="openOntologyInstanceModal(msg)">
+                    🔮 감시 에이전트
+                  </button>
+                </div>
               </div>
               <ResultTable v-if="msg.data" :data="msg.data" :max-rows="20" />
             </div>
@@ -225,6 +219,55 @@
           </template>
         </div>
 
+        <!-- 진행 상황 카드 (문맥 수집/보강) - 요약 기본, 세부 토글 -->
+        <div v-if="reactStore.isRunning && progressHeadline" class="chat-message ai progress">
+          <div class="message-avatar ai">⏳</div>
+          <div class="message-content progress-content">
+            <div class="message-header">
+              <span class="phase-label thinking">진행 상황</span>
+              <span class="progress-headline">{{ progressHeadline }}</span>
+              <span v-if="estimatedProgressPercent" class="progress-percent">추정 {{ estimatedProgressPercent }}%</span>
+              <button class="progress-toggle-btn" @click="progressExpanded = !progressExpanded">
+                {{ progressExpanded ? '세부 정보 접기' : '세부 정보 보기' }}
+              </button>
+            </div>
+
+            <div class="progress-bar" aria-hidden="true">
+              <div class="progress-bar-fill" :style="{ width: `${estimatedProgressPercent}%` }"></div>
+            </div>
+
+            <div v-if="progressDetails.length" class="progress-details">
+              <span v-for="(d, idx) in progressDetails" :key="idx" class="progress-detail-chip">
+                {{ d }}
+              </span>
+            </div>
+
+            <div v-if="progressExpanded" class="progress-expanded">
+              <details v-if="progressDetailsHiddenCount > 0" class="progress-counts-more">
+                <summary class="progress-counts-summary">
+                  전체 지표 보기 ({{ progressDetailsAll.length }}개)
+                </summary>
+                <div v-if="progressDetailsAll.length" class="progress-details progress-details-all">
+                  <span v-for="(d, idx) in progressDetailsAll" :key="idx" class="progress-detail-chip">
+                    {{ d }}
+                  </span>
+                </div>
+              </details>
+              <div v-if="reactStore.visiblePipelineStageList.length" class="progress-stages">
+                <div v-for="st in reactStore.visiblePipelineStageList" :key="st.stage" class="progress-stage-row">
+                  <span class="stage-name">{{ getStageLabel(st.stage) }}</span>
+                  <span :class="['stage-status', st.status]">
+                    {{ st.status === 'start' ? '진행 중' : st.status === 'done' ? '완료' : '오류' }}
+                  </span>
+                  <span v-if="typeof st.elapsed_ms === 'number'" class="stage-elapsed">
+                    {{ (st.elapsed_ms / 1000).toFixed(1) }}초
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Live 스트리밍 패널 - 추론 + SQL 중심 -->
         <div v-if="reactStore.isRunning && liveCurrent" class="chat-message ai live">
           <div class="message-avatar ai">🧩</div>
@@ -233,7 +276,7 @@
               <span class="step-badge">Step {{ reactStore.currentIteration }}</span>
               <span class="phase-label thinking">생성 중</span>
             </div>
-            
+
             <!-- 추론 + SQL만 표시 -->
             <div class="live-summary">
               <!-- 추론 내용 -->
@@ -262,7 +305,7 @@
         <!-- 진행 중 상태 표시 -->
         <div v-else-if="isAnyRunning && !reactStore.isWaitingUser" class="status-bar">
           <span class="status-dot running"></span>
-          <span>{{ mode === 'langchain' ? '⚡ 빠른 검색 중...' : '🧠 AI가 분석 중...' }}</span>
+          <span>{{ runningStatusText }}</span>
           <button class="pause-btn" @click="handlePause">⏸ 잠시 멈춤</button>
           <button class="cancel-btn" @click="handleCancel">✕ 중단</button>
         </div>
@@ -307,11 +350,6 @@
               <span class="setting-hint">OLAP 큐브 데이터만 검색</span>
             </div>
             <div class="setting-row">
-              <label>계리수식 우선</label>
-              <input v-model="preferFormula" type="checkbox" />
-              <span class="setting-hint">계리/보험수식을 우선 검색</span>
-            </div>
-            <div class="setting-row">
               <label>Raw XML(디버그)</label>
               <input v-model="debugRawXml" type="checkbox" />
             </div>
@@ -329,17 +367,9 @@
         </button>
       </div>
       <div class="sql-preview">
-        <TransitionGroup
-          v-if="sqlDisplayLines.length"
-          name="sql-line"
-          tag="pre"
-          class="sql-diff"
-        >
-          <code
-            v-for="line in sqlDisplayLines"
-            :key="line.id"
-            :class="['sql-line', line.status]"
-          >{{ line.content }}</code>
+        <TransitionGroup v-if="sqlDisplayLines.length" name="sql-line" tag="pre" class="sql-diff">
+          <code v-for="line in sqlDisplayLines" :key="line.id"
+            :class="['sql-line', line.status]">{{ line.content }}</code>
         </TransitionGroup>
 
         <!-- fallback: diff 라인 생성 전/타이머 중 안전장치 -->
@@ -479,12 +509,14 @@
 import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useReactStore, useHistoryStore, type QueryHistoryItem } from '@/stores/text2sql'
 import { useSessionStore } from '@/stores/session'
+import { useDatasourcesStore } from '@/stores/datasources'
 import ResultTable from './ResultTable.vue'
 import HistoryPanel from './HistoryPanel.vue'
 import DirectSqlInput from './DirectSqlInput.vue'
-import { useLangChainStore } from '@/stores/langchain'
 import type { ReactExecutionResult } from '@/types'
 import { buildSqlLineDiff, type PreviousSqlLine, type SqlDiffLine } from '@/utils/sqlLineDiff'
+import { getText2SqlStageLabelKo } from '@/utils/text2sqlProgress'
+import { text2sqlApi } from '@/services/api'
 import {
   IconPlay, IconUpload, IconSettings, IconChevronDown, IconCopy
 } from '@/components/icons'
@@ -535,21 +567,23 @@ interface ChatMessage {
   icon?: string
   sql?: string  // 결과에 연결된 SQL (히스토리 선택 시 사용)
   question?: string  // 원본 질문 (OLAP 내보내기 시 사용)
+  // UI feedback gating (backend query-quality gate)
+  feedbackRequired?: boolean
+  fromCache?: boolean
   toolInfo?: ToolInfo  // 도구 호출 세부 정보 (디버깅용)
 }
 
 const reactStore = useReactStore()
 const historyStore = useHistoryStore()
 const sessionStore = useSessionStore()
-const langchainStore = useLangChainStore()
+const datasourcesStore = useDatasourcesStore()
 
-// 모드: 'react' | 'langchain' | 'direct'
-type QueryMode = 'react' | 'langchain' | 'direct'
+// 모드: 'react' | 'direct'
+type QueryMode = 'react' | 'direct'
 const mode = ref<QueryMode>('react')
 
 const modeOptions: { value: QueryMode; label: string; icon: string; desc: string }[] = [
   { value: 'react', label: '자연어 검색', icon: '🧠', desc: '정밀한 AI 분석' },
-  { value: 'langchain', label: '빠른 검색', icon: '⚡', desc: '빠른 단순 검색' },
   { value: 'direct', label: 'SQL', icon: '📝', desc: '직접 입력' },
 ]
 
@@ -557,9 +591,9 @@ const modeOptions: { value: QueryMode; label: string; icon: string; desc: string
 function isComplexQuery(sql: string | null): boolean {
   if (!sql) return false
   const upperSql = sql.toUpperCase()
-  
+
   const joinCount = (upperSql.match(/\bJOIN\b/g) || []).length
-  
+
   return (
     joinCount >= 1 ||  // 1개 이상 JOIN
     (upperSql.match(/SELECT/g) || []).length > 1 || // 서브쿼리
@@ -585,11 +619,11 @@ function getResultSql(msg: ChatMessage): string | null {
 function exportToOlapFromMsg(msg: ChatMessage) {
   const sql = getResultSql(msg)
   const question = msg.question || reactStore.currentQuestion
-  
+
   console.log('[OLAP Export from Result] msg:', msg)
   console.log('[OLAP Export from Result] sql:', sql)
   console.log('[OLAP Export from Result] question:', question)
-  
+
   if (!sql) {
     alert('SQL 쿼리가 없습니다.')
     return
@@ -601,15 +635,90 @@ function exportToOlapFromMsg(msg: ChatMessage) {
 function exportToOntologyFromMsg(msg: ChatMessage) {
   const sql = getResultSql(msg)
   const question = msg.question || reactStore.currentQuestion
-  
+
   console.log('[Ontology Export] sql:', sql)
   console.log('[Ontology Export] question:', question)
-  
+
   if (!sql) {
     alert('SQL 쿼리가 없습니다.')
     return
   }
   sessionStore.navigateToOntologyWithSQL(question, sql)
+}
+
+// ============================================================================
+// Feedback (정답/오답) - 오염 방지 목적
+// ============================================================================
+
+const feedbackSubmitting = ref(false)
+const submittedFeedbackKeys = ref<Set<string>>(new Set())
+
+function _feedbackKey(msg: ChatMessage): string {
+  const q = (msg.question || reactStore.currentQuestion || '').trim()
+  const sql = (getResultSql(msg) || '').trim()
+  return `${q}||${sql}`
+}
+
+function hasFeedbackSubmitted(msg: ChatMessage): boolean {
+  return submittedFeedbackKeys.value.has(_feedbackKey(msg))
+}
+
+function shouldShowFeedbackButtons(msg: ChatMessage): boolean {
+  // 정책: 자동 검증 실패(feedbackRequired=true)에서만 노출하며, 캐시/히스토리는 노출하지 않는다.
+  if (msg.type !== 'result') return false
+  if (msg.fromCache) return false
+  return msg.feedbackRequired === true
+}
+
+function isFeedbackDisabled(msg: ChatMessage): boolean {
+  const sql = getResultSql(msg)
+  if (!sql) return true
+  if (feedbackSubmitting.value) return true
+  return submittedFeedbackKeys.value.has(_feedbackKey(msg))
+}
+
+async function submitFeedbackFromMsg(msg: ChatMessage, approved: boolean) {
+  const sql = getResultSql(msg)
+  const q = (msg.question || reactStore.currentQuestion || '').trim()
+
+  if (!sql) {
+    alert('SQL 쿼리가 없습니다.')
+    return
+  }
+
+  const key = _feedbackKey(msg)
+  if (submittedFeedbackKeys.value.has(key)) return
+
+  let notes: string | undefined
+  if (!approved) {
+    const v = window.prompt('틀린 이유/추가 정보를 간단히 적어주세요 (선택)')
+    notes = v !== null ? v : undefined
+  }
+
+  // Optimistic UI: 클릭 즉시 버튼 숨김(실패 시 롤백)
+  submittedFeedbackKeys.value.add(key)
+  feedbackSubmitting.value = true
+  try {
+    await text2sqlApi.submitFeedback({
+      question: q || undefined,
+      conversation_state: reactStore.conversationState || undefined,
+      original_sql: sql,
+      rating: approved ? 5 : 1,
+      notes: notes || undefined,
+      approved,
+      source: 'react_ui'
+    })
+    addMessage({
+      type: 'system',
+      content: approved ? '피드백(맞아요)이 저장되었습니다.' : '피드백(틀려요)이 저장되었습니다.'
+    })
+  } catch (e) {
+    console.error('Failed to submit feedback:', e)
+    submittedFeedbackKeys.value.delete(key)
+    alert('피드백 저장에 실패했습니다.')
+  } finally {
+    feedbackSubmitting.value = false
+  }
 }
 
 // ========================================================================
@@ -640,11 +749,11 @@ async function openOntologyInstanceModal(msg: ChatMessage) {
     alert('SQL 쿼리 또는 결과 데이터가 없습니다.')
     return
   }
-  
+
   // 결과에서 컬럼 추출
   const columns = msg.data.columns || []
   const sampleData = (msg.data.rows || []).slice(0, 5)
-  
+
   ontologyModalData.value = {
     sql,
     question: msg.question || reactStore.currentQuestion,
@@ -652,7 +761,7 @@ async function openOntologyInstanceModal(msg: ChatMessage) {
     columns,
     sampleData
   }
-  
+
   // 스키마 목록 로드
   try {
     const response = await fetch('/api/gateway/ontology/schemas')
@@ -663,10 +772,10 @@ async function openOntologyInstanceModal(msg: ChatMessage) {
   } catch (err) {
     console.error('스키마 목록 로드 실패:', err)
   }
-  
+
   // 기본 뷰 이름 생성
   mvViewName.value = `mv_${Date.now()}`
-  
+
   showOntologyModal.value = true
 }
 
@@ -679,7 +788,7 @@ watch(selectedSchemaId, async (schemaId) => {
     availableNodeTypes.value = []
     return
   }
-  
+
   try {
     const response = await fetch(`/api/gateway/ontology/schemas/${schemaId}`)
     if (response.ok) {
@@ -698,10 +807,14 @@ async function createOntologyInstances() {
     alert('필수 항목을 선택해주세요.')
     return
   }
-  
+
   isCreatingInstances.value = true
-  
+
   try {
+    const selectedDs = datasourcesStore.selectedDatasource
+    if (!selectedDs?.name) {
+      throw new Error('데이터소스를 선택해주세요')
+    }
     // 1. Materialized View 생성 (선택된 경우)
     let viewFullName = null
     if (createMaterializedView.value && mvViewName.value) {
@@ -709,6 +822,7 @@ async function createOntologyInstances() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          datasource: selectedDs.name,
           view_name: mvViewName.value,
           sql_query: ontologyModalData.value.sql,
           schema_name: 'public',
@@ -716,14 +830,14 @@ async function createOntologyInstances() {
           refresh_on_create: true
         })
       })
-      
+
       if (mvResponse.ok) {
         const mvData = await mvResponse.json()
         viewFullName = mvData.full_name
         console.log('Materialized View 생성됨:', viewFullName)
       }
     }
-    
+
     // 2. Neo4j에 온톨로지 인스턴스 생성
     const instanceResponse = await fetch('/api/gateway/ontology/instances/bulk-create', {
       method: 'POST',
@@ -738,7 +852,7 @@ async function createOntologyInstances() {
         source_question: ontologyModalData.value.question
       })
     })
-    
+
     if (instanceResponse.ok) {
       const result = await instanceResponse.json()
       alert(`${result.created_count || 0}개의 인스턴스가 생성되었습니다.`)
@@ -765,9 +879,11 @@ const maxToolCalls = ref(30)
 const maxSqlSeconds = ref(60)
 const useCache = ref(true)  // 캐시 사용 여부
 const dwOnlySearch = ref(false)  // DW 스키마만 검색 (OLAP 전용)
-const preferFormula = ref(false)  // 계리수식 우선 검색
 const debugRawXml = ref(false)
 const expandedMessages = ref<Set<string>>(new Set())
+
+// 진행 카드(요약 기본) 토글
+const progressExpanded = ref(true)
 
 // DOM 최적화: 메시지 윈도우링
 const MAX_VISIBLE_MESSAGES = 30  // 최대 표시 메시지 수
@@ -775,7 +891,7 @@ const showAllMessages = ref(false)
 
 const visibleMessages = computed(() => {
   let messages = chatMessages.value
-  
+
   // tool, thinking 메시지는 항상 숨김 (reasoning + SQL만 표시)
   messages = messages.filter(msg => {
     // tool과 thinking 타입은 제외
@@ -784,7 +900,7 @@ const visibleMessages = computed(() => {
     }
     return true
   })
-  
+
   if (showAllMessages.value || messages.length <= MAX_VISIBLE_MESSAGES) {
     return messages
   }
@@ -833,7 +949,7 @@ function loadRecentQueries() {
 
 function saveRecentQuery(query: string) {
   if (!query || query.trim().length < 3) return
-  
+
   const trimmed = query.trim()
   // 중복 제거
   const filtered = recentQueries.value.filter(q => q !== trimmed)
@@ -841,7 +957,7 @@ function saveRecentQuery(query: string) {
   filtered.unshift(trimmed)
   // 최대 개수 제한
   recentQueries.value = filtered.slice(0, MAX_RECENT_QUERIES)
-  
+
   try {
     localStorage.setItem(RECENT_QUERIES_KEY, JSON.stringify(recentQueries.value))
   } catch (e) {
@@ -858,7 +974,7 @@ const exampleQueries = computed(() => {
 })
 
 // Computed
-const isAnyRunning = computed(() => reactStore.isRunning || langchainStore.isRunning)
+const isAnyRunning = computed(() => reactStore.isRunning)
 const canSubmit = computed(() =>
   inputText.value.trim() && (!isAnyRunning.value || reactStore.isWaitingUser)
 )
@@ -891,6 +1007,22 @@ const displaySql = computed(() =>
 const latestCompleteness = computed(() =>
   reactStore.latestStep?.sql_completeness ?? null
 )
+
+const progressHeadline = computed(() => reactStore.progressHeadline)
+const progressDetails = computed(() => reactStore.progressDetails)
+const progressDetailsAll = computed(() => reactStore.progressDetailsAll)
+const progressDetailsHiddenCount = computed(() => reactStore.progressDetailsHiddenCount)
+const estimatedProgressPercent = computed(() => reactStore.estimatedProgressPercent)
+
+function getStageLabel(stage: string): string {
+  return getText2SqlStageLabelKo(stage)
+}
+
+const runningStatusText = computed(() => {
+  // ReAct 모드: 진행 headline이 있으면 우선 사용
+  const h = progressHeadline.value
+  return h ? `🧠 ${h}` : '🧠 AI가 분석 중...'
+})
 
 // ============================================================================
 // Current SQL diff (right panel only)
@@ -983,7 +1115,7 @@ function handleScroll() {
 function scrollToBottom(force = false) {
   // 사용자가 위로 스크롤한 경우 자동 스크롤 안함 (force가 아닌 경우)
   if (isUserScrolledUp.value && !force) return
-  
+
   nextTick(() => {
     if (chatContainer.value) {
       chatContainer.value.scrollTop = chatContainer.value.scrollHeight
@@ -1044,23 +1176,22 @@ function startNewQuery() {
   if (reactStore.isRunning) {
     reactStore.cancel()
   }
-  if (langchainStore.isRunning) {
-    langchainStore.cancel()
-  }
-  
+  // 연속질문 컨텍스트 초기화 (완전한 새 대화)
+  reactStore.clear()
+
   // 채팅 메시지 초기화
   chatMessages.value = []
-  
+
   // 입력창 초기화 및 포커스
   inputText.value = ''
   nextTick(() => {
     inputRef.value?.focus()
   })
-  
+
   // SQL 디스플레이 초기화
   sqlDisplayLines.value = []
   previousSqlLines.value = []
-  
+
   // 스크롤 상태 초기화
   isUserScrolledUp.value = false
 }
@@ -1089,7 +1220,7 @@ async function handleSubmit() {
 
   const text = inputText.value.trim()
   inputText.value = ''
-  
+
   // 최근 쿼리 저장 (사용자 응답 제외)
   if (!reactStore.isWaitingUser) {
     saveRecentQuery(text)
@@ -1099,17 +1230,10 @@ async function handleSubmit() {
     // 사용자 응답 (ReAct 모드)
     addMessage({ type: 'user', content: text })
     await reactStore.continueWithResponse(text)
-  } else if (mode.value === 'langchain') {
-    // LangChain 빠른 검색 모드
-    chatMessages.value = []
-    addMessage({ type: 'user', content: text })
-    await langchainStore.start(text, {
-      maxIterations: maxToolCalls.value,
-      maxSqlSeconds: maxSqlSeconds.value,
-    })
   } else {
     // ReAct 자연어 검색 모드
-    chatMessages.value = []
+    // NOTE: 연속질문 UX를 위해 채팅 내역은 보존한다.
+    // 완전히 새 대화로 시작하고 싶으면 "새 쿼리" 버튼을 사용.
     addMessage({ type: 'user', content: text })
     
     // 도메인 레이어 모드면 ObjectType(Materialized View) 테이블만 검색
@@ -1124,8 +1248,7 @@ async function handleSubmit() {
       useCache: useCache.value,
       schemaFilter,
       objectTypeOnly: props.domainLayerMode,  // ObjectType 테이블만 검색
-      linkedObjectTypes: props.linkedObjectTypes,  // 연결된 ObjectType 정보 (프롬프트 확장용)
-      preferFormula: preferFormula.value  // 계리수식 우선 검색
+      linkedObjectTypes: props.linkedObjectTypes  // 연결된 ObjectType 정보 (프롬프트 확장용)
     })
   }
 }
@@ -1135,11 +1258,7 @@ function handleNewline(_e: KeyboardEvent) {
 }
 
 function handleCancel() {
-  if (mode.value === 'langchain') {
-    langchainStore.cancel()
-  } else {
-    reactStore.cancel()
-  }
+  reactStore.cancel()
   inputText.value = ''
   addMessage({ type: 'error', content: '작업이 중단되었습니다.' })
 }
@@ -1165,6 +1284,8 @@ async function handleResume() {
 
 // Watch for phase changes
 watch(() => reactStore.currentPhase, (phase) => {
+  // 중간 단계(tool/reasoning)는 디버그 모드에서만 채팅에 남긴다.
+  if (!debugRawXml.value) return
   if (phase === 'idle') {
     return
   }
@@ -1173,6 +1294,8 @@ watch(() => reactStore.currentPhase, (phase) => {
   const data = reactStore.currentPhaseData
 
   if (phase === 'acting' && data?.tool_name) {
+    // validate_sql 과정은 채팅 내역에 남길 필요 없음
+    if (data.tool_name === 'validate_sql') return
     addMessage({
       type: 'tool',
       content: '',
@@ -1208,18 +1331,32 @@ watch(() => reactStore.liveByIteration, () => {
   scrollToBottom()
 }, { deep: true })
 
+// 실행 종료 시 진행 카드 접기
+watch(() => reactStore.status, (s, prev) => {
+  if (s === 'running' && prev !== 'running') {
+    // running 시작 시 기본으로 열어둠
+    progressExpanded.value = true
+    return
+  }
+  if (s !== 'running') {
+    progressExpanded.value = false
+  }
+})
+
 // 이전 iteration 저장 (스텝 변경 감지용)
 const previousIterationRef = ref(0)
 
 // Watch for iteration changes - 이전 스텝의 추론 내용을 chatMessages에 저장
 watch(() => reactStore.currentIteration, (newIteration) => {
+  // validate_sql 등 중간 reasoning은 일반 UX에서는 채팅에 남기지 않는다.
+  if (!debugRawXml.value) return
   const prevIteration = previousIterationRef.value
-  
+
   if (newIteration > prevIteration && prevIteration > 0) {
     // 이전 스텝의 추론 내용을 가져와서 저장
     const prevLive = reactStore.liveByIteration[prevIteration]
     const reasoning = prevLive?.sections?.reasoning || ''
-    
+
     if (reasoning) {
       // 이미 해당 스텝의 reasoning이 있는지 확인
       const existingReasoning = chatMessages.value.find(
@@ -1229,14 +1366,17 @@ watch(() => reactStore.currentIteration, (newIteration) => {
         // 도구 정보 수집
         const toolName = prevLive?.sections?.['tool_call.tool_name'] || ''
         const toolParams = prevLive?.sections?.['tool_call.parameters'] || ''
-        
+
+        // validate_sql 과정은 채팅 내역에 남길 필요 없음
+        if (toolName === 'validate_sql') return
+
         // 해당 스텝의 tool 메시지에서 result 가져오기
         const toolMsg = chatMessages.value.find(
           m => m.type === 'tool' && m.step === prevIteration
         )
-        
+
         console.log(`[Reasoning] Adding step ${prevIteration}:`, { reasoning: reasoning.slice(0, 50), toolName })
-        
+
         addMessage({
           type: 'reasoning',
           content: reasoning,
@@ -1257,9 +1397,12 @@ watch(() => reactStore.currentIteration, (newIteration) => {
 
 // Watch for steps completion - 완료된 스텝의 reasoning 저장 (백업)
 watch(() => reactStore.steps, (steps) => {
+  // validate_sql 등 중간 step은 디버그 모드에서만 노출
+  if (!debugRawXml.value) return
   steps.forEach(step => {
     if (!step.reasoning) return
-    
+    if (step.tool_call?.name === 'validate_sql') return
+
     const existingReasoning = chatMessages.value.find(
       m => m.type === 'reasoning' && m.step === step.iteration
     )
@@ -1296,7 +1439,7 @@ watch(() => reactStore.questionToUser, (question) => {
 // Watch for completion (ReAct)
 watch(() => reactStore.status, (status) => {
   if (mode.value !== 'react') return
-  
+
   if (status === 'completed') {
     if (reactStore.finalSql) {
       addMessage({
@@ -1313,7 +1456,9 @@ watch(() => reactStore.status, (status) => {
         execTime: Math.round(reactStore.executionResult.execution_time_ms),
         data: reactStore.executionResult,
         sql: reactStore.finalSql || undefined,
-        question: reactStore.currentQuestion
+        question: reactStore.currentQuestion,
+        feedbackRequired: reactStore.feedbackRequired,
+        fromCache: reactStore.fromCache
       })
     }
   } else if (status === 'error' && reactStore.error) {
@@ -1324,76 +1469,19 @@ watch(() => reactStore.status, (status) => {
   }
 })
 
-// Watch for completion (LangChain)
-watch(() => langchainStore.status, (status) => {
-  if (mode.value !== 'langchain') return
-  
-  if (status === 'completed' && langchainStore.finalOutput) {
-    addMessage({
-      type: 'sql',
-      content: langchainStore.finalOutput
-    })
-  } else if (status === 'error' && langchainStore.error) {
-    addMessage({
-      type: 'error',
-      content: langchainStore.error
-    })
-  }
-})
-
-// Watch for LangChain phase changes
-watch(() => langchainStore.currentPhase, (phase) => {
-  if (mode.value !== 'langchain') return
-  
-  const currentStep = langchainStore.currentStep
-  
-  if (phase === 'thinking') {
-    addMessage({
-      type: 'thinking',
-      content: 'AI가 분석 중입니다...',
-      step: currentStep,
-    })
-  } else if (phase === 'acting' && langchainStore.currentTool) {
-    addMessage({
-      type: 'tool',
-      content: '',
-      step: currentStep,
-      toolName: langchainStore.currentTool,
-      params: langchainStore.currentToolInput || undefined,
-      isExecuting: true
-    })
-  }
-})
-
-// Watch for LangChain tool results
-watch(() => langchainStore.currentToolResult, (result) => {
-  if (mode.value !== 'langchain' || !result) return
-  
-  const step = langchainStore.currentStep
-  const toolMsg = [...chatMessages.value].reverse().find(
-    m => m.type === 'tool' && m.step === step
-  )
-  if (toolMsg) {
-    updateMessage(toolMsg.id, {
-      result: result,
-      isExecuting: false
-    })
-  }
-})
-
 // 히스토리 항목 선택 핸들러
 function handleHistorySelect(item: QueryHistoryItem) {
   // 선택한 히스토리의 질문과 결과를 표시
   chatMessages.value = []
-  
+
   // 사용자 질문 추가
   addMessage({ type: 'user', content: item.question })
-  
+
   // SQL이 있으면 표시
   if (item.final_sql) {
     addMessage({ type: 'sql', content: item.final_sql })
   }
-  
+
   // 실행 결과가 있으면 표시
   if (item.execution_result) {
     addMessage({
@@ -1406,7 +1494,7 @@ function handleHistorySelect(item: QueryHistoryItem) {
       question: item.question  // OLAP 버튼용 질문
     })
   }
-  
+
   // 에러가 있으면 표시
   if (item.status === 'error' && item.error_message) {
     addMessage({ type: 'error', content: item.error_message })
@@ -1421,11 +1509,11 @@ watch(() => reactStore.status, async (status, oldStatus) => {
   if (status === 'running' && oldStatus !== 'running') {
     saveStartTime = Date.now()
   }
-  
+
   // 완료 또는 에러 시 저장
   if (status === 'completed' || status === 'error') {
     const executionTimeMs = Date.now() - saveStartTime
-    
+
     await historyStore.saveToHistory({
       question: reactStore.currentQuestion,
       final_sql: reactStore.finalSql,
@@ -1440,9 +1528,18 @@ watch(() => reactStore.status, async (status, oldStatus) => {
   }
 })
 
-onMounted(() => {
+onMounted(async () => {
   inputRef.value?.focus()
-  
+
+  // 데이터소스 자동 로드 및 선택: DataSources 탭을 거치지 않고
+  // Text2SQL 탭에 직접 진입해도 정상 동작하도록 보장
+  if (!datasourcesStore.hasDatasources) {
+    await datasourcesStore.fetchDatasources()
+  }
+  if (!datasourcesStore.selectedDatasource && datasourcesStore.datasources.length > 0) {
+    await datasourcesStore.selectDatasource(datasourcesStore.datasources[0])
+  }
+
   // 로컬 스토리지에서 최근 쿼리 불러오기
   if (!props.embedded) {
     loadRecentQueries()
@@ -1562,20 +1659,20 @@ $badge-error: #f87171;
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
-  
+
   .btn-icon {
     font-size: 14px;
   }
-  
+
   .btn-label {
     font-size: 12px;
   }
-  
+
   &:hover {
     transform: translateY(-1px);
     box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
   }
-  
+
   &:active {
     transform: translateY(0);
   }
@@ -1607,25 +1704,25 @@ $badge-error: #f87171;
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
-  
+
   .opt-icon {
     font-size: 12px;
   }
-  
+
   .opt-label {
     font-size: 11px;
   }
-  
+
   &:hover {
     background: var(--color-bg-hover);
     color: var(--color-text);
   }
-  
+
   &.active {
     background: var(--color-accent);
     color: white;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    
+
     .opt-icon {
       filter: drop-shadow(0 0 3px rgba(0, 212, 170, 0.5));
     }
@@ -1695,9 +1792,17 @@ $badge-error: #f87171;
 // Welcome Message
 // ═══════════════════════════════════════════════════════════════
 @keyframes gradient-flow {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
+  0% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: 0% 50%;
+  }
 }
 
 .welcome-message {
@@ -1711,16 +1816,14 @@ $badge-error: #f87171;
     font-weight: 600;
     letter-spacing: -0.03em;
     line-height: 1.3;
-    background: linear-gradient(
-      90deg,
-      #667eea 0%,
-      #764ba2 15%,
-      #f093fb 30%,
-      #f5576c 45%,
-      #fda085 60%,
-      #f6d365 75%,
-      #667eea 100%
-    );
+    background: linear-gradient(90deg,
+        #667eea 0%,
+        #764ba2 15%,
+        #f093fb 30%,
+        #f5576c 45%,
+        #fda085 60%,
+        #f6d365 75%,
+        #667eea 100%);
     background-size: 200% auto;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -1745,7 +1848,7 @@ $badge-error: #f87171;
     margin-bottom: 16px;
     flex-direction: column;
   }
-  
+
   .examples-label {
     font-size: 11px;
     color: var(--color-text-secondary);
@@ -1755,13 +1858,13 @@ $badge-error: #f87171;
     width: 100%;
     text-align: center;
   }
-  
+
   .examples.recent .example-btn {
     background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(168, 85, 247, 0.15));
     border-color: rgba(99, 102, 241, 0.3);
   }
-  
-  .examples > div {
+
+  .examples>div {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
@@ -1863,6 +1966,19 @@ $badge-error: #f87171;
       box-shadow: 0 4px 32px rgba(0, 212, 170, 0.12);
     }
   }
+
+  &.progress {
+    // UX: keep the progress card width stable across stages.
+    // Otherwise, the bubble width changes with chip/headline text length.
+    align-self: stretch;
+    width: 66%;
+    max-width: 66%;
+
+    .message-content {
+      border-color: rgba(56, 189, 248, 0.25);
+      box-shadow: 0 4px 24px rgba(56, 189, 248, 0.08);
+    }
+  }
 }
 
 @keyframes messageSlide {
@@ -1915,6 +2031,158 @@ $badge-error: #f87171;
   padding: 16px 20px;
   min-width: 120px;
 }
+
+.progress-content {
+  width: 100%;
+}
+
+.progress-headline {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.progress-percent {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(0, 212, 170, 0.9), rgba(56, 189, 248, 0.9));
+  transition: width 0.25s ease;
+}
+
+.progress-toggle-btn {
+  margin-left: auto;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--color-text);
+  }
+}
+
+.progress-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.progress-detail-chip {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  color: #38bdf8;
+}
+
+.progress-counts-more {
+  margin-top: 10px;
+}
+
+.progress-counts-summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  user-select: none;
+  outline: none;
+
+  &:hover {
+    color: var(--color-text);
+  }
+}
+
+.progress-counts-summary::-webkit-details-marker {
+  display: none;
+}
+
+.progress-details-all {
+  margin-top: 8px;
+}
+
+.progress-expanded {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.progress-stages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.progress-stage-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.stage-name {
+  color: var(--color-text);
+  flex: 1;
+  min-width: 0;
+}
+
+.stage-status {
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+
+  &.start {
+    background: rgba(251, 191, 36, 0.10);
+    border-color: rgba(251, 191, 36, 0.25);
+    color: #fbbf24;
+  }
+
+  &.done {
+    background: rgba(52, 211, 153, 0.10);
+    border-color: rgba(52, 211, 153, 0.25);
+    color: #34d399;
+  }
+
+  &.error {
+    background: rgba(248, 113, 113, 0.10);
+    border-color: rgba(248, 113, 113, 0.25);
+    color: #f87171;
+  }
+}
+
+.stage-elapsed {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
 
 .live-content {
   width: 100%;
@@ -1972,17 +2240,17 @@ $badge-error: #f87171;
     white-space: pre-wrap;
     word-break: break-word;
   }
-  
+
   .reasoning-sql {
     margin-top: 12px;
-    
+
     .sql-code {
       margin: 0;
       padding: 12px;
       background: var(--chat-code-bg);
       border-radius: 8px;
       overflow-x: auto;
-      
+
       code {
         font-family: 'JetBrains Mono', monospace;
         font-size: 12px;
@@ -1991,7 +2259,7 @@ $badge-error: #f87171;
       }
     }
   }
-  
+
   .details-toggle-btn {
     margin-left: auto;
     padding: 4px 10px;
@@ -2002,43 +2270,43 @@ $badge-error: #f87171;
     font-size: 11px;
     cursor: pointer;
     transition: all 0.2s;
-    
+
     &:hover {
       background: rgba(255, 255, 255, 0.1);
       color: var(--color-text);
     }
   }
-  
+
   .tool-details {
     margin-top: 16px;
     padding: 12px;
     background: rgba(56, 189, 248, 0.05);
     border: 1px solid rgba(56, 189, 248, 0.2);
     border-radius: 8px;
-    
+
     .tool-details-header {
       font-size: 12px;
       font-weight: 600;
       color: #38bdf8;
       margin-bottom: 10px;
     }
-    
+
     .tool-detail-item {
       display: flex;
       gap: 8px;
       margin-bottom: 8px;
       font-size: 12px;
-      
+
       .label {
         color: var(--color-text-muted);
         flex-shrink: 0;
       }
-      
+
       .value {
         color: var(--color-text);
         word-break: break-all;
       }
-      
+
       code.value {
         font-family: 'JetBrains Mono', monospace;
         background: rgba(0, 0, 0, 0.2);
@@ -2046,7 +2314,7 @@ $badge-error: #f87171;
         border-radius: 4px;
       }
     }
-    
+
     .result-preview {
       margin: 4px 0 0;
       padding: 8px;
@@ -2054,7 +2322,7 @@ $badge-error: #f87171;
       border-radius: 4px;
       max-height: 150px;
       overflow: auto;
-      
+
       code {
         font-family: 'JetBrains Mono', monospace;
         font-size: 11px;
@@ -2620,6 +2888,54 @@ $badge-error: #f87171;
   }
 }
 
+// 실행 결과 액션 영역 (피드백/OLAP)
+.result-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  .olap-export-btn {
+    margin-left: 0;
+  }
+}
+
+// 결과 피드백 버튼
+.feedback-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--color-text);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+.feedback-btn.approve {
+  border-color: rgba(52, 211, 153, 0.25);
+  color: #34d399;
+}
+
+.feedback-btn.reject {
+  border-color: rgba(248, 113, 113, 0.25);
+  color: #f87171;
+}
+
 // OLAP 내보내기 버튼
 .olap-export-btn {
   display: inline-flex;
@@ -2908,9 +3224,12 @@ $badge-error: #f87171;
 }
 
 @keyframes pulse-glow {
-  0%, 100% {
+
+  0%,
+  100% {
     box-shadow: 0 0 0 0 rgba(34, 139, 230, 0);
   }
+
   50% {
     box-shadow: 0 0 12px 2px rgba(34, 139, 230, 0.2);
   }
@@ -3419,7 +3738,7 @@ $badge-error: #f87171;
   font-size: 12px;
   cursor: pointer;
   transition: all 0.2s ease;
-  
+
   &:hover {
     background: rgba(255, 255, 255, 0.1);
     color: var(--color-text);
@@ -3442,7 +3761,7 @@ $badge-error: #f87171;
 
 .tool-result-display {
   margin-top: 8px;
-  
+
   .result-code {
     margin: 0;
     padding: 10px;
@@ -3451,7 +3770,7 @@ $badge-error: #f87171;
     max-height: 300px;
     overflow: auto;
     font-size: 11px;
-    
+
     code {
       font-family: 'JetBrains Mono', monospace;
       color: var(--chat-code-text);
@@ -3485,14 +3804,14 @@ $badge-error: #f87171;
 
 .live-sql-preview {
   margin-top: 12px;
-  
+
   .sql-code {
     margin: 0;
     padding: 12px;
     background: var(--chat-code-bg);
     border-radius: 8px;
     overflow-x: auto;
-    
+
     code {
       font-family: 'JetBrains Mono', monospace;
       font-size: 12px;
@@ -3506,7 +3825,7 @@ $badge-error: #f87171;
   padding: 8px 10px;
   background: var(--chat-code-bg);
   border-radius: 6px;
-  
+
   code {
     font-size: 11px;
     font-family: 'JetBrains Mono', monospace;
@@ -3527,7 +3846,7 @@ $badge-error: #f87171;
   font-size: 11px;
   color: var(--color-text-muted);
   margin-top: 6px;
-  
+
   code {
     background: rgba(0, 0, 0, 0.2);
     padding: 4px 8px;

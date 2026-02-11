@@ -284,6 +284,24 @@ export interface ReactExecutionResult {
   execution_time_ms: number
 }
 
+export interface QueryQualityGateRound {
+  accept: boolean
+  confidence: number
+  reasons: string[]
+  risk_flags: string[]
+  summary: string
+}
+
+export interface QueryQualityGate {
+  policy: string
+  threshold: number
+  rounds: number
+  ok: boolean
+  verified_confidence?: number | null
+  results: QueryQualityGateRound[]
+  error?: string | null
+}
+
 /** ReAct 응답 모델 */
 export interface ReactResponseModel {
   status: 'completed' | 'needs_user_input'
@@ -295,19 +313,26 @@ export interface ReactResponseModel {
   partial_sql: string
   remaining_tool_calls: number
   session_state?: string | null
+  conversation_state?: string | null
   question_to_user?: string | null
   warnings?: string[] | null
+  from_cache?: boolean
+  quality_gate?: QueryQualityGate | null
+  feedback_required?: boolean
 }
 
 /** ReAct 요청 */
 export interface ReactRequest {
   question: string
+  /** MindsDB datasource명 (필수) */
+  datasource: string
   dbms?: string | null
   max_tool_calls?: number
   execute_final_sql?: boolean
   max_iterations?: number | null
   session_state?: string | null
   user_response?: string | null
+  conversation_state?: string | null
   max_sql_seconds?: number
   prefer_language?: string
   /** 디버그용: raw XML 토큰 스트림(event=token)을 함께 받을지 */
@@ -324,8 +349,6 @@ export interface ReactRequest {
     columns: Array<{ name: string; type: string }>
     description?: string
   }>
-  /** 계리수식/공식 우선 검색 모드 */
-  prefer_formula?: boolean
 }
 
 /** ReAct Phase 데이터 */
@@ -344,6 +367,83 @@ export type ReactStreamEvent =
       event: 'token'
       iteration: number
       token: string
+    }
+  | {
+      /** 새 세션에서 build_sql_context 선행 호출 완료 알림 */
+      event: 'prefetch'
+      tool_name: 'build_sql_context' | string
+      elapsed_ms: number
+      remaining_tool_calls: number
+    }
+  | {
+      /** 새 세션에서 build_sql_context 선행 호출 실패 알림 */
+      event: 'prefetch_error'
+      tool_name: 'build_sql_context' | string
+      elapsed_ms: number
+      error: string
+    }
+  | {
+      /**
+       * 컨트롤러가 ask_user 직전 자동 문맥 보강을 시도할 때 build_sql_context refresh 완료 알림.
+       * mode=auto 인 경우 enrichment_index/context_delta 등의 필드가 포함될 수 있다.
+       */
+      event: 'context_refresh'
+      tool_name: 'build_sql_context' | string
+      elapsed_ms: number
+      remaining_tool_calls: number
+      mode?: 'auto' | 'manual' | string
+      enrichment_index?: number
+      context_parse_mode?: string
+      context_hash_changed?: boolean
+      context_delta?: {
+        tables_added?: number
+        values_added?: number
+        relationships_added?: number
+      }
+    }
+  | {
+      /** 자동/수동 문맥 보강(build_sql_context refresh) 실패 알림 */
+      event: 'context_refresh_error'
+      tool_name: 'build_sql_context' | string
+      elapsed_ms?: number
+      remaining_tool_calls?: number
+      mode?: 'auto' | 'manual' | string
+      error: string
+    }
+  | {
+      /**
+       * (신규) build_sql_context 내부 단계 진행 이벤트.
+       * 비즈니스 UX에서는 기본적으로 단계명/경과시간/카운트만 요약 표시하고,
+       * 세부(테이블/컬럼/SQL)는 토글에서만 노출한다.
+       */
+      event: 'pipeline_stage'
+      pipeline: 'build_sql_context' | string
+      stage: string
+      status: 'start' | 'done' | 'error'
+      seq: number
+      iteration: number
+      elapsed_ms?: number
+      counts?: Record<string, number>
+      notes?: string[]
+      error?: string
+      ts_ms?: number
+    }
+  | {
+      /**
+       * (신규) build_sql_context 내부 아이템 진행 이벤트.
+       * 현재는 light_queries query preview 진행에 사용.
+       */
+      event: 'pipeline_item'
+      pipeline: 'build_sql_context' | string
+      stage: 'light_queries' | string
+      item_type: 'query_preview' | string
+      iteration: number
+      index: number
+      total: number
+      verdict?: 'PASS' | 'FAIL' | string
+      row_count?: number
+      elapsed_ms?: number
+      ts_ms?: number
     }
   | {
       event: 'section_delta'
@@ -382,9 +482,21 @@ export type ReactStreamEvent =
       state: Record<string, unknown>
     }
   | {
+      /** (호환) 일부 서버에서 completed 대신 complete를 보낼 수 있음 */
+      event: 'complete'
+      response: ReactResponseModel
+      state: Record<string, unknown>
+    }
+  | {
       event: 'needs_user_input'
       response: ReactResponseModel
       state: Record<string, unknown>
+    }
+  | {
+      /** 캐시 히트 알림 (다음 completed 이벤트에서 실제 결과 처리) */
+      event: 'cache_hit'
+      message?: string
+      hit_count?: number
     }
   | {
       event: 'error'
