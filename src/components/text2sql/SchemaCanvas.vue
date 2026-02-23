@@ -1183,6 +1183,16 @@ async function handleRefresh() {
         </button>
       </div>
       
+      <!-- 논리명/물리명 전환 스위치 (범례 숨김 시 독립 표시) -->
+      <div v-if="props.hideLegend && store.nodes.length > 0" class="name-mode-switch">
+        <label class="legend-switch" @click.prevent="store.toggleLogicalNames()">
+          <span class="legend-switch__label">{{ store.showLogicalNames ? '논리명' : '물리명' }}</span>
+          <span class="legend-switch__toggle" :class="{ active: store.showLogicalNames }">
+            <span class="legend-switch__knob"></span>
+          </span>
+        </label>
+      </div>
+      
       <!-- Legend (숨김 가능) -->
       <div v-if="!props.hideLegend" class="canvas-legend">
         <div class="legend-title">메타데이터 출처</div>
@@ -1221,6 +1231,16 @@ async function handleRefresh() {
           />
           <span class="legend-line legend-line--user"></span>
           <span class="legend-label">사용자 입력</span>
+        </label>
+        
+        <div class="legend-divider"></div>
+        
+        <!-- 논리명/물리명 전환 스위치 (범례 내부) -->
+        <label class="legend-switch" @click.prevent="store.toggleLogicalNames()">
+          <span class="legend-switch__label">{{ store.showLogicalNames ? '논리명' : '물리명' }}</span>
+          <span class="legend-switch__toggle" :class="{ active: store.showLogicalNames }">
+            <span class="legend-switch__knob"></span>
+          </span>
         </label>
         
         <div class="legend-divider"></div>
@@ -2453,6 +2473,71 @@ async function handleRefresh() {
   margin: 8px 0;
 }
 
+/* 논리명/물리명 전환 스위치 컨테이너 (항상 표시) */
+.name-mode-switch {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: var(--color-bg-secondary);
+  padding: 8px 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+}
+
+/* 범례가 있으면 스위치를 범례 위에 배치 */
+.canvas-legend + .name-mode-switch,
+.canvas-legend ~ .name-mode-switch {
+  /* 범례와 겹치지 않게 */
+}
+
+.legend-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 0;
+  
+  &__label {
+    font-size: 0.75rem;
+    color: var(--color-text-light);
+    font-weight: 500;
+  }
+  
+  &__toggle {
+    position: relative;
+    width: 32px;
+    height: 18px;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 9px;
+    transition: all 0.2s ease;
+    
+    &.active {
+      background: rgba(0, 212, 170, 0.3);
+      border-color: #00d4aa;
+    }
+  }
+  
+  &__knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    background: var(--color-text-muted);
+    border-radius: 50%;
+    transition: all 0.2s ease;
+    
+    .active & {
+      left: 16px;
+      background: #00d4aa;
+    }
+  }
+}
+
 .legend-tip {
   font-size: 0.7rem;
   color: var(--color-text-muted);
@@ -2714,7 +2799,7 @@ async function handleRefresh() {
   }
   
   &.highlighted {
-    background: rgba(56, 189, 248, 0.25);
+    background: rgba(56, 189, 248, 0.15);
     
     // 왼쪽 강조 바
     &::before {
@@ -2725,18 +2810,18 @@ async function handleRefresh() {
       bottom: 0;
       width: 4px;
       background: linear-gradient(180deg, #38bdf8, #0ea5e9);
-      box-shadow: 0 0 8px rgba(56, 189, 248, 0.6);
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
     }
     
     .source-line-number {
-      color: #38bdf8;
+      color: #0284c7;
       font-weight: 700;
       opacity: 1;
-      background: rgba(56, 189, 248, 0.15);
+      background: rgba(56, 189, 248, 0.12);
     }
     
     .source-line-content {
-      color: #fff;
+      color: #0c4a6e;
     }
   }
 }

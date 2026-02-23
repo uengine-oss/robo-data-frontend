@@ -7,7 +7,7 @@
  * - 'text2sql': neo4j-text2sql (PostgreSQL 인제스천)
  */
 
-import { defineStore, storeToRefs } from 'pinia'
+import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { MarkerType } from '@vue-flow/core'
 import type { Edge, Node } from '@vue-flow/core'
@@ -47,7 +47,6 @@ export interface RelationshipData {
 export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   // Session stores
   const sessionStore = useSessionStore()
-  const { apiKey: sessionApiKey } = storeToRefs(sessionStore)
   
   // Data source selection
   const dataSource = ref<SchemaDataSource>('robo')
@@ -327,6 +326,13 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   function toggleFkVisibility(source: 'ddl' | 'procedure' | 'user') {
     fkVisibility.value[source] = !fkVisibility.value[source]
     updateEdgesFromRelationships()
+  }
+  
+  // 논리명/물리명 표시 전환 (기본: 논리명=description 우선)
+  const showLogicalNames = ref(true)
+  
+  function toggleLogicalNames() {
+    showLogicalNames.value = !showLogicalNames.value
   }
   
   // =========================================================================
@@ -681,7 +687,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       if (dataSource.value === 'robo') {
         // Neo4j 직접 조회 (robo-analyzer)
         const tables = await roboSchemaApi.getTables({
-          limit: 200
+          limit: 1000
         })
         allTables.value = tables.map(t => ({
           name: t.name,
@@ -735,20 +741,13 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       return
     }
     
-    // API 키 확인
-    const apiKey = sessionApiKey.value
-    if (!apiKey) {
-      semanticSearchError.value = 'OpenAI API 키가 필요합니다. 설정에서 API 키를 입력해주세요.'
-      return
-    }
-    
     isSemanticSearching.value = true
     semanticSearchError.value = null
     
     try {
       const results = await roboSchemaApi.semanticSearch(
         query,
-        { limit: 10, apiKey }
+        { limit: 10 }
       )
       
       semanticSearchResults.value = results
@@ -1143,6 +1142,38 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       
       selectedTable.value = table
       selectedTableColumns.value = node.data.columns || []
+      
+      // ObjectType인 경우: 최신 description을 API에서 다시 가져옴
+      if (node.data.isObjectType && node.data.tableName) {
+        try {
+          const response = await fetch(`/api/gateway/ontology/object-types/${encodeURIComponent(node.data.tableName)}`)
+          if (response.ok) {
+            const detail = await response.json()
+            if (detail.columns && detail.columns.length > 0) {
+              // description 정보 병합 (기존 컬럼에 description 업데이트)
+              const updatedColumns = (node.data.columns || []).map((col: Text2SqlColumnInfo) => {
+                const apiCol = detail.columns.find((c: any) => c.name === col.name)
+                if (apiCol?.description && !col.description) {
+                  return { ...col, description: apiCol.description }
+                }
+                return col
+              })
+              node.data.columns = updatedColumns
+              selectedTableColumns.value = updatedColumns
+            }
+            // 테이블 description도 업데이트
+            if (detail.description && !node.data.description) {
+              node.data.description = detail.description
+              if (selectedTable.value) {
+                selectedTable.value = { ...selectedTable.value, description: detail.description }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[SchemaCanvas] ObjectType description 업데이트 실패:', e)
+        }
+      }
+      
       // 상세 패널에서 컬럼 0개로 보이는 경우를 방지하기 위해 지연 로딩 보강
       if ((selectedTableColumns.value?.length || 0) === 0) {
         const loadedColumns = await loadTableColumns(
@@ -2015,6 +2046,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     searchQuery,
     dataSource,
     fkVisibility,  // FK 관계 유형별 표시 상태
+    showLogicalNames,  // 논리명/물리명 전환
     sourceCodePanel,  // 소스 코드 패널 상태
     tableDataPanel,   // 테이블 데이터 조회 패널 상태
     
@@ -2063,6 +2095,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     addAllTablesToCanvas,
     applyAutoLayout,
     toggleFkVisibility,  // FK 표시 토글 함수
+    toggleLogicalNames,  // 논리명/물리명 전환 함수
     
     // 시멘틱 검색
     performSemanticSearch,

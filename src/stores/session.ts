@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 
-const STORAGE_KEY_API_KEY = 'robo-analyzer-api-key'
 const STORAGE_KEY_THEME = 'robo-analyzer-theme'
 
 export type Theme = 'dark' | 'light'
@@ -17,17 +16,7 @@ const saveToStorage = (key: string, value: string): void => {
   localStorage.setItem(key, value)
 }
 
-// 로컬스토리지에서 값 삭제
-const removeFromStorage = (key: string): void => {
-  localStorage.removeItem(key)
-}
-
 export const useSessionStore = defineStore('session', () => {
-  // OpenAI API Key (옵션) - 로컬스토리지에서 로드
-  const apiKey = ref<string>(
-    loadFromStorage(STORAGE_KEY_API_KEY, '')
-  )
-  
   // 테마 (dark/light) - 로컬스토리지에서 로드, 기본값 dark
   const theme = ref<Theme>(
     (loadFromStorage(STORAGE_KEY_THEME, 'dark') as Theme)
@@ -75,27 +64,19 @@ export const useSessionStore = defineStore('session', () => {
   }
   const ontologyTransferData = ref<OntologyTransferData | null>(null)
   
-  // API Key 변경 시 로컬스토리지에 저장
-  watch(apiKey, (newKey) => {
-    saveToStorage(STORAGE_KEY_API_KEY, newKey)
-  }, { immediate: true })
-  
   // 테마 변경 시 로컬스토리지에 저장 및 DOM에 적용
   watch(theme, (newTheme) => {
     saveToStorage(STORAGE_KEY_THEME, newTheme)
     document.documentElement.setAttribute('data-theme', newTheme)
   }, { immediate: true })
   
-  // 새 세션 생성 (로컬스토리지도 초기화)
+  // 새 세션 생성
   const createNewSession = () => {
-    apiKey.value = ''
     activeTab.value = 'upload'
   }
   
-  // 세션 초기화 (로컬스토리지 완전 삭제)
+  // 세션 초기화
   const clearSession = () => {
-    removeFromStorage(STORAGE_KEY_API_KEY)
-    apiKey.value = ''
     activeTab.value = 'upload'
   }
   
@@ -204,11 +185,6 @@ export const useSessionStore = defineStore('session', () => {
     return data
   }
   
-  // API Key 설정
-  const setApiKey = (key: string) => {
-    apiKey.value = key
-  }
-  
   // 테마 설정
   const setTheme = (newTheme: Theme) => {
     theme.value = newTheme
@@ -219,21 +195,16 @@ export const useSessionStore = defineStore('session', () => {
     theme.value = theme.value === 'dark' ? 'light' : 'dark'
   }
   
-  // 헤더 생성
+  // 헤더 생성 (API 키는 서버 환경변수에서 처리)
   const getHeaders = (): Record<string, string> => {
     const headers: Record<string, string> = {
       'Accept-Language': 'ko'
-    }
-    
-    if (apiKey.value) {
-      headers['OpenAI-Api-Key'] = apiKey.value
     }
     
     return headers
   }
   
   return {
-    apiKey,
     activeTab,
     theme,
     olapTransferData,
@@ -244,7 +215,6 @@ export const useSessionStore = defineStore('session', () => {
     ontologyTransferData,
     createNewSession,
     clearSession,
-    setApiKey,
     setTheme,
     toggleTheme,
     setActiveTab,

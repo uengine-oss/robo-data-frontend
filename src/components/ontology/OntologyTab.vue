@@ -2,6 +2,7 @@
 /**
  * OntologyTab.vue
  * 도메인 온톨로지 스키마 생성 및 모니터링 메인 탭
+ * What-if 분석 패널 통합
  */
 import { ref, computed, onMounted } from 'vue'
 import OntologyWizard from './OntologyWizard.vue'
@@ -9,6 +10,7 @@ import OntologyCanvas from './OntologyCanvas.vue'
 import InstancePanel from './InstancePanel.vue'
 import FeedbackModal from './FeedbackModal.vue'
 import SchemaSelector from './SchemaSelector.vue'
+import WhatIfPanel from './whatif/WhatIfPanel.vue'
 import { useOntologyStore } from '@/stores/ontology'
 import { storeToRefs } from 'pinia'
 import type { OntologySchema } from '@/types'
@@ -36,6 +38,12 @@ const isGenerating = computed(() => wizard.value.isGenerating)
 // 인스턴스 패널 상태
 const isInstancePanelOpen = ref(false)
 
+// What-if 패널 상태
+const isWhatIfOpen = ref(false)
+
+// 현재 스키마 ID
+const currentSchemaId = computed(() => schema.value?.id || '')
+
 // 피드백 제출
 async function handleFeedbackSubmit() {
   if (!feedbackText.value.trim()) return
@@ -58,18 +66,28 @@ function closeInstancePanel() {
 // 새 온톨로지 생성
 function handleNewOntology() {
   store.reset()
+  isWhatIfOpen.value = false
 }
 
 // 스키마 선택 시
 function handleSchemaSelected(selectedSchema: OntologySchema) {
   store.applySchema(selectedSchema)
   store.setWizardStep('binding')
+  isWhatIfOpen.value = false
 }
 
 // 스키마 저장
 async function handleSaveSchema() {
   if (schema.value) {
     await store.saveSchema()
+  }
+}
+
+// What-if 패널 토글
+function toggleWhatIf() {
+  isWhatIfOpen.value = !isWhatIfOpen.value
+  if (isWhatIfOpen.value) {
+    isInstancePanelOpen.value = false  // 인스턴스 패널 닫기
   }
 }
 </script>
@@ -104,6 +122,14 @@ async function handleSaveSchema() {
           <span class="node-count">{{ schema?.nodes?.length || 0 }} 노드</span>
         </div>
         <div class="toolbar-right">
+          <button 
+            class="toolbar-btn whatif-btn" 
+            :class="{ active: isWhatIfOpen }"
+            @click="toggleWhatIf"
+          >
+            <span>🔬</span>
+            What-if 분석
+          </button>
           <button class="toolbar-btn save-btn" @click="handleSaveSchema">
             <span>💾</span>
             저장
@@ -119,21 +145,34 @@ async function handleSaveSchema() {
         </div>
       </div>
       
-      <!-- 메인 콘텐츠 영역 -->
-      <div class="ontology-content">
-        <!-- VueFlow 캔버스 -->
-        <OntologyCanvas 
-          :schema="schema"
-          @node-select="handleNodeSelect"
-        />
-        
-        <!-- 인스턴스 패널 (우측) -->
-        <Transition name="slide-right">
-          <InstancePanel 
-            v-if="isInstancePanelOpen && selectedNode"
-            :node="selectedNode"
-            @close="closeInstancePanel"
+      <!-- 메인 콘텐츠 영역 (What-if 패널 열리면 상하 분할) -->
+      <div class="ontology-main" :class="{ 'whatif-active': isWhatIfOpen }">
+        <!-- 상단: 캔버스 + 인스턴스 패널 -->
+        <div class="ontology-content">
+          <!-- VueFlow 캔버스 -->
+          <OntologyCanvas 
+            :schema="schema"
+            @node-select="handleNodeSelect"
           />
+          
+          <!-- 인스턴스 패널 (우측) -->
+          <Transition name="slide-right">
+            <InstancePanel 
+              v-if="isInstancePanelOpen && selectedNode"
+              :node="selectedNode"
+              @close="closeInstancePanel"
+            />
+          </Transition>
+        </div>
+
+        <!-- 하단: What-if 분석 패널 -->
+        <Transition name="slide-up">
+          <div v-if="isWhatIfOpen && currentSchemaId" class="whatif-container">
+            <WhatIfPanel
+              :schema-id="currentSchemaId"
+              @close="isWhatIfOpen = false"
+            />
+          </div>
         </Transition>
       </div>
     </template>
@@ -238,11 +277,48 @@ async function handleSaveSchema() {
   }
 }
 
+.ontology-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  &.whatif-active {
+    .ontology-content {
+      flex: 1;
+      min-height: 200px;
+    }
+    .whatif-container {
+      flex: 1;
+      min-height: 300px;
+      max-height: 50vh;
+    }
+  }
+}
+
 .ontology-content {
   flex: 1;
   display: flex;
   overflow: hidden;
   position: relative;
+}
+
+.whatif-container {
+  overflow: hidden;
+  border-top: 2px solid var(--color-primary, #6366f1);
+}
+
+// What-if 버튼 활성 상태
+.whatif-btn {
+  &.active {
+    background: var(--color-primary, #6366f1) !important;
+    color: #fff !important;
+    border-color: var(--color-primary, #6366f1) !important;
+  }
+  &:hover:not(.active) {
+    border-color: var(--color-primary, #6366f1);
+    color: var(--color-primary, #6366f1);
+  }
 }
 
 // 슬라이드 애니메이션
@@ -255,5 +331,22 @@ async function handleSaveSchema() {
 .slide-right-leave-to {
   transform: translateX(100%);
   opacity: 0;
+}
+
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: max-height 0.4s ease, opacity 0.3s ease;
+}
+
+.slide-up-enter-from,
+.slide-up-leave-to {
+  max-height: 0;
+  opacity: 0;
+}
+
+.slide-up-enter-to,
+.slide-up-leave-from {
+  max-height: 50vh;
+  opacity: 1;
 }
 </style>

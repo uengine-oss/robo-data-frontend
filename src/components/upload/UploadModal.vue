@@ -27,6 +27,8 @@ const emit = defineEmits<{
 }>()
 const files = ref<File[]>([...(props.initialFiles || [])])
 const sourceType = ref<SourceType>('java')
+// 사용자가 수동으로 소스 타입을 변경했는지 추적
+const userManuallySelectedType = ref(false)
 
 // 데이터 소스 스토어
 const datasourcesStore = useDatasourcesStore()
@@ -59,11 +61,14 @@ onMounted(async () => {
 const autoDetectedType = ref<SourceType | null>(null)
 const detectionConfidence = ref<string>('')
 
-// 자동 감지 결과가 오면 sourceType 자동 설정
+// 자동 감지 결과가 오면 sourceType 자동 설정 (사용자 수동 선택 존중)
 watch(() => props.detectedTypes, (detected) => {
   if (detected?.summary) {
     const suggested = detected.summary.suggestedTarget as SourceType
-    sourceType.value = suggested
+    // 사용자가 이미 수동으로 선택한 경우 자동 감지로 덮어쓰지 않음
+    if (!userManuallySelectedType.value) {
+      sourceType.value = suggested
+    }
     autoDetectedType.value = suggested
     
     // 신뢰도 계산 (상위 타입 비율)
@@ -198,10 +203,9 @@ const hasFiles = computed(() => files.value.length > 0)
 // 전체 파일 수
 const totalFileCount = computed(() => files.value.length)
 
-// 소스 타입 옵션
+// 소스 타입 옵션 (antlr-code-parser에서 지원하는 타입만)
 const sourceTypeOptions: { value: SourceType; label: string }[] = [
   { value: 'java', label: 'Java' },
-  { value: 'python', label: 'Python' },
   { value: 'postgresql', label: 'PostgreSQL' },
   { value: 'oracle', label: 'Oracle' }
 ]
@@ -232,14 +236,17 @@ const detectSourceType = (files: File[]): SourceType | null => {
   return null
 }
 
-// 파일이 변경되면 자동으로 소스 타입 감지 (기본값 설정만)
+// 파일이 변경되면 자동으로 소스 타입 감지 (초기 설정만, 사용자 수동 선택 존중)
 watch(files, (newFiles) => {
   if (newFiles.length === 0) return
+  // 사용자가 이미 수동으로 소스 타입을 선택한 경우 자동 감지로 덮어쓰지 않음
+  if (userManuallySelectedType.value) return
   
   const detected = detectSourceType(newFiles)
-  // 자동 감지가 가능한 경우(Java, Python)에만 자동 설정
+  // 자동 감지가 가능한 경우(Java)에만 자동 설정
   // SQL인 경우는 사용자가 직접 선택해야 함
-  if (detected === 'java' || detected === 'python') {
+  // Python은 antlr-code-parser에서 미지원이므로 자동 설정하지 않음
+  if (detected === 'java') {
     sourceType.value = detected
   }
 }, { deep: true })
@@ -615,6 +622,7 @@ const moveFileRelPath = (sourceRelPath: string, targetFolderRelPath: string) => 
               v-model="sourceType" 
               class="select select--compact"
               :class="{ 'auto-detected': autoDetectedType && sourceType === autoDetectedType }"
+              @change="userManuallySelectedType = true"
             >
               <option v-for="option in sourceTypeOptions" :key="option.value" :value="option.value">
                 {{ option.label }}

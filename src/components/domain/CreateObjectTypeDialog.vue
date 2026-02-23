@@ -161,6 +161,16 @@ function selectDataSource(type: DataSourceType) {
   }
 }
 
+// SQL에서 datasource.schema.table 패턴의 datasource를 자동 감지
+function detectDatasourceFromSql(sql: string): string | null {
+  // FROM datasource.schema.table 패턴 (3단 이름)
+  const match = sql.match(/(?:FROM|JOIN)\s+([a-zA-Z_]\w*)\.([a-zA-Z_]\w*)\.([a-zA-Z_]\w*)/i)
+  if (match) {
+    return match[1]  // 첫 번째 부분이 datasource
+  }
+  return null
+}
+
 // 직접 SQL 실행
 async function executeSql() {
   if (!directSqlInput.value.trim()) {
@@ -172,8 +182,12 @@ async function executeSql() {
   sqlExecutionError.value = null
   
   try {
-    const selectedDs = datasourcesStore.selectedDatasource
-    if (!selectedDs?.name) {
+    // 1) 선택된 데이터소스 우선, 없으면 SQL에서 자동 감지
+    let datasourceName = datasourcesStore.selectedDatasource?.name
+    if (!datasourceName) {
+      datasourceName = detectDatasourceFromSql(directSqlInput.value) || undefined
+    }
+    if (!datasourceName) {
       throw new Error('데이터소스를 선택해주세요')
     }
     const response = await fetch('/api/gateway/text2sql/direct-sql/stream', {
@@ -181,7 +195,7 @@ async function executeSql() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         sql: directSqlInput.value,
-        datasource: selectedDs.name
+        datasource: datasourceName
       })
     })
     
@@ -720,9 +734,24 @@ onMounted(async () => {
               <textarea 
                 v-model="directSqlInput"
                 class="sql-editor"
-                placeholder="SELECT column1, column2, ...&#10;FROM table_name&#10;WHERE ..."
+                placeholder="SELECT column1, column2, ...&#10;FROM datasource.schema.table&#10;WHERE ..."
                 rows="10"
               ></textarea>
+              
+              <!-- 데이터소스 선택 또는 자동 감지 -->
+              <div class="datasource-selector">
+                <template v-if="datasourcesStore.selectedDatasource">
+                  <span class="ds-label">데이터소스:</span>
+                  <span class="ds-name">{{ datasourcesStore.selectedDatasource.name }}</span>
+                </template>
+                <template v-else-if="detectDatasourceFromSql(directSqlInput)">
+                  <span class="ds-label">자동 감지된 데이터소스:</span>
+                  <span class="ds-name ds-auto">{{ detectDatasourceFromSql(directSqlInput) }}</span>
+                </template>
+                <template v-else>
+                  <span class="ds-warning">데이터소스를 선택해주세요</span>
+                </template>
+              </div>
               
               <div v-if="sqlExecutionError" class="error-message">
                 {{ sqlExecutionError }}
@@ -1968,6 +1997,35 @@ onMounted(async () => {
   overflow-x: auto;
   white-space: pre-wrap;
   max-height: 150px;
+}
+
+.datasource-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-top: 8px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  
+  .ds-label {
+    color: var(--color-text-muted);
+  }
+  
+  .ds-name {
+    color: #00d4aa;
+    font-weight: 600;
+    font-family: 'Fira Code', monospace;
+    
+    &.ds-auto {
+      color: #a78bfa;
+    }
+  }
+  
+  .ds-warning {
+    color: #f87171;
+    font-size: 0.85rem;
+  }
 }
 
 .error-message {

@@ -818,6 +818,14 @@ function getDescriptionSourceLabel(source?: string): string {
   }
 }
 
+/* 실제 컬럼명 (description이 레이블일 때 서브라인으로 표시) */
+.column-item__real-name {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  opacity: 0.8;
+}
+
 .column-item__edit {
   margin-top: 8px;
   

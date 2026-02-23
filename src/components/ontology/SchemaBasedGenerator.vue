@@ -288,7 +288,7 @@ async function generateOntology() {
 }
 
 .back-btn:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-bg-hover);
 }
 
 .loading-state {
@@ -325,7 +325,7 @@ async function generateOntology() {
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: 8px;
   cursor: pointer;
@@ -334,8 +334,8 @@ async function generateOntology() {
 
 .datasource-item:hover,
 .schema-item:hover {
-  background: rgba(59, 130, 246, 0.1);
-  border-color: var(--color-primary);
+  background: var(--color-bg-hover);
+  border-color: var(--color-accent);
 }
 
 .ds-icon,
@@ -362,13 +362,13 @@ async function generateOntology() {
   gap: 8px;
   margin-bottom: 20px;
   padding: 12px;
-  background: rgba(59, 130, 246, 0.1);
+  background: var(--color-bg-tertiary);
   border-radius: 8px;
 }
 
 .info-badge {
   padding: 4px 10px;
-  background: var(--color-primary);
+  background: var(--color-accent);
   border-radius: 4px;
   font-size: 0.85rem;
   font-weight: 500;
@@ -388,29 +388,34 @@ async function generateOntology() {
   margin-bottom: 6px;
   font-size: 0.85rem;
   font-weight: 500;
-  color: var(--color-text-muted);
+  color: var(--color-text-light);
 }
 
 .form-input,
 .form-textarea {
   width: 100%;
   padding: 10px 12px;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: 6px;
-  color: var(--color-text);
+  color: var(--color-text-bright);
   font-size: 0.9rem;
 }
 
 .form-input:focus,
 .form-textarea:focus {
   outline: none;
-  border-color: var(--color-primary);
+  border-color: var(--color-accent);
 }
 
 .form-textarea {
   min-height: 80px;
   resize: vertical;
+}
+
+.form-input::placeholder,
+.form-textarea::placeholder {
+  color: var(--color-text-muted);
 }
 
 .checkbox-group label {
@@ -430,7 +435,7 @@ async function generateOntology() {
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 6px;
-  color: #fca5a5;
+  color: var(--color-error);
   font-size: 0.85rem;
   margin-bottom: 16px;
 }
@@ -440,7 +445,7 @@ async function generateOntology() {
   background: rgba(34, 197, 94, 0.1);
   border: 1px solid rgba(34, 197, 94, 0.3);
   border-radius: 6px;
-  color: #86efac;
+  color: var(--color-success);
   font-size: 0.85rem;
   margin-bottom: 16px;
 }
@@ -463,7 +468,7 @@ async function generateOntology() {
 
 .generate-btn {
   padding: 10px 24px;
-  background: var(--color-primary);
+  background: var(--color-accent);
   border: none;
   border-radius: 6px;
   color: white;
@@ -473,7 +478,7 @@ async function generateOntology() {
 }
 
 .generate-btn:hover:not(:disabled) {
-  background: var(--color-primary-dark, #2563eb);
+  background: var(--color-accent-hover);
 }
 
 .generate-btn:disabled {

@@ -6,7 +6,6 @@
  * 설정 항목:
  * - 노드 표시 제한 (MAX_DISPLAY_NODES)
  * - UML 다이어그램 깊이
- * - API Key
  * - 데이터 삭제
  */
 
@@ -18,7 +17,6 @@ import {
   IconSettings, 
   IconX, 
   IconBarChart, 
-  IconKey, 
   IconAlertTriangle,
   IconRefresh,
   IconTrash,
@@ -47,7 +45,7 @@ const emit = defineEmits<{
 const sessionStore = useSessionStore()
 const projectStore = useProjectStore()
 
-const { apiKey: storeApiKey, theme: storeTheme } = storeToRefs(sessionStore)
+const { theme: storeTheme } = storeToRefs(sessionStore)
 const { graphData } = storeToRefs(projectStore)
 
 // ============================================================================
@@ -63,25 +61,14 @@ const tempUmlDepth = ref(3)
 /** 테마 (dark/light) */
 const tempTheme = ref<'dark' | 'light'>('dark')
 
-/** API Key (마스킹) */
-const tempApiKey = ref('')
-const showApiKey = ref(false)
-
 /** 앱 타이틀 */
 const tempAppTitle = ref(DEFAULT_APP_TITLE)
 
 /** 변경 여부 */
 const hasChanges = ref(false)
 
-// store의 apiKey와 동기화
-watch(storeApiKey, (value) => {
-  if (value) {
-    tempApiKey.value = value
-  }
-}, { immediate: true })
-
 /** 활성 설정 섹션 */
-const activeSection = ref<'general' | 'display' | 'api' | 'danger'>('general')
+const activeSection = ref<'general' | 'display' | 'danger'>('general')
 
 // ============================================================================
 // Computed
@@ -94,14 +81,6 @@ void _currentNodeCount // suppress unused warning
 /** 현재 그래프 관계 수 */
 const _currentRelCount = computed(() => graphData.value?.links.length || 0)
 void _currentRelCount // suppress unused warning
-
-/** API Key 마스킹 */
-const _maskedApiKey = computed(() => {
-  if (!tempApiKey.value) return '설정되지 않음'
-  if (showApiKey.value) return tempApiKey.value
-  return tempApiKey.value.slice(0, 8) + '••••••••••••••••'
-})
-void _maskedApiKey // suppress unused warning
 
 // ============================================================================
 // 핸들러
@@ -145,11 +124,6 @@ function handleSaveAndApply() {
   window.dispatchEvent(new CustomEvent('nodeLimitChange', { detail: tempNodeLimit.value }))
   window.dispatchEvent(new CustomEvent('umlDepthChange', { detail: tempUmlDepth.value }))
   
-  // API Key 저장
-  if (tempApiKey.value) {
-    sessionStore.setApiKey(tempApiKey.value)
-  }
-  
   // 앱 타이틀 저장
   setAppTitle(tempAppTitle.value || DEFAULT_APP_TITLE)
   
@@ -162,7 +136,7 @@ function handleSaveAndApply() {
 // ============================================================================
 
 // 값 변경 감지 (저장 버튼 활성화용)
-watch([tempNodeLimit, tempUmlDepth, tempApiKey, tempAppTitle, tempTheme], () => {
+watch([tempNodeLimit, tempUmlDepth, tempAppTitle, tempTheme], () => {
   if (props.isOpen) {
     hasChanges.value = true
   }
@@ -186,10 +160,6 @@ watch(() => props.isOpen, (isOpen) => {
     // 테마 로드
     if (storeTheme.value) {
       tempTheme.value = storeTheme.value
-    }
-    // API Key 로드
-    if (storeApiKey.value) {
-      tempApiKey.value = storeApiKey.value
     }
     // 앱 타이틀 로드
     tempAppTitle.value = getAppTitle()
@@ -232,13 +202,6 @@ watch(() => props.isOpen, (isOpen) => {
               >
                 <IconBarChart :size="16" />
                 표시 설정
-              </button>
-              <button 
-                :class="{ active: activeSection === 'api' }"
-                @click="activeSection = 'api'"
-              >
-                <IconKey :size="16" />
-                API 설정
               </button>
               <button 
                 :class="{ active: activeSection === 'danger' }"
@@ -343,44 +306,6 @@ watch(() => props.isOpen, (isOpen) => {
                       <span class="theme-icon">☀️</span>
                       <span>라이트</span>
                     </button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- API 설정 -->
-              <div v-if="activeSection === 'api'" class="settings-section">
-                <h3>API 설정</h3>
-                
-                <div class="setting-item">
-                  <div class="setting-label">
-                    <span class="label-text">OpenAI API Key</span>
-                    <span class="label-desc">
-                      코드 변환에 사용되는 OpenAI API 키입니다.
-                      키는 브라우저에 안전하게 저장됩니다.
-                    </span>
-                  </div>
-                  <div class="setting-control api-key-control">
-                    <div class="input-wrapper">
-                      <input 
-                        :type="showApiKey ? 'text' : 'password'"
-                        v-model="tempApiKey" 
-                        placeholder="sk-..."
-                      />
-                      <button 
-                        class="toggle-visibility" 
-                        @click="showApiKey = !showApiKey"
-                        :title="showApiKey ? '숨기기' : '보기'"
-                      >
-                        <svg v-if="showApiKey" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
-                          <line x1="1" y1="1" x2="23" y2="23"/>
-                        </svg>
-                        <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                          <circle cx="12" cy="12" r="3"/>
-                        </svg>
-                      </button>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -735,41 +660,6 @@ watch(() => props.isOpen, (isOpen) => {
     font-size: 14px;
   }
 
-  &.api-key-control {
-    flex-wrap: wrap;
-
-    .input-wrapper {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      min-width: 250px;
-
-      input {
-        flex: 1;
-        width: auto;
-      }
-
-      .toggle-visibility {
-        width: 36px;
-        height: 36px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: var(--color-bg-tertiary);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-md);
-        color: var(--color-text-light);
-        cursor: pointer;
-        transition: all 0.15s;
-
-        &:hover {
-          background: var(--color-bg-elevated);
-          color: var(--color-text);
-        }
-      }
-    }
-  }
 }
 
 // ============================================================================
