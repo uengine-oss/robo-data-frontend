@@ -723,6 +723,7 @@
                   <span v-if="linkingProgress.nodeStatuses[node.id]?.status === 'searching'" class="searching-icon">⏳</span>
                   <span v-else-if="linkingProgress.nodeStatuses[node.id]?.status === 'found'">✅</span>
                   <span v-else-if="linkingProgress.nodeStatuses[node.id]?.status === 'not_found'">❌</span>
+                  <span v-else-if="linkingProgress.nodeStatuses[node.id]?.status === 'error'">⚠️</span>
                   <span v-else>⏸️</span>
                 </span>
                 <span class="node-name">{{ node.name }}</span>
@@ -755,6 +756,10 @@
               <div class="stat-item not-found">
                 <span class="stat-value">{{ getMappingStats().notFound }}</span>
                 <span class="stat-label">미발견</span>
+              </div>
+              <div class="stat-item error">
+                <span class="stat-value">{{ getMappingStats().error }}</span>
+                <span class="stat-label">오류</span>
               </div>
             </div>
             
@@ -4401,6 +4406,7 @@ function getMappingStats() {
     total: mappings.length,
     found: mappings.filter(m => m.status === 'found' || m.status === 'confirmed').length,
     notFound: mappings.filter(m => m.status === 'not_found').length,
+    error: mappings.filter(m => m.status === 'error').length,
     confirmed: mappings.filter(m => m.status === 'confirmed').length
   }
 }
@@ -4873,6 +4879,7 @@ function getStatusIcon(status: string) {
     case 'confirmed': return '✅'
     case 'found': return '🔍'
     case 'not_found': return '❌'
+    case 'error': return '⚠️'
     case 'searching': return '⏳'
     default: return '⏳'
   }
@@ -4883,6 +4890,7 @@ function getStatusText(status: string) {
     case 'confirmed': return '확정됨'
     case 'found': return '후보 발견'
     case 'not_found': return '미발견'
+    case 'error': return '오류'
     case 'searching': return '검색 중'
     default: return '대기'
   }
@@ -7777,6 +7785,11 @@ watch(detailPanelTab, (newTab, oldTab) => {
   background: rgba(239, 68, 68, 0.1);
 }
 
+.node-progress-item.error {
+  border-left-color: #f97316;
+  background: rgba(249, 115, 22, 0.1);
+}
+
 .node-status-icon {
   font-size: 1rem;
   width: 24px;
@@ -7858,6 +7871,7 @@ watch(detailPanelTab, (newTab, oldTab) => {
 .stat-item.found .stat-value { color: #22c55e; }
 .stat-item.confirmed .stat-value { color: #3b82f6; }
 .stat-item.not-found .stat-value { color: #ef4444; }
+.stat-item.error .stat-value { color: #f97316; }
 
 .mapping-list {
   max-height: 400px;
@@ -9871,6 +9885,11 @@ watch(detailPanelTab, (newTab, oldTab) => {
 .light-mode .node-progress-item.not_found {
   background: rgba(239, 68, 68, 0.08) !important;
   border-left: 3px solid #ef4444 !important;
+}
+
+.light-mode .node-progress-item.error {
+  background: rgba(249, 115, 22, 0.08) !important;
+  border-left: 3px solid #f97316 !important;
 }
 
 .light-mode .mapping-item {
