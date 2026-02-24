@@ -1432,6 +1432,7 @@ const dataSourceMappings = ref<Record<string, {
   search_query: string
   candidates: Array<{
     table_name: string
+    datasource?: string
     columns: string[]
     sample_data: any[]
     row_count: number
@@ -2159,7 +2160,9 @@ async function fetchDataViaText2SQL(node: OntologyNode, nodeId: string) {
   try {
     // MindsDB-only: datasource is mandatory for /direct-sql
     const ds =
-      selectedDatasource.value && selectedDatasource.value !== '__ontology__'
+      node.dataSourceSchema?.datasource
+        ? String(node.dataSourceSchema.datasource)
+        : selectedDatasource.value && selectedDatasource.value !== '__ontology__'
         ? selectedDatasource.value
         : (node.dataSource || '').split('.').length === 3
           ? (node.dataSource || '').split('.')[0]
@@ -3299,6 +3302,55 @@ function getCytoscapeStyles(): cytoscape.Stylesheet[] {
   ]
 }
 
+function sanitizeRelationshipsForCanvas(
+  rawRelationships: OntologyRelationship[],
+  rawNodes: OntologyNode[]
+): { relationships: OntologyRelationship[]; skipped: number; rekeyed: number } {
+  const nodeIds = new Set(rawNodes.map(node => node.id).filter(Boolean))
+  const usedRelationshipIds = new Set<string>()
+  const sanitizedRelationships: OntologyRelationship[] = []
+  let skipped = 0
+  let rekeyed = 0
+
+  rawRelationships.forEach((rawRel, index) => {
+    if (!rawRel?.source || !rawRel?.target) {
+      skipped += 1
+      return
+    }
+
+    if (!nodeIds.has(rawRel.source) || !nodeIds.has(rawRel.target)) {
+      skipped += 1
+      return
+    }
+
+    const relType = rawRel.type || 'RELATED_TO'
+    const baseId = (rawRel.id || `rel_${rawRel.source}_${rawRel.target}_${relType}`).trim() || `rel_${index + 1}`
+    let uniqueId = baseId
+
+    if (usedRelationshipIds.has(uniqueId)) {
+      let suffix = 2
+      while (usedRelationshipIds.has(`${baseId}__${suffix}`)) {
+        suffix += 1
+      }
+      uniqueId = `${baseId}__${suffix}`
+      rekeyed += 1
+    }
+
+    usedRelationshipIds.add(uniqueId)
+    sanitizedRelationships.push({
+      ...rawRel,
+      id: uniqueId,
+      type: relType
+    })
+  })
+
+  return {
+    relationships: sanitizedRelationships,
+    skipped,
+    rekeyed
+  }
+}
+
 // Cytoscape
 function initCytoscape(shouldRestoreSelection: boolean = false) {
   if (!cytoscapeContainer.value) {
@@ -4291,7 +4343,8 @@ async function confirmDataSourceMapping(nodeId: string, candidate: any) {
           dataSourceSchema: {
             columns: candidate.columns || [],
             sql: candidate.suggested_sql || '',
-            row_count: candidate.row_count || 0
+            row_count: candidate.row_count || 0,
+            datasource: candidate.datasource || '',
           }
         }
         // Vue 반응성을 위해 배열 교체
@@ -4339,15 +4392,66 @@ async function loadSampleData(candidate: any) {
   showSampleDataDialog.value = true
   
   try {
+    const normalizeTableRef = (tableName: string, datasource: string) => {
+      const clean = String(tableName || '').replace(/["`]/g, '')
+      const parts = clean.split('.').filter(Boolean)
+      const ds = String(datasource || '').trim()
+      if (!ds) return clean
+      if (parts.length === 3 && parts[0].toLowerCase() === ds.toLowerCase()) {
+        return `${parts[1]}.${parts[2]}`
+      }
+      if (parts.length >= 2) {
+        return `${parts[parts.length - 2]}.${parts[parts.length - 1]}`
+      }
+      return clean
+    }
+
+    const toObjectRows = (rows: any[], columns: any[]) => {
+      if (!Array.isArray(rows) || rows.length === 0) return []
+      if (Array.isArray(rows[0])) {
+        return rows.map((row: any[]) => {
+          const out: Record<string, any> = {}
+          columns.forEach((c: any, i: number) => {
+            out[String(c)] = row[i]
+          })
+          return out
+        })
+      }
+      return rows
+    }
+
     // 후보의 sample_data가 이미 있으면 사용
     if (candidate.sample_data && candidate.sample_data.length > 0) {
       sampleData.value = candidate.sample_data
+    } else if (candidate?.table_name && candidate?.datasource) {
+      // 자연어 검색 결과 후보는 노드 미확정 상태일 수 있으므로 후보 자체로 직접 조회
+      const tableRef = normalizeTableRef(candidate.table_name, candidate.datasource)
+      const sql = `SELECT * FROM ${tableRef} LIMIT 10`
+      const response = await fetch('/api/gateway/text2sql/direct-sql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sql,
+          datasource: candidate.datasource,
+          max_sql_seconds: 30,
+          format_with_ai: false
+        })
+      })
+      if (response.ok) {
+        const result = await response.json()
+        const rowsRaw = result.rows || result.data || []
+        const columns = result.columns || []
+        sampleData.value = toObjectRows(rowsRaw, columns)
+      }
     } else {
       // API 호출하여 샘플 데이터 가져오기
       const response = await fetch(`/api/gateway/ontology/node/${selectedMappingNodeId.value}/sample-data?limit=10`)
       if (response.ok) {
         const result = await response.json()
-        sampleData.value = result.data?.data || result.data || []
+        const nested = result.data || {}
+        const rowsRaw = nested.data || nested.rows || []
+        const columns = nested.columns || []
+        sampleData.value = toObjectRows(rowsRaw, columns)
       }
     }
   } catch (err) {
@@ -4505,6 +4609,7 @@ async function searchNodeDataSource() {
           
           return {
             table_name: tableName,  // 원본 (datasource.schema.table 또는 schema.table)
+            datasource: selectedDatasource.value || '',
             full_table_name: fullTableName,  // SQL용 (따옴표 포함)
             columns: columns,
             sample_data: rows.slice(0, 5),
@@ -4525,6 +4630,7 @@ async function searchNodeDataSource() {
           if (tableMatch) {
             nodeSearchResults.value = [{
               table_name: tableMatch[1],
+              datasource: selectedDatasource.value || '',
               columns: columns,
               sample_data: rows.slice(0, 5),
               row_count: rows.length,
@@ -4816,6 +4922,7 @@ async function confirmNodeDataSource() {
     candidate = {
       ...searchResult,
       table_name: searchResult.table_name || searchResult.full_table_name?.replace(/"/g, ''),
+      datasource: searchResult.datasource || (selectedDatasource.value !== '__ontology__' ? selectedDatasource.value : ''),
       suggested_sql: searchResult.suggested_sql || `SELECT * FROM ${searchResult.full_table_name || `"${searchResult.table_name}"`} LIMIT 100`
     }
   } else if (nodeDataSourceTab.value === 'manual' && selectedManualTable.value) {
@@ -4833,6 +4940,7 @@ async function confirmNodeDataSource() {
       
       candidate = {
         table_name: tableNameForDataSource,
+        datasource: selectedDatasource.value !== '__ontology__' ? selectedDatasource.value : '',
         columns: [],
         sample_data: [],
         row_count: 0,
@@ -5157,7 +5265,17 @@ function handleStreamEvent(event: any) {
       currentStep.value = '완료'
       if (event.data?.success && event.data?.schema) {
         nodes.value = event.data.schema.nodes || []
-        relationships.value = event.data.schema.relationships || []
+        const sanitizedFromGeneration = sanitizeRelationshipsForCanvas(
+          event.data.schema.relationships || [],
+          nodes.value
+        )
+        relationships.value = sanitizedFromGeneration.relationships
+        if (sanitizedFromGeneration.skipped > 0 || sanitizedFromGeneration.rekeyed > 0) {
+          addLog(
+            `관계 정제 적용: 잘못된 관계 ${sanitizedFromGeneration.skipped}개 제외, 중복 ID ${sanitizedFromGeneration.rekeyed}개 보정`,
+            'warning'
+          )
+        }
         
         // 스키마 ID가 있으면 저장
         if (event.data.schema.id) {
@@ -5583,7 +5701,19 @@ async function loadSchema(schemaId: string) {
     
     // 노드와 관계 로드
     nodes.value = schema.nodes || []
-    relationships.value = schema.relationships || []
+    const sanitizedFromSchema = sanitizeRelationshipsForCanvas(schema.relationships || [], nodes.value)
+    relationships.value = sanitizedFromSchema.relationships
+    if (sanitizedFromSchema.skipped > 0 || sanitizedFromSchema.rekeyed > 0) {
+      console.warn('스키마 관계 정제 적용:', {
+        schemaId,
+        skipped: sanitizedFromSchema.skipped,
+        rekeyed: sanitizedFromSchema.rekeyed
+      })
+      addLog(
+        `관계 정제 적용: 잘못된 관계 ${sanitizedFromSchema.skipped}개 제외, 중복 ID ${sanitizedFromSchema.rekeyed}개 보정`,
+        'warning'
+      )
+    }
     
     console.log(`스키마 로드 완료: ${schema.name} (${nodes.value.length}개 노드, ${relationships.value.length}개 관계)`)
     
