@@ -953,6 +953,18 @@
             <div class="search-input-section">
               <label>검색어 (노드 정보 기반 자동 생성)</label>
               <div class="search-input-wrapper">
+                <select
+                  class="search-datasource-select"
+                  v-model="selectedDatasource"
+                  @change="handleDatasourceChange"
+                  :disabled="loadingTables"
+                  :title="selectedDatasource || '데이터 소스 선택'"
+                >
+                  <option value="">데이터 소스</option>
+                  <option v-for="ds in availableDatasources" :key="ds" :value="ds">
+                    {{ ds }}
+                  </option>
+                </select>
                 <input 
                   v-model="nodeSearchQuery"
                   type="text"
@@ -963,18 +975,18 @@
                 <button 
                   class="search-btn"
                   @click="searchNodeDataSource"
-                  :disabled="nodeSearchLoading"
+                  :disabled="nodeSearchLoading || !selectedDatasource"
                 >
                   {{ nodeSearchLoading ? '검색 중...' : '🔍 검색' }}
                 </button>
               </div>
               <div class="search-hint">
-                💡 노드 이름과 레이어를 기반으로 검색어가 자동 생성됩니다. 필요시 수정하세요.
+                {{ !selectedDatasource ? '⚠️ 데이터 소스를 먼저 선택하세요.' : '💡 노드 이름과 레이어를 기반으로 검색어가 자동 생성됩니다. 필요시 수정하세요.' }}
               </div>
               
               <!-- 검색 진행 상황 표시 -->
-              <div v-if="nodeSearchLoading && nodeSearchStatus" class="search-status">
-                <div class="search-spinner-small"></div>
+              <div v-if="nodeSearchStatus" class="search-status">
+                <div v-if="nodeSearchLoading" class="search-spinner-small"></div>
                 <span>{{ nodeSearchStatus }}</span>
               </div>
               
@@ -1028,7 +1040,7 @@
               </div>
             </div>
             
-            <div v-else-if="nodeSearchQuery && !nodeSearchLoading" class="no-results">
+            <div v-else-if="nodeSearchQuery && !nodeSearchLoading && !nodeSearchStatus" class="no-results">
               <p>검색 결과가 없습니다. 다른 검색어를 시도해보세요.</p>
             </div>
           </div>
@@ -4433,6 +4445,10 @@ async function searchNodeDataSource() {
   selectedSearchResult.value = null
   
   try {
+    if (!selectedDatasource.value && availableDatasources.value.length === 1) {
+      selectedDatasource.value = availableDatasources.value[0]
+    }
+
     if (!selectedDatasource.value) {
       nodeSearchStatus.value = '❌ 데이터소스를 선택해주세요'
       return
@@ -4590,9 +4606,10 @@ async function loadDatasources() {
     if (response.ok) {
       const datasources = await response.json()
       availableDatasources.value = datasources
-      // "온톨로지" 옵션 추가 (ObjectType용)
-      if (datasources.length > 0) {
-        // 데이터 소스 목록에 "온톨로지" 추가하지 않고, 별도로 처리
+      // 단일 데이터소스 환경에서는 자연어 검색 첫 클릭 동작을 위해 자동 선택
+      if (datasources.length === 1) {
+        selectedDatasource.value = datasources[0]
+        await loadSchemasForDatasource(selectedDatasource.value)
       }
     } else {
       const error = await response.json().catch(() => ({ detail: '데이터 소스 목록 조회 실패' }))
@@ -8289,6 +8306,30 @@ watch(detailPanelTab, (newTab, oldTab) => {
   display: flex;
   gap: 8px;
   margin-bottom: 8px;
+  align-items: stretch;
+}
+
+.search-datasource-select {
+  width: 180px;
+  min-width: 140px;
+  padding: 10px 12px;
+  background: var(--color-bg-secondary, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-bright);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.search-datasource-select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.search-datasource-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .search-input {
@@ -8299,6 +8340,7 @@ watch(detailPanelTab, (newTab, oldTab) => {
   border-radius: var(--radius-sm);
   color: var(--color-text-bright);
   font-size: 0.875rem;
+  min-width: 0;
 }
 
 .search-input:focus {
@@ -9719,7 +9761,8 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 .light-mode .datasource-selector select,
 .light-mode .schema-selector select,
-.light-mode .table-search input {
+.light-mode .table-search input,
+.light-mode .search-datasource-select {
   background: #f8fafc !important;
   border-color: #e2e8f0 !important;
   color: #1e293b !important;
