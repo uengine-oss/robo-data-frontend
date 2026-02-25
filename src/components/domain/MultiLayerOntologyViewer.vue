@@ -3114,7 +3114,7 @@ function renderChart() {
     },
     legend: {
       data: yAxes,
-      top: 10,
+      bottom: 0,
       left: 'center',
       itemGap: 20,
       textStyle: {
@@ -3127,7 +3127,8 @@ function renderChart() {
     grid: {
       left: '3%',
       right: '4%',
-      bottom: '3%',
+      top: 40,
+      bottom: '15%',
       containLabel: true
     },
     xAxis: {
