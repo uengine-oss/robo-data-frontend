@@ -3207,12 +3207,16 @@ function renderChart() {
         return
       }
       
-      // ECharts brush 이벤트에서 coordRange 찾기
-      let range: number[] | null = null
+      // ECharts brush 이벤트에서 브러시 범위 추출
+      // - coordRange: [[xStart, xEnd], [yStart, yEnd]] (축 좌표)
+      // - range: [[x1, y1], [x2, y2]] 또는 [start, end] (픽셀/단순 범위)
+      let range: any = null
+      let rangeSource: 'coordRange' | 'pixelRange' | null = null
       
       // 1. params.areas에서 직접 찾기
       if (params?.areas?.length > 0 && params.areas[0]?.coordRange) {
         range = params.areas[0].coordRange
+        rangeSource = 'coordRange'
         console.log('✅ params.areas[0].coordRange에서 찾음:', range)
       }
       // 2. params.batch[0]에서 찾기
@@ -3227,24 +3231,29 @@ function renderChart() {
         // batchItem에 직접 coordRange가 있는지
         if (batchItem?.coordRange) {
           range = batchItem.coordRange
+          rangeSource = 'coordRange'
           console.log('✅ batchItem.coordRange에서 찾음:', range)
         }
         // batchItem.areas[0].coordRange에서 찾기
         else if (batchItem?.areas?.[0]?.coordRange) {
           range = batchItem.areas[0].coordRange
+          rangeSource = 'coordRange'
           console.log('✅ batchItem.areas[0].coordRange에서 찾음:', range)
         }
         // batchItem.selected[0].areas[0].coordRange에서 찾기
         else if (batchItem?.selected?.[0]?.areas?.[0]?.coordRange) {
           range = batchItem.selected[0].areas[0].coordRange
+          rangeSource = 'coordRange'
           console.log('✅ batchItem.selected[0].areas[0].coordRange에서 찾음:', range)
         }
         // batchItem.range에서 찾기 (다른 형식일 수 있음)
         else if (batchItem?.range) {
           if (Array.isArray(batchItem.range)) {
             range = batchItem.range
+            rangeSource = 'pixelRange'
           } else if (typeof batchItem.range === 'object' && batchItem.range.start != null && batchItem.range.end != null) {
             range = [batchItem.range.start, batchItem.range.end]
+            rangeSource = 'pixelRange'
           }
           if (range) {
             console.log('✅ batchItem.range에서 찾음:', range)
@@ -3257,19 +3266,41 @@ function renderChart() {
         return
       }
       
-      console.log('브러시 범위 (원본):', range, '타입:', Array.isArray(range[0]) ? '2D' : '1D')
+      console.log('브러시 범위 (원본):', range, '타입:', Array.isArray(range[0]) ? '2D' : '1D', '소스:', rangeSource)
       
-      // coordRange가 2D 배열인 경우 처리 [[x1, y1], [x2, y2]] -> [x1, x2]
-      let xRange: number[]
+      // source별로 X 범위를 안전하게 추출
+      let xRange: number[] | null = null
       if (Array.isArray(range[0])) {
-        // 2D 배열: [[x1, y1], [x2, y2]] 형태
-        xRange = [range[0][0], range[1][0]]
-        console.log('2D 배열 감지, X 범위 추출:', xRange)
+        if (rangeSource === 'coordRange') {
+          // coordRange 2D: [[xStart, xEnd], [yStart, yEnd]]
+          const xCoordRange = range[0]
+          if (Array.isArray(xCoordRange) && xCoordRange.length >= 2) {
+            xRange = [Number(xCoordRange[0]), Number(xCoordRange[1])]
+            console.log('2D coordRange 감지, X 축 범위 추출:', xRange)
+          }
+        } else {
+          // pixel range 2D: [[x1, y1], [x2, y2]]
+          const p1 = range[0]
+          const p2 = range[1]
+          if (Array.isArray(p1) && p1.length > 0 && Array.isArray(p2) && p2.length > 0) {
+            xRange = [Number(p1[0]), Number(p2[0])]
+            console.log('2D pixel range 감지, X 좌표 추출:', xRange)
+          }
+        }
       } else {
         // 1D 배열: [x1, x2] 형태
-        xRange = range as number[]
+        xRange = [Number(range[0]), Number(range[1])]
         console.log('1D 배열, X 범위:', xRange)
       }
+      
+      if (!xRange || xRange.length < 2 || !Number.isFinite(xRange[0]) || !Number.isFinite(xRange[1])) {
+        console.log('❌ X 범위 추출 실패:', { range, rangeSource, xRange })
+        return
+      }
+      
+      // 역방향 드래그(오른쪽→왼쪽)도 허용
+      const xStart = Math.min(xRange[0], xRange[1])
+      const xEnd = Math.max(xRange[0], xRange[1])
       
       // rows, xAxis, xData가 클로저에서 접근 가능한지 확인
       if (!rows || !xAxis || !xData) {
@@ -3284,10 +3315,14 @@ function renderChart() {
         return
       }
       
-      const startIdx = Math.max(0, Math.floor(xRange[0]))
-      const endIdx = Math.min(xData.length - 1, Math.ceil(xRange[1]))
+      const startIdx = Math.max(0, Math.floor(xStart))
+      const endIdx = Math.min(xData.length - 1, Math.ceil(xEnd))
       console.log('인덱스 계산:', { 
         range, 
+        rangeSource,
+        xRange,
+        xStart,
+        xEnd,
         startIdx, 
         endIdx, 
         xDataLength: xData.length,
