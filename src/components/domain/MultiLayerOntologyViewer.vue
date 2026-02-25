@@ -1326,7 +1326,10 @@
                             <span v-if="mapping.status === 'confirmed' && mapping.selected_candidate?.table_name === candidate.table_name" class="confirmed-tag">✅ 확정됨</span>
                           </div>
                           <div class="candidate-meta">
-                            <span>📊 {{ candidate.row_count.toLocaleString() }} rows</span>
+                            <span v-if="candidate.row_count === null">📊 ... rows</span>
+                            <span v-else-if="candidate.row_count === -1">📊 - rows</span>
+                            <span v-else-if="candidate.row_count_approx">📊 {{ candidate.row_count.toLocaleString() }}+ rows</span>
+                            <span v-else>📊 {{ candidate.row_count.toLocaleString() }} rows</span>
                             <span>📋 {{ candidate.columns.length }} columns</span>
                           </div>
                           <div class="candidate-reason">{{ candidate.match_reason }}</div>
@@ -1545,7 +1548,10 @@
                     <span class="relevance-badge">{{ (result.relevance_score * 100).toFixed(0) }}%</span>
                   </div>
                   <div class="result-meta">
-                    <span>{{ result.row_count?.toLocaleString() || 0 }} rows</span>
+                    <span v-if="result.row_count === null">... rows</span>
+                    <span v-else-if="result.row_count === -1">- rows</span>
+                    <span v-else-if="result.row_count_approx">{{ result.row_count.toLocaleString() }}+ rows</span>
+                    <span v-else>{{ result.row_count.toLocaleString() }} rows</span>
                     <span>{{ result.columns?.length || 0 }} columns</span>
                   </div>
                   <div class="result-reason">{{ result.match_reason }}</div>
@@ -1858,6 +1864,20 @@ interface LayerInfo {
   icon: string
 }
 
+interface NodeSearchCandidate {
+  table_name: string
+  datasource?: string
+  full_table_name?: string
+  columns: string[]
+  sample_data: any[]
+  row_count: number | null
+  row_count_approx: boolean
+  relevance_score: number
+  match_reason: string
+  suggested_sql: string
+  materializedView?: string
+}
+
 // Layer 정의 (KPI가 맨 위, 위에서 아래로 계층 순서)
 const layers: LayerInfo[] = [
   { id: 'KPI', name: 'KPI', color: '#ef4444', icon: '📊' },         // 최상위: 핵심 성과 지표
@@ -2049,9 +2069,10 @@ const nodeSearchQuery = ref('')
 const nodeSearchLoading = ref(false)
 const nodeSearchStatus = ref<string>('') // 검색 진행 상황 메시지
 const nodeSearchConversation = ref<string[]>([]) // 스트리밍 대화 내용
-const nodeSearchResults = ref<any[]>([])
+const nodeSearchResults = ref<NodeSearchCandidate[]>([])
 const selectedSearchResult = ref<number | null>(null)
 const nodeSearchAbortController = ref<AbortController | null>(null)
+const nodeSearchProbeRunId = ref(0)
 const selectedManualTable = ref<string | null>(null)
 const availableDatasources = ref<string[]>([])
 const availableSchemas = ref<string[]>([])
@@ -2066,16 +2087,7 @@ const dataSourceMappings = ref<Record<string, {
   node_name: string
   node_layer: string
   search_query: string
-  candidates: Array<{
-    table_name: string
-    datasource?: string
-    columns: string[]
-    sample_data: any[]
-    row_count: number
-    relevance_score: number
-    match_reason: string
-    suggested_sql: string
-  }>
+  candidates: Array<NodeSearchCandidate>
   selected_candidate: any | null
   status: string
 }>>({})
@@ -5965,7 +5977,7 @@ async function confirmDataSourceMapping(nodeId: string, candidate: any) {
           dataSourceSchema: {
             columns: candidate.columns || [],
             sql: candidate.suggested_sql || '',
-            row_count: candidate.row_count || 0,
+            row_count: typeof candidate.row_count === 'number' && candidate.row_count > 0 ? candidate.row_count : 0,
             datasource: candidate.datasource || '',
           }
         }
@@ -6008,40 +6020,91 @@ async function confirmDataSourceMapping(nodeId: string, candidate: any) {
   }
 }
 
+function normalizeTableRef(tableName: string, datasource: string): string {
+  const clean = String(tableName || '').replace(/["`]/g, '')
+  const parts = clean.split('.').filter(Boolean)
+  const ds = String(datasource || '').trim()
+  if (!ds) return clean
+  if (parts.length === 3 && parts[0].toLowerCase() === ds.toLowerCase()) {
+    return `${parts[1]}.${parts[2]}`
+  }
+  if (parts.length >= 2) {
+    return `${parts[parts.length - 2]}.${parts[parts.length - 1]}`
+  }
+  return clean
+}
+
+function toObjectRows(rows: any[], columns: any[]): any[] {
+  if (!Array.isArray(rows) || rows.length === 0) return []
+  if (Array.isArray(rows[0])) {
+    return rows.map((row: any[]) => {
+      const out: Record<string, any> = {}
+      columns.forEach((c: any, i: number) => {
+        out[String(c)] = row[i]
+      })
+      return out
+    })
+  }
+  return rows
+}
+
+async function probeRowCounts(runId: number) {
+  const PROBE_LIMIT = 11
+  const CONCURRENCY = 2
+
+  for (let i = 0; i < nodeSearchResults.value.length; i += CONCURRENCY) {
+    if (runId !== nodeSearchProbeRunId.value) {
+      return
+    }
+
+    const batch = nodeSearchResults.value.slice(i, i + CONCURRENCY)
+    await Promise.allSettled(batch.map(async (candidate) => {
+      if (runId !== nodeSearchProbeRunId.value) {
+        return
+      }
+
+      try {
+        const tableRef = normalizeTableRef(candidate.table_name, candidate.datasource || '')
+        const sql = `SELECT * FROM ${tableRef} LIMIT ${PROBE_LIMIT}`
+        const response = await fetch('/api/gateway/text2sql/direct-sql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sql,
+            datasource: candidate.datasource,
+            max_sql_seconds: 15,
+            format_with_ai: false
+          })
+        })
+
+        if (!response.ok) {
+          candidate.row_count = -1
+          candidate.row_count_approx = false
+          return
+        }
+
+        const result = await response.json()
+        const rowsRaw = result.rows || result.data || []
+        const columns = result.columns || []
+        const hasMoreThanTen = rowsRaw.length >= PROBE_LIMIT
+        candidate.row_count = hasMoreThanTen ? PROBE_LIMIT - 1 : rowsRaw.length
+        candidate.row_count_approx = hasMoreThanTen
+        candidate.columns = columns.length > 0 ? columns : candidate.columns
+        candidate.sample_data = toObjectRows(rowsRaw.slice(0, 10), columns.length > 0 ? columns : candidate.columns)
+      } catch (err) {
+        candidate.row_count = -1
+        candidate.row_count_approx = false
+      }
+    }))
+  }
+}
+
 async function loadSampleData(candidate: any) {
   sampleDataLoading.value = true
   sampleData.value = []
   showSampleDataDialog.value = true
   
   try {
-    const normalizeTableRef = (tableName: string, datasource: string) => {
-      const clean = String(tableName || '').replace(/["`]/g, '')
-      const parts = clean.split('.').filter(Boolean)
-      const ds = String(datasource || '').trim()
-      if (!ds) return clean
-      if (parts.length === 3 && parts[0].toLowerCase() === ds.toLowerCase()) {
-        return `${parts[1]}.${parts[2]}`
-      }
-      if (parts.length >= 2) {
-        return `${parts[parts.length - 2]}.${parts[parts.length - 1]}`
-      }
-      return clean
-    }
-
-    const toObjectRows = (rows: any[], columns: any[]) => {
-      if (!Array.isArray(rows) || rows.length === 0) return []
-      if (Array.isArray(rows[0])) {
-        return rows.map((row: any[]) => {
-          const out: Record<string, any> = {}
-          columns.forEach((c: any, i: number) => {
-            out[String(c)] = row[i]
-          })
-          return out
-        })
-      }
-      return rows
-    }
-
     // 후보의 sample_data가 이미 있으면 사용
     if (candidate.sample_data && candidate.sample_data.length > 0) {
       sampleData.value = candidate.sample_data
@@ -6145,6 +6208,7 @@ function openNodeDataSourceDialog(nodeId: string) {
   currentNodeForDataSource.value = node
   showNodeDataSourceDialog.value = true
   nodeDataSourceTab.value = 'search'
+  nodeSearchProbeRunId.value += 1
   nodeSearchQuery.value = ''
   nodeSearchResults.value = []
   selectedSearchResult.value = null
@@ -6171,6 +6235,8 @@ function openNodeDataSourceDialog(nodeId: string) {
 async function searchNodeDataSource() {
   if (!currentNodeForDataSource.value || !nodeSearchQuery.value.trim()) return
   
+  const runId = nodeSearchProbeRunId.value + 1
+  nodeSearchProbeRunId.value = runId
   nodeSearchLoading.value = true
   nodeSearchStatus.value = '🔍 관련 테이블 검색 중...'
   nodeSearchResults.value = []
@@ -6206,13 +6272,12 @@ async function searchNodeDataSource() {
       const usedTables = provenance.tables || []
       const tableData = result.table || {}
       const columns = tableData.columns || []
-      const rows = tableData.rows || []
       
       if (usedTables.length > 0 || result.sql) {
         nodeSearchStatus.value = `✅ ${usedTables.length}개 테이블 발견`
         // 테이블 정보를 후보 형식으로 변환
         // usedTables는 이미 datasource.schema.table 형식일 수 있음
-        const candidates = usedTables.map((tableName: string, idx: number) => {
+        const candidates: NodeSearchCandidate[] = usedTables.map((tableName: string, idx: number) => {
           // tableName이 이미 datasource.schema.table 형식인지 확인
           const parts = tableName.split('.')
           let fullTableName = tableName
@@ -6234,8 +6299,9 @@ async function searchNodeDataSource() {
             datasource: selectedDatasource.value || '',
             full_table_name: fullTableName,  // SQL용 (따옴표 포함)
             columns: columns,
-            sample_data: rows.slice(0, 5),
-            row_count: rows.length,
+            sample_data: [],
+            row_count: null,
+            row_count_approx: false,
             relevance_score: 0.8 - (idx * 0.1),
             match_reason: `Text2SQL 검색: ${nodeSearchQuery.value}`,
             suggested_sql: result.sql || `SELECT * FROM ${fullTableName} LIMIT 100`
@@ -6244,22 +6310,26 @@ async function searchNodeDataSource() {
         
         nodeSearchResults.value = candidates
         nodeSearchStatus.value = '' // 성공 시 상태 메시지 제거
+        void probeRowCounts(runId)
       } else {
         // 직접 SQL에서 테이블 추출 시도
         if (result.sql) {
           nodeSearchStatus.value = '📋 SQL에서 테이블 정보 추출 중...'
           const tableMatch = result.sql.match(/FROM\s+["`]?(\w+)["`]?/i)
           if (tableMatch) {
-            nodeSearchResults.value = [{
+            const fallbackCandidates: NodeSearchCandidate[] = [{
               table_name: tableMatch[1],
               datasource: selectedDatasource.value || '',
               columns: columns,
-              sample_data: rows.slice(0, 5),
-              row_count: rows.length,
+              sample_data: [],
+              row_count: null,
+              row_count_approx: false,
               relevance_score: 0.7,
               match_reason: `SQL에서 추출: ${result.sql.substring(0, 50)}...`,
               suggested_sql: result.sql
             }]
+            nodeSearchResults.value = fallbackCandidates
+            void probeRowCounts(runId)
             nodeSearchStatus.value = '✅ 테이블 정보 추출 완료'
           } else {
             nodeSearchStatus.value = '⚠️ 테이블 정보를 찾을 수 없습니다'
@@ -6566,6 +6636,7 @@ async function confirmNodeDataSource() {
         columns: [],
         sample_data: [],
         row_count: 0,
+        row_count_approx: false,
         relevance_score: 1.0,
         match_reason: selectedDatasource.value === '__ontology__' ? '온톨로지 (ObjectType) 선택' : '수동 선택',
         suggested_sql: `SELECT * FROM ${table.fullName} LIMIT 100`,
