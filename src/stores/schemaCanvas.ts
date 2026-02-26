@@ -1309,41 +1309,144 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       t => t.name === tableName && (t.schema || 'public') === schemaName
     )
     let resolvedDatasource = normalizedInputDatasource || (matchedTable?.datasource || '').trim()
+
     const extractDatasourceFromSql = (query: string): string => {
-      const fromMatch = query.match(/\bFROM\s+([A-Za-z0-9_`"]+)\./i)
+      // FROM/JOIN datasource.schema.table 패턴만 datasource로 인식한다.
+      const fromMatch = query.match(/\b(?:FROM|JOIN)\s+`?([A-Za-z_][A-Za-z0-9_]*)`?\s*\.\s*[`"]?[A-Za-z_][A-Za-z0-9_]*[`"]?\s*\.\s*[`"]?[A-Za-z_][A-Za-z0-9_]*[`"]?/i)
       if (!fromMatch?.[1]) return ''
       return fromMatch[1].replace(/[`"]/g, '').trim()
     }
-    let sql: string
-    
+
+    const withLimit = (rawSql: string, rowLimit: number): string => {
+      const trimmed = String(rawSql || '').trim().replace(/;+\s*$/, '')
+      if (!trimmed) return ''
+      if (/\blimit\s+\d+\s*$/i.test(trimmed)) {
+        return trimmed.replace(/\blimit\s+\d+\s*$/i, `LIMIT ${rowLimit}`)
+      }
+      return `${trimmed} LIMIT ${rowLimit}`
+    }
+
+    const executeDirectSqlStream = async (
+      sqlToRun: string,
+      ds: string
+    ): Promise<
+      | { ok: true; columns: string[]; rows: unknown[][]; rowCount: number; executionTimeMs: number }
+      | { ok: false; error: string }
+    > => {
+      const response = await fetch(`${TEXT2SQL_API_BASE}/direct-sql/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sql: sqlToRun,
+          datasource: ds,
+          max_sql_seconds: 30,
+          format_with_ai: false
+        })
+      })
+
+      if (!response.ok) {
+        return { ok: false, error: `HTTP ${response.status}` }
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) return { ok: false, error: '스트림을 읽을 수 없습니다' }
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let latestError = ''
+      type StreamResultPayload = {
+        columns: string[]
+        rows: unknown[][]
+        rowCount: number
+        executionTimeMs: number
+      }
+      let latestResult: StreamResultPayload | undefined
+
+      const consumeLine = (line: string) => {
+        try {
+          const event = JSON.parse(line)
+          switch (event.event) {
+            case 'result':
+              latestResult = {
+                columns: event.columns || [],
+                rows: event.rows || [],
+                rowCount: Number(event.row_count || 0),
+                executionTimeMs: Number(event.execution_time_ms || 0)
+              }
+              break
+            case 'error':
+              latestError = String(event.message || 'SQL 실행 오류')
+              break
+          }
+        } catch {
+          // JSON 파싱 실패 라인은 무시
+        }
+      }
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (line.trim()) consumeLine(line)
+        }
+      }
+
+      if (buffer.trim()) {
+        consumeLine(buffer.trim())
+      }
+
+      if (typeof latestResult !== 'undefined') {
+        return {
+          ok: true,
+          columns: latestResult.columns,
+          rows: latestResult.rows,
+          rowCount: latestResult.rowCount,
+          executionTimeMs: latestResult.executionTimeMs
+        }
+      }
+      return { ok: false, error: latestError || 'SQL 실행 결과를 수신하지 못했습니다.' }
+    }
+
+    const candidateSqls: string[] = []
+    let primarySql = ''
+
     // ObjectType인 경우 Neo4j에서 materializedView 또는 query 가져오기
     if (schemaName === 'ObjectType' || normalizedInputDatasource === 'ontology') {
       try {
-        // ObjectType의 상세 정보 조회
         const response = await fetch(`${import.meta.env.VITE_GATEWAY_URL || ''}/api/gateway/ontology/object-types/${encodeURIComponent(tableName)}`)
-        if (response.ok) {
-          const otData = await response.json()
-          if (otData.materializedView) {
-            // Materialized View가 있으면 해당 뷰에서 조회
-            sql = `SELECT * FROM ${otData.materializedView} LIMIT ${limit}`
-            if (!resolvedDatasource) {
-              const mvDatasource = String(otData.materializedView).split('.')[0]?.replace(/[`"]/g, '').trim()
-              resolvedDatasource = mvDatasource || ''
-            }
-          } else if (otData.query) {
-            // query가 있으면 서브쿼리로 사용
-            sql = `SELECT * FROM (${otData.query}) AS subq LIMIT ${limit}`
-            if (!resolvedDatasource) {
-              resolvedDatasource = extractDatasourceFromSql(String(otData.query))
-            }
-          } else {
-            throw new Error(`ObjectType '${tableName}'에 조회 가능한 데이터가 없습니다.`)
-          }
-        } else {
+        if (!response.ok) {
           throw new Error(`ObjectType '${tableName}' 정보를 조회할 수 없습니다.`)
         }
+        const otData = await response.json()
+        const otQuery = String(otData.query || '').trim()
+        const otDatasource = extractDatasourceFromSql(otQuery)
+        if (!resolvedDatasource && otDatasource) {
+          resolvedDatasource = otDatasource
+        }
+
+        // MV 우선, 실패 시 원본 query로 자동 폴백
+        if (otData.materializedView) {
+          primarySql = `SELECT * FROM ${otData.materializedView} LIMIT ${limit}`
+          candidateSqls.push(primarySql)
+        }
+
+        if (otQuery) {
+          const fallbackSql = withLimit(otQuery, limit)
+          if (fallbackSql && !candidateSqls.includes(fallbackSql)) {
+            candidateSqls.push(fallbackSql)
+          }
+          if (!primarySql) {
+            primarySql = fallbackSql
+          }
+        }
+
+        if (!primarySql) {
+          throw new Error(`ObjectType '${tableName}'에 조회 가능한 데이터가 없습니다.`)
+        }
       } catch (error) {
-        // 패널 열고 에러 표시 (behaviorMode 상태 유지)
         tableDataPanel.value = {
           ...tableDataPanel.value,
           isOpen: true,
@@ -1363,37 +1466,29 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       }
     } else {
       // 일반 테이블 - 대문자가 포함된 경우 식별자 감싸기
-      // MindsDB를 통할 경우: 백틱(`) 사용 (예: posgres.`RWIS`.`AA_GET_MIN_STATUS`)
-      // 직접 PostgreSQL일 경우: 큰따옴표(") 사용
-      // 멀티 데이터소스: datasource.schema.table 형식 사용 (3단계)
       let fullTableName: string
-      
-      // 대문자 포함 여부 확인
       const hasUpperCase = (str: string) => /[A-Z]/.test(str)
       const quoteMysqlIdent = (str: string) => `\`${str.replace(/`/g, '``')}\``
       const needsSchemaQuoting = hasUpperCase(schemaName)
       const needsTableQuoting = hasUpperCase(tableName)
-      
+
       if (resolvedDatasource) {
-        // 데이터소스 프리픽스 포함 (MindsDB를 통한 쿼리)
-        // datasource.schema.table 형식으로 명시해 public 스키마로 잘못 해석되는 케이스를 방지한다.
         const schemaIdent = needsSchemaQuoting ? quoteMysqlIdent(schemaName) : schemaName
         const tableIdent = needsTableQuoting ? quoteMysqlIdent(tableName) : tableName
         fullTableName = `${resolvedDatasource}.${schemaIdent}.${tableIdent}`
       } else {
-        // 데이터소스 없이 스키마.테이블만 사용 (직접 PostgreSQL)
-        // PostgreSQL에서는 큰따옴표(")로 대문자 식별자 감싸기
         if (needsSchemaQuoting || needsTableQuoting) {
           fullTableName = `"${schemaName}"."${tableName}"`
         } else {
           fullTableName = `${schemaName}.${tableName}`
         }
       }
-      sql = `SELECT * FROM ${fullTableName} LIMIT ${limit}`
+      primarySql = `SELECT * FROM ${fullTableName} LIMIT ${limit}`
+      candidateSqls.push(primarySql)
     }
 
     if (!resolvedDatasource) {
-      resolvedDatasource = extractDatasourceFromSql(sql)
+      resolvedDatasource = extractDatasourceFromSql(primarySql)
     }
 
     if (!resolvedDatasource) {
@@ -1410,12 +1505,11 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         isLoading: false,
         error: '데이터소스를 확인할 수 없습니다. 테이블의 datasource를 먼저 선택/확인해주세요.',
         limit,
-        executedSql: sql
+        executedSql: primarySql
       }
       return
     }
-    
-    // 패널 열기 및 로딩 상태 설정 (behaviorMode 상태 유지)
+
     tableDataPanel.value = {
       ...tableDataPanel.value,
       isOpen: true,
@@ -1429,65 +1523,28 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       isLoading: true,
       error: null,
       limit,
-      executedSql: sql  // 실행된 SQL 저장
+      executedSql: primarySql
     }
-    
-    try {
-      const response = await fetch(`${TEXT2SQL_API_BASE}/direct-sql/stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sql,
-          datasource: resolvedDatasource,
-          max_sql_seconds: 30,
-          format_with_ai: false
-        })
-      })
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
+
+    let lastError = ''
+    for (let i = 0; i < candidateSqls.length; i += 1) {
+      const candidateSql = candidateSqls[i]
+      tableDataPanel.value.executedSql = candidateSql
+      const result = await executeDirectSqlStream(candidateSql, resolvedDatasource)
+      if (result.ok) {
+        tableDataPanel.value.columns = result.columns
+        tableDataPanel.value.rows = result.rows
+        tableDataPanel.value.rowCount = result.rowCount
+        tableDataPanel.value.executionTimeMs = result.executionTimeMs
+        tableDataPanel.value.isLoading = false
+        tableDataPanel.value.error = null
+        return
       }
-      
-      const reader = response.body?.getReader()
-      if (!reader) throw new Error('스트림을 읽을 수 없습니다')
-      
-      const decoder = new TextDecoder()
-      
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        
-        const lines = decoder.decode(value).split('\n').filter(l => l.trim())
-        
-        for (const line of lines) {
-          try {
-            const event = JSON.parse(line)
-            
-            switch (event.event) {
-              case 'result':
-                tableDataPanel.value.columns = event.columns
-                tableDataPanel.value.rows = event.rows
-                tableDataPanel.value.rowCount = event.row_count
-                tableDataPanel.value.executionTimeMs = event.execution_time_ms
-                tableDataPanel.value.isLoading = false
-                break
-              case 'error':
-                tableDataPanel.value.error = event.message
-                tableDataPanel.value.isLoading = false
-                break
-              case 'completed':
-                tableDataPanel.value.isLoading = false
-                break
-            }
-          } catch (e) {
-            // JSON 파싱 실패 무시
-          }
-        }
-      }
-    } catch (error) {
-      tableDataPanel.value.error = error instanceof Error ? error.message : '알 수 없는 오류'
-      tableDataPanel.value.isLoading = false
+      lastError = result.error
     }
+
+    tableDataPanel.value.error = lastError || '알 수 없는 오류'
+    tableDataPanel.value.isLoading = false
   }
   
   /**
