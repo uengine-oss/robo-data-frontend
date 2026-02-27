@@ -2722,7 +2722,7 @@ async function fetchNodeData(nodeId: string) {
   try {
     // cascading 필터 조건 수집
     const effectiveFilters = getEffectiveFilters(nodeId)
-    const filterParams = new URLSearchParams({ limit: '1000' })
+    const filterParams = new URLSearchParams({ limit: '500' })
     
     // 필터 조건을 쿼리 파라미터로 추가
     Object.entries(effectiveFilters).forEach(([key, value]) => {
