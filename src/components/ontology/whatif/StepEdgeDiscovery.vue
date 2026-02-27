@@ -17,6 +17,7 @@ const emit = defineEmits<{
 }>()
 
 const isDiscovering = ref(false)
+const hasRunDiscovery = ref(false)
 const edges = ref<EdgeCandidate[]>([])
 const dataRows = ref(0)
 const varsCount = ref(0)
@@ -111,6 +112,7 @@ async function runDiscovery() {
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
+    hasRunDiscovery.value = true
     isDiscovering.value = false
   }
 }
@@ -225,7 +227,7 @@ function reasonLabel(reason: string): string {
     <div v-if="error" class="error-msg">{{ error }}</div>
 
     <!-- 결과 요약 -->
-    <div v-if="edges.length > 0" class="results">
+    <div v-if="hasRunDiscovery" class="results">
       <div class="summary-cards">
         <div class="summary-card">
           <span class="card-value">{{ dataRows }}</span>
@@ -239,6 +241,10 @@ function reasonLabel(reason: string): string {
           <span class="card-value">{{ edges.length }}</span>
           <span class="card-label">발견된 관계</span>
         </div>
+      </div>
+
+      <div v-if="edges.length === 0" class="empty-result-msg">
+        발견된 관계가 없습니다. 최소 상관계수를 낮추거나(예: 0.3 → 0.1), 필터 조건/데이터 소스 설정을 확인해 주세요.
       </div>
 
       <!-- 학습 데이터 미리보기 -->
@@ -451,6 +457,15 @@ function reasonLabel(reason: string): string {
 }
 
 .error-msg { padding: 12px; background: #fef2f2; border: 1px solid #fca5a5; border-radius: 8px; color: #dc2626; margin-bottom: 16px; }
+.empty-result-msg {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 8px;
+  color: #f59e0b;
+  font-size: 0.82rem;
+}
 
 .summary-cards {
   display: flex; gap: 12px; margin-bottom: 16px;
