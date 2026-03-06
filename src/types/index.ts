@@ -234,7 +234,7 @@ export interface Text2SqlTableInfo {
   schema: string
   datasource?: string  // 데이터소스명 (예: robo_postgres, ontology)
   description: string
-  description_source?: 'ddl' | 'procedure' | 'user' | ''  // 설명 출처
+  description_source?: 'ddl' | 'procedure' | 'user' | 'code' | ''  // 설명 출처
   analyzed_description?: string  // 프로시저 분석에서 도출된 설명
   column_count: number
 }
@@ -246,7 +246,7 @@ export interface Text2SqlColumnInfo {
   dtype: string
   nullable: boolean
   description: string
-  description_source?: 'ddl' | 'procedure' | 'user' | ''  // 설명 출처
+  description_source?: 'ddl' | 'procedure' | 'user' | 'code' | ''  // 설명 출처
   analyzed_description?: string  // 프로시저 분석에서 도출된 설명
 }
 

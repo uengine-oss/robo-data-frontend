@@ -24,7 +24,7 @@ export interface TableNodeData {
   schema: string
   datasource?: string  // 데이터소스명 (예: robo_postgres)
   description?: string
-  description_source?: 'ddl' | 'procedure' | 'user' | ''  // 설명 출처
+  description_source?: 'ddl' | 'procedure' | 'user' | ''  // 설명 출처 (code는 procedure로 정규화됨)
   columns: Text2SqlColumnInfo[]
   columnCount: number
   isPrimary?: boolean  // 직접 선택/드래그한 테이블인지 여부
@@ -316,7 +316,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   const semanticSearchError = ref<string | null>(null)
   
   // FK 관계 유형별 표시 여부 (범례 체크박스용)
-  // source: 'ddl' | 'procedure' | 'user'
+  // source: 'ddl' | 'procedure' | 'user' | 'code' (code는 procedure와 동일하게 취급)
   const fkVisibility = ref({
     ddl: true,        // DDL에서 추출 (실선, 초록색)
     procedure: true,  // 프로시저 분석 (점선, 하늘색)
@@ -324,8 +324,10 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   })
   
   // FK 표시 토글 함수
-  function toggleFkVisibility(source: 'ddl' | 'procedure' | 'user') {
-    fkVisibility.value[source] = !fkVisibility.value[source]
+  function toggleFkVisibility(source: 'ddl' | 'procedure' | 'user' | 'code') {
+    // 'code'는 procedure와 동일 그룹으로 토글
+    const key = source === 'code' ? 'procedure' : source
+    fkVisibility.value[key] = !fkVisibility.value[key]
     updateEdgesFromRelationships()
   }
   
@@ -683,17 +685,24 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         const tables = await roboSchemaApi.getTables({
           limit: 200
         })
-        allTables.value = tables.map(t => ({
-          name: t.name,
-          schema: t.table_schema,  // Backend returns table_schema
-          datasource: t.datasource || '',  // 데이터소스명 추가
-          description: t.description || '',
-          description_source: (t.description_source && (t.description_source === 'ddl' || t.description_source === 'procedure' || t.description_source === 'user' || t.description_source === '')) 
-            ? t.description_source 
-            : undefined,  // 설명 출처 - 타입 안전하게 변환
-          analyzed_description: t.analyzed_description,
-          column_count: t.column_count
-        }))
+        allTables.value = tables.map(t => {
+          // 데이터 소스가 'code' 인 경우도 'procedure' 와 동일하게 취급
+          const rawSource = (t as any).description_source as string | undefined
+          const normalizedSource =
+            rawSource === 'code' ? 'procedure' : rawSource
+          
+          return {
+            name: t.name,
+            schema: t.table_schema,  // Backend returns table_schema
+            datasource: t.datasource || '',  // 데이터소스명 추가
+            description: t.description || '',
+            description_source: (normalizedSource && (normalizedSource === 'ddl' || normalizedSource === 'procedure' || normalizedSource === 'user' || normalizedSource === '')) 
+              ? normalizedSource 
+              : undefined,  // 설명 출처 - 타입 안전하게 변환
+            analyzed_description: t.analyzed_description,
+            column_count: t.column_count
+          }
+        })
       } else {
         // PostgreSQL 인제스천 (text2sql)
         const datasourcesStore = useDatasourcesStore()
@@ -806,17 +815,23 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         const roboColumns = await roboSchemaApi.getTableColumns(tableName, {
           schema: resolvedSchema
         })
-        columns = roboColumns.map(c => ({
-          name: c.name,
-          table_name: c.table_name,
-          dtype: c.dtype,
-          nullable: c.nullable,
-          description: c.description || '',
-          description_source: (c.description_source && (c.description_source === 'ddl' || c.description_source === 'procedure' || c.description_source === 'user' || c.description_source === '')) 
-            ? c.description_source 
-            : undefined,  // 설명 출처 - 타입 안전하게 변환
-          analyzed_description: c.analyzed_description
-        }))
+        columns = roboColumns.map(c => {
+          const rawSource = (c as any).description_source as string | undefined
+          const normalizedSource =
+            rawSource === 'code' ? 'procedure' : rawSource
+          
+          return {
+            name: c.name,
+            table_name: c.table_name,
+            dtype: c.dtype,
+            nullable: c.nullable,
+            description: c.description || '',
+            description_source: (normalizedSource && (normalizedSource === 'ddl' || normalizedSource === 'procedure' || normalizedSource === 'user' || normalizedSource === '')) 
+              ? normalizedSource 
+              : undefined,  // 설명 출처 - 타입 안전하게 변환
+            analyzed_description: c.analyzed_description
+          }
+        })
       } else {
         if (!resolvedDatasource) {
           throw new Error(`Text2SQL 컬럼 조회에는 datasource가 필요합니다: ${tableName}`)
@@ -907,7 +922,9 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         schema: table.schema || 'public',
         datasource: table.datasource || '',  // 데이터소스명 (멀티 데이터소스 지원)
         description: table.description || undefined,
-        description_source: table.description_source,  // 설명 출처
+        description_source: (table.description_source && table.description_source !== 'code')
+          ? table.description_source
+          : (table.description_source === 'code' ? 'procedure' : undefined),  // 설명 출처 (code → procedure)
         columns: columns,
         columnCount: table.column_count || columns.length,
         isPrimary: isPrimary,  // 직접 선택한 테이블 표시
@@ -1644,15 +1661,17 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     // source 속성에 따라 스타일 구분:
     // - 'ddl': 실선, 초록색
     // - 'user': 실선, 주황색
-    // - 'procedure': 점선, 하늘색/푸른색
+    // - 'procedure' / 'code': 점선, 하늘색/푸른색
     neo4jRelationships.value.forEach((rel) => {
       if (tableNamesOnCanvas.has(rel.from_table) && tableNamesOnCanvas.has(rel.to_table)) {
         // source에 따른 스타일 결정
-        const isProcedure = rel.source === 'procedure' || rel.type === 'CO_REFERENCED'
+        // code 데이터 소스는 procedure와 동일한 스타일로 처리
+        const isProcedure = rel.source === 'procedure' || rel.type === 'CO_REFERENCED' || (rel.source as string | undefined) === 'code'
         const isUser = rel.source === 'user'
         
         // visibility 체크 - 해당 source 유형이 비활성화되어 있으면 스킵
-        const sourceType = isProcedure ? 'procedure' : isUser ? 'user' : 'ddl'
+        const sourceType: 'ddl' | 'procedure' | 'user' =
+          isProcedure ? 'procedure' : isUser ? 'user' : 'ddl'
         if (!fkVisibility.value[sourceType]) {
           return  // 이 관계는 표시하지 않음
         }
