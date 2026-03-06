@@ -21,7 +21,7 @@ const {
   consoleMessages
 } = storeToRefs(projectStore)
 
-const { pausePipeline, resumePipeline } = projectStore
+const { pausePipeline, resumePipeline, clearMessages } = projectStore
 
 // 드래그 기능
 const { x, y, isDragging, startDrag } = useDrag({
@@ -75,10 +75,14 @@ const togglePause = async () => {
   }
 }
 
-// 패널 닫기 (완료 후에만, 오류가 없을 때만)
+// 패널 닫기 (처리 중이 아닐 때, 또는 오류 상태에서도 닫기 가능)
 const closePanel = () => {
-  if (isCompleted.value && !hasRecentError.value) {
+  if (!isProcessing.value || isCompleted.value || hasRecentError.value) {
     isMinimized.value = true
+    // 오류 상태에서 닫을 때 콘솔 메시지 초기화하여 패널이 다시 뜨지 않도록
+    if (hasRecentError.value && !isProcessing.value) {
+      clearMessages()
+    }
   }
 }
 
@@ -159,7 +163,6 @@ watch(hasRecentError, (hasError) => {
             />
           </button>
           <button 
-            v-if="!isProcessing && !hasRecentError"
             class="action-btn close-btn"
             @click.stop="closePanel"
             title="닫기"

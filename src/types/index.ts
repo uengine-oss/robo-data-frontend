@@ -540,7 +540,7 @@ export interface OntologyNode {
   description?: string
   properties?: OntologyNodeProperty[]
   dataSource?: string  // 바인딩된 테이블/뷰 이름
-  dataSourceSchema?: string  // 스키마명
+  dataSourceSchema?: string | { columns: string[]; sql: string; row_count: number }  // 스키마명 또는 데이터소스 메타정보
   materializedView?: string  // 생성된 Materialized View 이름
   instanceCount?: number  // 인스턴스 수 (실시간)
   position?: { x: number; y: number }  // VueFlow 위치

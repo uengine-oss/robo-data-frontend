@@ -497,7 +497,13 @@ function onColumnMouseLeave() {
           <line x1="9" y1="21" x2="9" y2="9"></line>
         </svg>
       </div>
-      <span class="table-node__name">{{ data.tableName }}</span>
+      <!-- 논리명 모드: description을 타이틀로, 물리명 모드: tableName을 타이틀로 -->
+      <span 
+        class="table-node__name"
+        :title="canvasStore.showLogicalNames && data.description ? `테이블명: ${data.tableName}` : (data.description || data.tableName)"
+      >
+        {{ canvasStore.showLogicalNames && data.description ? truncateDescription(data.description, 30) : data.tableName }}
+      </span>
       <div class="table-node__actions">
         <button 
           class="table-node__action-btn table-node__action-btn--query" 
@@ -544,18 +550,20 @@ function onColumnMouseLeave() {
       />
     </div>
     
-    <!-- Description - 출처에 따른 색상 적용 -->
+    <!-- Description / 테이블명 서브라인 - 스위치에 따라 전환 -->
     <div 
       v-if="data.description" 
       class="table-node__description"
-      :style="{ color: getDescriptionColor(data.description_source) }"
-      :title="`${data.description} ${data.description_source ? `[출처: ${getDescriptionSourceLabel(data.description_source)}]` : ''}`"
+      :style="{ color: canvasStore.showLogicalNames ? 'var(--color-text-muted, #5c5f66)' : getDescriptionColor(data.description_source) }"
+      :title="canvasStore.showLogicalNames 
+        ? `테이블명: ${data.tableName}` 
+        : `${data.description} ${data.description_source ? `[출처: ${getDescriptionSourceLabel(data.description_source)}]` : ''}`"
       @mouseenter="isDescriptionHovered = true"
       @mouseleave="isDescriptionHovered = false"
     >
-      <!-- 출처 배지 - 프로시저인 경우 호버 시 클릭 가능한 칩으로 변환 -->
+      <!-- 출처 배지 (물리명 모드에서만) -->
       <span 
-        v-if="data.description_source" 
+        v-if="!canvasStore.showLogicalNames && data.description_source" 
         class="table-node__description-badge"
         :class="{ 
           'is-clickable': data.description_source === 'procedure',
@@ -569,7 +577,7 @@ function onColumnMouseLeave() {
           📍
         </span>
       </span>
-      {{ data.description }}
+      {{ canvasStore.showLogicalNames ? data.tableName : data.description }}
     </div>
     
     <!-- 컬럼 프로시저 참조 팝업 -->
@@ -721,12 +729,18 @@ function onColumnMouseLeave() {
             <template v-else-if="isForeignKey(col.name)">🔗</template>
             <template v-else>•</template>
           </span>
-          <span class="table-node__column-name">{{ col.name }}</span>
+          <!-- 논리명 모드: description 우선 표시, 물리명 모드: name 표시 -->
+          <span 
+            class="table-node__column-name"
+            :title="canvasStore.showLogicalNames && col.description ? `컬럼명: ${col.name}` : (col.description || col.name)"
+          >
+            {{ canvasStore.showLogicalNames && col.description ? truncateDescription(col.description, 28) : col.name }}
+          </span>
           <span class="table-node__column-type">{{ getColumnTypeShort(col.dtype) }}</span>
           <span v-if="!col.nullable" class="table-node__column-required">*</span>
         </div>
         
-        <!-- 컬럼 설명 (있는 경우만 표시) - 출처에 따른 색상 적용 -->
+        <!-- 논리명 모드: 실제 컬럼명을 서브라인으로 / 물리명 모드: description을 서브라인으로 -->
         <div 
           v-if="col.description" 
           class="table-node__column-desc"
@@ -735,11 +749,13 @@ function onColumnMouseLeave() {
             'is-clickable': col.description_source === 'procedure'
           }"
           :style="{ color: getDescriptionColor(col.description_source) }"
-          :title="`${col.description} ${col.description_source ? `[출처: ${getDescriptionSourceLabel(col.description_source)}]` : ''}`"
+          :title="canvasStore.showLogicalNames 
+            ? `${col.name} ${col.description_source ? `[출처: ${getDescriptionSourceLabel(col.description_source)}]` : ''}`
+            : `${col.description} ${col.description_source ? `[출처: ${getDescriptionSourceLabel(col.description_source)}]` : ''}`"
           @click="col.description_source === 'procedure' ? handleColumnSourceClick($event, col.name) : null"
         >
           <span v-if="col.description_source" class="table-node__desc-source-dot" :style="{ background: getDescriptionColor(col.description_source) }"></span>
-          {{ truncateDescription(col.description) }}
+          {{ canvasStore.showLogicalNames ? col.name : truncateDescription(col.description) }}
           <span v-if="col.description_source === 'procedure'" class="table-node__column-link-icon">🔍</span>
         </div>
         

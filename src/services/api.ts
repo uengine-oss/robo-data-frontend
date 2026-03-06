@@ -164,7 +164,6 @@ async function postFormData<T>(
     const response = await fetch(url, {
       method: 'POST',
       headers: { 
-        ...(headers['OpenAI-Api-Key'] ? { 'OpenAI-Api-Key': headers['OpenAI-Api-Key'] } : {}),
         'Accept-Language': headers['Accept-Language'] || 'ko'
         // Content-Type은 명시하지 않음 (브라우저가 multipart/form-data로 자동 설정)
       },
@@ -829,24 +828,18 @@ export const roboSchemaApi = {
    */
   async semanticSearch(
     query: string,
-    options?: { limit?: number; apiKey?: string }
+    options?: { limit?: number }
   ): Promise<Array<{
     name: string
     schema: string
     description: string
     similarity: number
   }>> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json'
-    }
-    
-    if (options?.apiKey) {
-      headers['X-API-Key'] = options.apiKey
-    }
-    
     const response = await fetch(`${ROBO_BASE_URL}/schema/semantic-search`, {
       method: 'POST',
-      headers,
+      headers: {
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify({
         query,
         limit: options?.limit || 10
@@ -870,7 +863,7 @@ export const text2sqlApi = {
   /**
    * 테이블 목록 조회
    */
-  async getTables(datasource: string, search?: string, schema?: string, limit: number = 50): Promise<Text2SqlTableInfo[]> {
+  async getTables(datasource: string, search?: string, schema?: string, limit: number = 500): Promise<Text2SqlTableInfo[]> {
     if (!datasource) {
       throw new Error('datasource is required')
     }
@@ -1598,6 +1591,107 @@ export const glossaryApi = {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
+    })
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    return response.json()
+  }
+}
+
+// ============================================================================
+// Business Day Calendar API (영업일 캘린더)
+// ============================================================================
+
+export interface BusinessDay {
+  date: string         // YYYY-MM-DD
+  isBusinessDay: boolean
+  reason?: string
+}
+
+export interface BusinessDayCalendarSettings {
+  excludeWeekends: boolean
+}
+
+export interface SaveBusinessDaysRequest {
+  year: number
+  nonBusinessDays: Array<{ date: string; isBusinessDay: boolean; reason?: string }>
+  holidays: Array<{ date: string; name: string }>
+  settings: BusinessDayCalendarSettings
+}
+
+export interface BusinessDaysResponse {
+  businessDays: BusinessDay[]
+  holidays: Array<{ date: string; name: string }>
+  settings: BusinessDayCalendarSettings
+}
+
+export const businessCalendarApi = {
+  /**
+   * 영업일 데이터 조회
+   */
+  async getBusinessDays(headers: Headers, year: number): Promise<BusinessDaysResponse> {
+    const response = await fetch(`${ROBO_BASE_URL}/business-calendar/${year}`, {
+      method: 'GET',
+      headers
+    })
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    return response.json()
+  },
+
+  /**
+   * 영업일 설정 저장
+   */
+  async saveBusinessDays(headers: Headers, data: SaveBusinessDaysRequest): Promise<{ success: boolean }> {
+    const response = await fetch(`${ROBO_BASE_URL}/business-calendar/`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    return response.json()
+  },
+
+  /**
+   * 특정 날짜가 영업일인지 확인
+   */
+  async isBusinessDay(headers: Headers, date: string): Promise<{ date: string; isBusinessDay: boolean }> {
+    const response = await fetch(`${ROBO_BASE_URL}/business-calendar/check/${date}`, {
+      method: 'GET',
+      headers
+    })
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    return response.json()
+  },
+
+  /**
+   * 영업일 설정 삭제 (특정 연도)
+   */
+  async deleteBusinessDays(headers: Headers, year: number): Promise<{ success: boolean }> {
+    const response = await fetch(`${ROBO_BASE_URL}/business-calendar/${year}`, {
+      method: 'DELETE',
+      headers
+    })
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    return response.json()
+  },
+
+  /**
+   * 비영업일 날짜 목록만 조회 (필터용)
+   */
+  async getNonBusinessDates(headers: Headers, startDate: string, endDate: string): Promise<{ dates: string[] }> {
+    const params = new URLSearchParams({ start: startDate, end: endDate })
+    const response = await fetch(`${ROBO_BASE_URL}/business-calendar/non-business-dates?${params}`, {
+      method: 'GET',
+      headers
     })
     if (!response.ok) {
       await handleHttpError(response)
@@ -2339,6 +2433,22 @@ export const ontologyApi = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request)
+    })
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(errorText || `HTTP ${response.status}`)
+    }
+    return response.json()
+  },
+
+  /**
+   * Process 노드의 BPMN XML 업데이트
+   */
+  async updateBpmnXml(nodeId: string, bpmnXml: string): Promise<{ success: boolean; nodeId: string; message: string }> {
+    const response = await fetch(`${ONTOLOGY_BASE_URL}/nodes/${nodeId}/bpmn-xml`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bpmnXml })
     })
     if (!response.ok) {
       const errorText = await response.text()

@@ -3,6 +3,7 @@ import UploadTab from '@/components/upload/UploadTab.vue'
 import GraphTab from '@/components/graph/GraphTab.vue'
 import LineageTab from '@/components/lineage/LineageTab.vue'
 import GlossaryTab from '@/components/glossary/GlossaryTab.vue'
+import BusinessDayCalendar from '@/components/glossary/BusinessDayCalendar.vue'
 import Text2SqlTab from '@/components/text2sql/Text2SqlTab.vue'
 import LangChainTab from '@/components/langchain-text2sql/LangChainTab.vue'
 import { OlapTab } from '@/components/olap'
@@ -30,6 +31,7 @@ const { activeTab } = storeToRefs(sessionStore)
     <GraphTab v-else-if="activeTab === 'graph'" />
     <LineageTab v-else-if="activeTab === 'lineage'" />
     <GlossaryTab v-else-if="activeTab === 'glossary'" />
+    <BusinessDayCalendar v-else-if="activeTab === 'business-calendar'" />
     <OlapTab v-else-if="activeTab === 'olap'" />
     <Text2SqlTab v-else-if="activeTab === 'text2sql'" />
     <Text2SqlTab v-else-if="activeTab === 'domain-text2sql'" :domain-layer-mode="true" />

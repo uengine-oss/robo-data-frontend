@@ -23,7 +23,9 @@ import {
   IconOntology,
   IconSearch,
   IconWhatIf,
-  IconSecurity
+  IconSecurity,
+  IconCalendar,
+  IconSettings
 } from '@/components/icons'
 import type { Component } from 'vue'
 
@@ -34,6 +36,7 @@ const { activeTab } = storeToRefs(sessionStore)
 const isPhysicalLayerExpanded = ref(true)  // 피지컬 레이어 기본 펼침
 const isDomainLayerExpanded = ref(false)
 const isDynamicLayerExpanded = ref(false)
+const isStandardMgmtExpanded = ref(false)  // 기준관리 그룹
 
 interface NavItem {
   id: string
@@ -92,10 +95,20 @@ const dynamicLayerGroup: NavGroup = {
   ]
 }
 
-// 하단 메뉴 (분석/도구) - What-If 제거됨
+// 기준관리 그룹 (용어 관리 + 영업일 캘린더)
+const standardMgmtGroup: NavGroup = {
+  id: 'standard-mgmt',
+  label: '기준관리',
+  icon: IconSettings,
+  children: [
+    { id: 'glossary', label: '용어 관리', icon: IconBook },
+    { id: 'business-calendar', label: '영업일 캘린더', icon: IconCalendar }
+  ]
+}
+
+// 하단 메뉴 (분석/도구) - 용어 관리를 기준관리 그룹으로 이동
 const bottomNavItems: NavItem[] = [
   { id: 'lineage', label: '데이터 리니지', icon: IconLineage },
-  { id: 'glossary', label: '용어 관리', icon: IconBook },
   { id: 'olap', label: 'OLAP 분석', icon: IconBarChart }
 ]
 
@@ -128,6 +141,15 @@ const toggleDynamicLayer = () => {
 
 const isDynamicLayerActive = () => {
   return dynamicLayerGroup.children.some(child => activeTab.value === child.id)
+}
+
+// 기준관리 그룹 토글
+const toggleStandardMgmt = () => {
+  isStandardMgmtExpanded.value = !isStandardMgmtExpanded.value
+}
+
+const isStandardMgmtActive = () => {
+  return standardMgmtGroup.children.some(child => activeTab.value === child.id)
 }
 </script>
 
@@ -208,6 +230,30 @@ const isDynamicLayerActive = () => {
       
       <!-- 구분선 -->
       <div class="nav-divider"></div>
+
+      <!-- 기준관리 그룹 (용어 관리 + 영업일 캘린더) -->
+      <div class="nav-group" :class="{ expanded: isStandardMgmtExpanded, active: isStandardMgmtActive() }">
+        <button class="nav-item nav-group-header" :class="{ active: isStandardMgmtActive() }"
+          @click="toggleStandardMgmt" :title="standardMgmtGroup.label">
+          <span class="nav-icon">
+            <component :is="standardMgmtGroup.icon" :size="20" />
+          </span>
+          <span class="nav-label">{{ standardMgmtGroup.label }}</span>
+          <span class="nav-chevron" :class="{ rotated: isStandardMgmtExpanded }">
+            <IconChevronDown :size="14" />
+          </span>
+        </button>
+
+        <div class="nav-group-children" v-show="isStandardMgmtExpanded">
+          <button v-for="child in standardMgmtGroup.children" :key="child.id" class="nav-item nav-child"
+            :class="{ active: activeTab === child.id }" @click="setActiveTab(child.id)" :title="child.label">
+            <span class="nav-icon">
+              <component :is="child.icon" :size="18" />
+            </span>
+            <span class="nav-label">{{ child.label }}</span>
+          </button>
+        </div>
+      </div>
       
       <!-- 하단 메뉴: 분석/도구 -->
       <button v-for="item in bottomNavItems" :key="item.id" class="nav-item" :class="{ active: activeTab === item.id }"

@@ -29,6 +29,7 @@ import {
 import SqlNode from './nodes/SqlNode.vue'
 import ConditionNode from './nodes/ConditionNode.vue'
 import ActionNode from './nodes/ActionNode.vue'
+import WhatIfNode from './nodes/WhatIfNode.vue'
 import ResultTable from '@/components/text2sql/ResultTable.vue'
 
 // 파이프라인 스텝 타입
@@ -76,6 +77,11 @@ interface AgentProfile {
   last_executed_at?: string
   execution_count: number
   last_result?: 'success' | 'triggered' | 'error'
+  // What-If 시뮬레이션 데이터 소스
+  data_source_type?: 'sql' | 'whatif_scenario'
+  whatif_scenario_id?: string
+  whatif_scenario_name?: string
+  whatif_output_field?: string
   // 그래프 기반 파이프라인 원본 데이터
   _pipeline?: PipelineData
 }
@@ -100,7 +106,8 @@ const availableNodeTypes = [
     category: 'data',
     label: '데이터',
     nodes: [
-      { type: 'SQL_QUERY', nodeType: 'sql', label: 'SQL 쿼리', icon: '📊', color: '#3b82f6', description: 'SQL로 데이터 조회' }
+      { type: 'SQL_QUERY', nodeType: 'sql', label: 'SQL 쿼리', icon: '📊', color: '#3b82f6', description: 'SQL로 데이터 조회' },
+      { type: 'WHATIF_SCENARIO', nodeType: 'whatif', label: 'What-If 시뮬레이션', icon: '🔮', color: '#a855f7', description: 'What-If 시나리오 시뮬레이션 결과 감시' }
     ]
   },
   {
@@ -126,6 +133,7 @@ const availableNodeTypes = [
 // 연결 규칙 정의
 const connectionRules: Record<string, string[]> = {
   'sql': ['condition'],           // SQL 뒤에는 조건만
+  'whatif': ['condition'],        // What-If 뒤에는 조건만
   'condition': ['action'],        // 조건 뒤에는 조치만
   'action': []                    // 조치 뒤에는 연결 없음 (종료)
 }
@@ -201,7 +209,8 @@ const saveNodePositions = async () => {
 const nodeTypes = {
   sql: SqlNode,
   condition: ConditionNode,
-  action: ActionNode
+  action: ActionNode,
+  whatif: WhatIfNode
 }
 
 // 에이전트 목록
@@ -223,8 +232,28 @@ const newAgentConfig = ref({
   processName: '',
   processId: '',
   actionType: 'process' as 'process' | 'alarm',
-  checkIntervalMinutes: 10
+  checkIntervalMinutes: 10,
+  // What-If 시뮬레이션 데이터 소스
+  dataSourceType: 'sql' as 'sql' | 'whatif_scenario',
+  whatifScenarioId: '',
+  whatifScenarioName: '',
+  whatifOutputField: '',
 })
+
+// What-If 시나리오 프로필 목록
+interface WhatIfScenarioProfile {
+  id: string
+  name: string
+  description?: string
+  schemaId: string
+  interventions: Array<Record<string, any>>
+  created_at: string
+  last_simulated_at?: string
+  last_simulation_results?: Record<string, any>
+  outputFields?: Array<{ key: string; label: string; lastValue?: number }>
+}
+const whatifScenarios = ref<WhatIfScenarioProfile[]>([])
+const isLoadingScenarios = ref(false)
 
 // 선택된 노드
 const selectedNodeId = ref<string | null>(null)
@@ -291,6 +320,81 @@ const currentActionType = computed(() => {
   return isCreatingNew.value ? newAgentConfig.value.actionType : selectedProfile.value?.action_type
 })
 
+// 선택된 노드의 타입 (동적 ID 대응)
+const selectedNodeType = computed(() => {
+  if (!selectedNodeId.value) return null
+  // 기본 3-step 구조에서는 ID가 곧 타입
+  if (['sql', 'condition', 'action', 'whatif'].includes(selectedNodeId.value)) {
+    return selectedNodeId.value
+  }
+  // 파이프라인 노드: nodes 배열에서 type 조회
+  const node = nodes.value.find((n: any) => n.id === selectedNodeId.value)
+  return node?.type || null
+})
+
+// What-If 시나리오 프로필 로드
+const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? '/api/gateway'
+const loadWhatifScenarios = async () => {
+  isLoadingScenarios.value = true
+  try {
+    const response = await fetch(`${API_GATEWAY_URL}/domain-whatif/scenarios`)
+    if (response.ok) {
+      const data = await response.json()
+      // 새 API는 직접 배열 반환, 레거시 호환: {scenarios: [...]}
+      whatifScenarios.value = Array.isArray(data) ? data : (data.scenarios ?? [])
+    }
+  } catch (error) {
+    console.error('What-If 시나리오 로드 실패:', error)
+  } finally {
+    isLoadingScenarios.value = false
+  }
+}
+
+// What-If 시나리오 선택 핸들러
+const onSelectWhatifScenario = (scenarioId: string) => {
+  const scenario = whatifScenarios.value.find(s => s.id === scenarioId)
+  if (scenario) {
+    newAgentConfig.value.whatifScenarioId = scenario.id
+    newAgentConfig.value.whatifScenarioName = scenario.name
+  }
+}
+
+// SQL 데이터 소스로 전환
+const switchToSqlDataSource = () => {
+  newAgentConfig.value.dataSourceType = 'sql'
+  newAgentConfig.value.whatifScenarioId = ''
+  newAgentConfig.value.whatifScenarioName = ''
+  newAgentConfig.value.whatifOutputField = ''
+  createWorkflowNodes(null)
+  selectedNodeId.value = 'sql'
+  showNodePanel.value = true
+}
+
+// What-If 데이터 소스로 전환
+const switchToWhatifDataSource = () => {
+  newAgentConfig.value.dataSourceType = 'whatif_scenario'
+  loadWhatifScenarios()
+  createWorkflowNodes(null)
+  selectedNodeId.value = 'whatif'
+  showNodePanel.value = true
+}
+
+// 선택된 시나리오의 결과 필드 목록
+const whatifOutputFields = computed(() => {
+  const scenario = whatifScenarios.value.find(s => s.id === newAgentConfig.value.whatifScenarioId)
+  if (!scenario) return []
+  
+  // outputFields가 있으면 우선 사용 (key 필드)
+  if (scenario.outputFields?.length) {
+    return scenario.outputFields.map(f => f.key)
+  }
+  
+  // fallback: last_simulation_results의 final_state 키 사용
+  if (!scenario.last_simulation_results) return []
+  const finalState = scenario.last_simulation_results.final_state || scenario.last_simulation_results
+  return Object.keys(finalState)
+})
+
 // 워크플로우 노드 생성
 const createWorkflowNodes = (profile: AgentProfile | null) => {
   if (!profile && !isCreatingNew.value) {
@@ -309,6 +413,7 @@ const createWorkflowNodes = (profile: AgentProfile | null) => {
       let nodeType = 'sql'
       if (step.type === 'CONDITION_EVALUATION') nodeType = 'condition'
       else if (step.type === 'PROCESS_START' || step.type === 'ALARM') nodeType = 'action'
+      else if (step.type === 'WHATIF_SCENARIO') nodeType = 'whatif'
       
       const stepStatus = currentSimulationStep.value === step.id ? 'running' : 
                          simulationLogs.value.find(l => l.step === step.id)?.status || 'idle'
@@ -328,6 +433,9 @@ const createWorkflowNodes = (profile: AgentProfile | null) => {
           description: step.config?.condition_description,
           actionType: step.config?.action_type,
           processName: step.config?.process_name,
+          // What-If 관련 데이터
+          scenarioName: step.config?.whatif_scenario_name,
+          resultField: step.config?.whatif_output_field,
           status: stepStatus
         },
         sourcePosition: Position.Right,
@@ -353,23 +461,46 @@ const createWorkflowNodes = (profile: AgentProfile | null) => {
       condition_expression: newAgentConfig.value.conditionExpression,
       condition_description: newAgentConfig.value.conditionDescription,
       process_name: newAgentConfig.value.processName,
-      action_type: newAgentConfig.value.actionType
+      action_type: newAgentConfig.value.actionType,
+      data_source_type: newAgentConfig.value.dataSourceType,
+      whatif_scenario_id: newAgentConfig.value.whatifScenarioId,
+      whatif_scenario_name: newAgentConfig.value.whatifScenarioName,
+      whatif_output_field: newAgentConfig.value.whatifOutputField
     }
 
-    nodes.value = [
-      {
-        id: 'sql',
-        type: 'sql',
-        position: { x: 100, y: 150 },
-        data: {
-          label: 'SQL 쿼리',
-          sql: config.generated_sql,
-          status: currentSimulationStep.value === 'sql' ? 'running' : 
-                  simulationLogs.value.find(l => l.step === 'sql')?.status || 'idle'
-        },
-        sourcePosition: Position.Right,
-        targetPosition: Position.Left
+    // 데이터 소스 타입에 따라 첫 번째 노드 결정
+    const isWhatif = (config as any).data_source_type === 'whatif_scenario'
+    const dataSourceNode = isWhatif ? {
+      id: 'whatif',
+      type: 'whatif',
+      position: { x: 100, y: 150 },
+      data: {
+        label: 'What-If 시뮬레이션',
+        scenarioName: (config as any).whatif_scenario_name || '시나리오 미선택',
+        resultField: (config as any).whatif_output_field,
+        status: currentSimulationStep.value === 'whatif' ? 'running' : 
+                simulationLogs.value.find(l => l.step === 'whatif')?.status || 'idle'
       },
+      sourcePosition: Position.Right,
+      targetPosition: Position.Left
+    } : {
+      id: 'sql',
+      type: 'sql',
+      position: { x: 100, y: 150 },
+      data: {
+        label: 'SQL 쿼리',
+        sql: config.generated_sql,
+        status: currentSimulationStep.value === 'sql' ? 'running' : 
+                simulationLogs.value.find(l => l.step === 'sql')?.status || 'idle'
+      },
+      sourcePosition: Position.Right,
+      targetPosition: Position.Left
+    }
+
+    const dataSourceId = isWhatif ? 'whatif' : 'sql'
+
+    nodes.value = [
+      dataSourceNode,
       {
         id: 'condition',
         type: 'condition',
@@ -403,10 +534,10 @@ const createWorkflowNodes = (profile: AgentProfile | null) => {
 
     edges.value = [
       {
-        id: 'e-sql-condition',
-        source: 'sql',
+        id: `e-${dataSourceId}-condition`,
+        source: dataSourceId,
         target: 'condition',
-        animated: currentSimulationStep.value === 'sql',
+        animated: currentSimulationStep.value === dataSourceId,
         style: { stroke: '#6366f1', strokeWidth: 2 },
         markerEnd: { type: MarkerType.ArrowClosed, color: '#6366f1' }
       },
@@ -467,9 +598,16 @@ const startNewAgent = () => {
       processName: '',
       processId: '',
       actionType: 'process',
-      checkIntervalMinutes: 10
+      checkIntervalMinutes: 10,
+      dataSourceType: 'sql',
+      whatifScenarioId: '',
+      whatifScenarioName: '',
+      whatifOutputField: '',
     }
   }
+  
+  // What-If 시나리오 목록 로드
+  loadWhatifScenarios()
   
   createWorkflowNodes(null)
 }
@@ -512,8 +650,8 @@ const inferProcessFromQuery = (question: string) => {
   const lowerQ = question.toLowerCase()
   
   if (lowerQ.includes('탁도')) {
-    newAgentConfig.value.processName = '원수탁도조치'
-    newAgentConfig.value.processId = 'turbidity_action'
+    newAgentConfig.value.processName = '정수장 여과지 탁도 이상 대응 프로세스'
+    newAgentConfig.value.processId = 'smart_ai_wtp_anomaly_detection_process'
   } else if (lowerQ.includes('수위')) {
     newAgentConfig.value.processName = '수위관리조치'
     newAgentConfig.value.processId = 'water_level_action'
@@ -655,6 +793,7 @@ onConnect((params) => {
 const getNodeTypeLabel = (nodeType: string): string => {
   switch (nodeType) {
     case 'sql': return 'SQL 쿼리'
+    case 'whatif': return 'What-If 시뮬레이션'
     case 'condition': return '조건'
     case 'action': return '조치'
     default: return nodeType
@@ -755,7 +894,16 @@ const executeProcessGPTStream = async (
       body: requestBody
     }).then(async (response) => {
       if (!response.ok) {
-        resolve({ success: false, error: `HTTP ${response.status}` })
+        let errorDetail = `HTTP ${response.status}`
+        try {
+          const errorBody = await response.json()
+          if (response.status === 500 && errorBody?.path?.includes('agent-scheduler')) {
+            errorDetail = `agent-scheduler 서비스가 실행되지 않고 있습니다 (포트 8089). 서비스를 먼저 시작해주세요.`
+          } else if (errorBody?.error) {
+            errorDetail = `HTTP ${response.status}: ${errorBody.error}`
+          }
+        } catch { /* ignore parse error */ }
+        resolve({ success: false, error: errorDetail })
         return
       }
       
@@ -1065,18 +1213,34 @@ const saveAgent = async () => {
   // 현재 노드 위치 가져오기
   const positions = getCurrentNodePositions()
   
+  // 데이터 소스 타입에 따라 첫 번째 스텝 구성
+  const isWhatif = newAgentConfig.value.dataSourceType === 'whatif_scenario'
+  const dataSourceStepId = isWhatif ? 'whatif' : 'sql'
+  
+  const dataSourceStep = isWhatif ? {
+    id: 'whatif',
+    type: 'WHATIF_SCENARIO',
+    name: 'What-If 시뮬레이션',
+    config: {
+      whatif_scenario_id: newAgentConfig.value.whatifScenarioId,
+      whatif_scenario_name: newAgentConfig.value.whatifScenarioName,
+      whatif_output_field: newAgentConfig.value.whatifOutputField,
+    },
+    position: positions['whatif'] || { x: 100, y: 150 }
+  } : {
+    id: 'sql',
+    type: 'SQL_QUERY',
+    name: 'SQL 쿼리',
+    config: {
+      sql: newAgentConfig.value.sql,
+      original_question: newAgentConfig.value.question
+    },
+    position: positions['sql'] || { x: 100, y: 150 }
+  }
+  
   // 파이프라인 스텝 구성 (현재 노드 위치 사용)
   const pipelineSteps = [
-    {
-      id: 'sql',
-      type: 'SQL_QUERY',
-      name: 'SQL 쿼리',
-      config: {
-        sql: newAgentConfig.value.sql,
-        original_question: newAgentConfig.value.question
-      },
-      position: positions['sql'] || { x: 100, y: 150 }
-    },
+    dataSourceStep,
     {
       id: 'condition',
       type: 'CONDITION_EVALUATION',
@@ -1102,9 +1266,9 @@ const saveAgent = async () => {
     }
   ]
   
-  // 연결 구성 (기본: sql -> condition -> action)
+  // 연결 구성 (데이터소스 -> condition -> action)
   const connections = [
-    { source: 'sql', target: 'condition', condition: null, label: null },
+    { source: dataSourceStepId, target: 'condition', condition: null, label: null },
     { source: 'condition', target: 'action', condition: 'true', label: '조건 충족' }
   ]
   
@@ -1114,12 +1278,19 @@ const saveAgent = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: newAgentConfig.value.name,
-        description: newAgentConfig.value.question,
+        description: isWhatif 
+          ? `What-If 시뮬레이션: ${newAgentConfig.value.whatifScenarioName}` 
+          : newAgentConfig.value.question,
         natural_language_query: newAgentConfig.value.question,
         check_interval_minutes: newAgentConfig.value.checkIntervalMinutes,
         steps: pipelineSteps,
         connections: connections,
-        start_step_id: 'sql'
+        start_step_id: dataSourceStepId,
+        // What-If 관련 필드 (프로필 저장용)
+        data_source_type: newAgentConfig.value.dataSourceType,
+        whatif_scenario_id: newAgentConfig.value.whatifScenarioId,
+        whatif_scenario_name: newAgentConfig.value.whatifScenarioName,
+        whatif_output_field: newAgentConfig.value.whatifOutputField,
       })
     })
     
@@ -1671,16 +1842,122 @@ watch([selectedProfile, isCreatingNew], () => {
     <aside class="node-panel" :class="{ visible: showNodePanel }">
       <div class="panel-header">
         <h3>
-          {{ selectedNodeId === 'sql' ? '📊 SQL 쿼리' : 
-             selectedNodeId === 'condition' ? '⚡ 조건 설정' : 
-             selectedNodeId === 'action' ? '🎯 조치 설정' : '설정' }}
+          {{ selectedNodeType === 'sql' ? '📊 SQL 쿼리' : 
+             selectedNodeType === 'whatif' ? '🔮 What-If 시뮬레이션' :
+             selectedNodeType === 'condition' ? '⚡ 조건 설정' : 
+             selectedNodeType === 'action' ? '🎯 조치 설정' : '설정' }}
         </h3>
         <button class="close-btn" @click="showNodePanel = false">✕</button>
       </div>
       
       <div class="panel-body">
+        <!-- What-If 시뮬레이션 노드 설정 -->
+        <template v-if="selectedNodeType === 'whatif'">
+          <div class="field-group">
+            <label>데이터 소스 유형</label>
+            <div class="data-source-types">
+              <button 
+                class="type-btn"
+                :class="{ selected: newAgentConfig.dataSourceType === 'whatif_scenario' }"
+                :disabled="!isCreatingNew"
+              >
+                🔮 What-If 시뮬레이션
+              </button>
+              <button 
+                class="type-btn"
+                @click="isCreatingNew && switchToSqlDataSource()"
+                :disabled="!isCreatingNew"
+              >
+                📊 SQL 쿼리로 전환
+              </button>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label>시나리오 프로필</label>
+            <select 
+              v-if="isCreatingNew"
+              v-model="newAgentConfig.whatifScenarioId"
+              class="select-input"
+              @change="onSelectWhatifScenario(newAgentConfig.whatifScenarioId)"
+            >
+              <option value="">-- 시나리오 선택 --</option>
+              <option 
+                v-for="scenario in whatifScenarios" 
+                :key="scenario.id" 
+                :value="scenario.id"
+              >
+                {{ scenario.name }}
+              </option>
+            </select>
+            <div v-else class="readonly-text">
+              {{ selectedProfile?.whatif_scenario_name || '미설정' }}
+            </div>
+            <div v-if="isLoadingScenarios" class="loading-hint">시나리오 로딩 중...</div>
+            <div v-if="!isLoadingScenarios && whatifScenarios.length === 0" class="empty-hint">
+              등록된 시나리오 프로필이 없습니다.<br>
+              What-If 시뮬레이터에서 프로필을 먼저 등록하세요.
+            </div>
+          </div>
+
+          <div class="field-group" v-if="newAgentConfig.whatifScenarioId">
+            <label>감시 결과 필드</label>
+            <select 
+              v-if="isCreatingNew"
+              v-model="newAgentConfig.whatifOutputField"
+              class="select-input"
+            >
+              <option value="">-- 결과 필드 선택 --</option>
+              <option 
+                v-for="field in whatifOutputFields" 
+                :key="field" 
+                :value="field"
+              >
+                {{ field }}
+              </option>
+            </select>
+            <input 
+              v-if="isCreatingNew && whatifOutputFields.length === 0"
+              v-model="newAgentConfig.whatifOutputField"
+              type="text"
+              class="text-input"
+              placeholder="결과 필드명 직접 입력"
+            />
+          </div>
+
+          <div class="field-group" v-if="newAgentConfig.whatifScenarioId">
+            <label>시나리오 설명</label>
+            <div class="readonly-text scenario-info">
+              {{ whatifScenarios.find(s => s.id === newAgentConfig.whatifScenarioId)?.description || '설명 없음' }}
+            </div>
+          </div>
+
+          <button class="run-step-btn" @click="runSingleStep('whatif')">
+            <IconPlay :size="14" />
+            이 단계만 실행
+          </button>
+        </template>
+
         <!-- SQL 노드 설정 -->
-        <template v-if="selectedNodeId === 'sql'">
+        <template v-if="selectedNodeType === 'sql'">
+          <div class="field-group" v-if="isCreatingNew">
+            <label>데이터 소스 유형</label>
+            <div class="data-source-types">
+              <button 
+                class="type-btn selected"
+                :disabled="true"
+              >
+                📊 SQL 쿼리
+              </button>
+              <button 
+                class="type-btn"
+                @click="switchToWhatifDataSource()"
+              >
+                🔮 What-If로 전환
+              </button>
+            </div>
+          </div>
+
           <div class="field-group">
             <label>SQL 쿼리</label>
             <textarea 
@@ -1710,7 +1987,7 @@ watch([selectedProfile, isCreatingNew], () => {
         </template>
 
         <!-- 조건 노드 설정 -->
-        <template v-if="selectedNodeId === 'condition'">
+        <template v-if="selectedNodeType === 'condition'">
           <div class="field-group">
             <label>조건 유형</label>
             <select 
@@ -1797,7 +2074,7 @@ watch([selectedProfile, isCreatingNew], () => {
         </template>
 
         <!-- 조치 노드 설정 -->
-        <template v-if="selectedNodeId === 'action'">
+        <template v-if="selectedNodeType === 'action'">
           <div class="field-group">
             <label>조치 유형</label>
             <div class="action-types">
@@ -1827,14 +2104,14 @@ watch([selectedProfile, isCreatingNew], () => {
               v-model="newAgentConfig.processName"
               type="text"
               class="text-input"
-              placeholder="예: 원수탁도조치"
+              placeholder="예: 정수장 여과지 탁도 이상 대응 프로세스"
             />
             <input 
               v-else
               :value="selectedProfile?.process_name"
               type="text"
               class="text-input"
-              placeholder="예: 원수탁도조치"
+              placeholder="예: 정수장 여과지 탁도 이상 대응 프로세스"
               readonly
             />
           </div>
@@ -3036,7 +3313,7 @@ watch([selectedProfile, isCreatingNew], () => {
     }
   }
 
-  .action-types {
+  .action-types, .data-source-types {
     display: flex;
     gap: var(--spacing-sm);
 
@@ -3049,6 +3326,7 @@ watch([selectedProfile, isCreatingNew], () => {
       font-size: 12px;
       cursor: pointer;
       transition: all 0.15s ease;
+      color: var(--color-text);
 
       &.selected {
         border-color: var(--color-accent);
@@ -3060,6 +3338,29 @@ watch([selectedProfile, isCreatingNew], () => {
         cursor: not-allowed;
       }
     }
+  }
+
+  .loading-hint {
+    font-size: 11px;
+    color: var(--color-text-muted);
+    margin-top: 4px;
+    font-style: italic;
+  }
+
+  .empty-hint {
+    font-size: 11px;
+    color: var(--color-text-muted);
+    margin-top: 4px;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: var(--radius-sm);
+    line-height: 1.5;
+  }
+
+  .scenario-info {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--color-text-muted);
   }
 
   .run-step-btn {

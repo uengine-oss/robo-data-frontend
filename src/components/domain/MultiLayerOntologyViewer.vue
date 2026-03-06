@@ -4,8 +4,17 @@
     <div class="viewer-header">
       <h2>🌐 온톨로지 관리</h2>
       <div class="header-actions">
-        <button class="action-btn" @click="showGenerateDialog = true">
+        <select v-model="currentLayout" class="layout-select header-layout-select" @change="applyLayout">
+          <option value="hierarchical">계층형 (Hierarchical)</option>
+          <option value="cose">물리 기반 (Cose)</option>
+          <option value="circle">원형 (Circle)</option>
+          <option value="grid">격자 (Grid)</option>
+        </select>
+        <button class="action-btn" @click="openGenerateDialog('document')">
           <span>📄</span> 문서에서 생성
+        </button>
+        <button class="action-btn" @click="openGenerateDialog('schema')">
+          <span>🗃️</span> DB 스키마에서 생성
         </button>
         <div class="ontology-list-dropdown" :class="{ 'dropdown-open': showOntologyListDropdown }">
           <button 
@@ -106,12 +115,145 @@
           <span>💾</span> 저장
         </button>
         <button 
-          class="action-btn primary" 
-          @click="autoLinkDataSources" 
-          :disabled="loading || nodes.length === 0"
+          class="action-btn whatif-toggle-btn" 
+          :class="{ active: isWhatIfPanelOpen }"
+          @click="() => { whatifFilters = JSON.parse(JSON.stringify(nodeFilters || {})); isWhatIfPanelOpen = !isWhatIfPanelOpen }"
+          :disabled="loading || nodes.length === 0 || !currentSchemaId"
         >
-          <span>🔗</span> 데이터 소스 자동 연결
+          <span>🔬</span> What-if 분석
         </button>
+      </div>
+    </div>
+
+    <!-- 필터 다이얼로그 (노드 우클릭 → 필터 적용 시 표시) -->
+    <div v-if="showFilterDialog && filterTargetNode" class="dialog-overlay" @click.self="closeFilterDialog">
+      <div class="filter-dialog">
+        <div class="filter-dialog-header">
+          <div class="filter-dialog-title">
+            <span class="filter-dialog-icon">🔍</span>
+            <span>{{ filterTargetNode.name }} 필터</span>
+          </div>
+          <div class="filter-dialog-actions-top">
+            <button 
+              v-if="hasActiveFilters" 
+              class="clear-all-filters-btn"
+              @click="clearAllFilters"
+            >
+              모두 초기화
+            </button>
+            <button class="filter-dialog-close" @click="closeFilterDialog">✕</button>
+          </div>
+        </div>
+        
+        <div class="filter-dialog-body">
+          <!-- 상위 노드에서 상속된 cascading 필터 표시 -->
+          <div v-if="getCascadingFiltersForNode(filterTargetNode.id).length > 0" class="cascading-filters-info">
+            <h5>🔗 상위 노드에서 상속된 필터</h5>
+            <div 
+              v-for="cf in getCascadingFiltersForNode(filterTargetNode.id)" 
+              :key="cf.field"
+              class="cascading-filter-item"
+            >
+              <span class="cf-from">{{ getNodeName(cf.fromNode) }}.{{ cf.fromField }}</span>
+              <span class="cf-arrow">→</span>
+              <span class="cf-field">{{ cf.field }}</span>
+              <span class="cf-equals">=</span>
+              <code class="cf-value">{{ cf.value }}</code>
+            </div>
+          </div>
+          
+          <!-- 필터 필드가 없는 경우 -->
+          <div v-if="!filterTargetNode.filterFields || filterTargetNode.filterFields.length === 0" class="no-filter-fields">
+            <span>📋 이 노드에는 필터 가능한 필드가 없습니다.</span>
+            <span class="hint">(DB 스키마에서 새로 생성한 온톨로지에만 필터 필드가 포함됩니다)</span>
+          </div>
+          
+          <!-- 필터 필드가 있는 경우 -->
+          <div v-else class="filter-dialog-fields">
+            <div 
+              v-for="field in filterTargetNode.filterFields" 
+              :key="field.column"
+              class="filter-field-row"
+            >
+              <label>{{ field.label }}</label>
+              
+              <!-- 날짜 범위 필터 -->
+              <div v-if="field.type === 'date_range'" class="date-range-filter">
+                <input 
+                  type="date" 
+                  v-model="activeFilters[`${filterTargetNode.id}.${field.column}.from`]"
+                  @change="onFilterChange"
+                />
+                <span>~</span>
+                <input 
+                  type="date" 
+                  v-model="activeFilters[`${filterTargetNode.id}.${field.column}.to`]"
+                  @change="onFilterChange"
+                />
+              </div>
+              
+              <!-- 선택/카테고리 필터 -->
+              <div v-else-if="field.type === 'select' || field.type === 'category'" class="select-filter-wrapper">
+                <select 
+                  v-model="activeFilters[`${filterTargetNode.id}.${field.column}`]"
+                  @change="onFilterChange"
+                  class="select-filter"
+                >
+                  <option value="">전체</option>
+                  <option 
+                    v-for="val in (filterDistinctValues[field.column] || [])" 
+                    :key="val" 
+                    :value="val"
+                  >
+                    {{ val }}
+                  </option>
+                </select>
+                <span v-if="filterDistinctLoading && (!filterDistinctValues[field.column] || filterDistinctValues[field.column].length === 0)" class="filter-loading-hint">
+                  로딩 중...
+                </span>
+                <span v-else-if="filterDistinctValues[field.column]" class="filter-count-hint">
+                  {{ filterDistinctValues[field.column].length }}개 항목
+                </span>
+              </div>
+              
+              <!-- 범위 필터 -->
+              <div v-else-if="field.type === 'range'" class="range-filter">
+                <input 
+                  type="number" 
+                  v-model="activeFilters[`${filterTargetNode.id}.${field.column}.min`]"
+                  @change="onFilterChange"
+                  placeholder="최소"
+                />
+                <span>~</span>
+                <input 
+                  type="number" 
+                  v-model="activeFilters[`${filterTargetNode.id}.${field.column}.max`]"
+                  @change="onFilterChange"
+                  placeholder="최대"
+                />
+              </div>
+              
+              <!-- 검색 필터 (distinct 값이 있으면 datalist 사용) -->
+              <div v-else-if="field.type === 'search'" class="search-filter-wrapper">
+                <input 
+                  type="text" 
+                  v-model="activeFilters[`${filterTargetNode.id}.${field.column}`]"
+                  @input="onFilterChange"
+                  :list="filterDistinctValues[field.column]?.length ? `datalist-${field.column}` : undefined"
+                  placeholder="검색..."
+                  class="search-filter"
+                />
+                <datalist v-if="filterDistinctValues[field.column]?.length" :id="`datalist-${field.column}`">
+                  <option v-for="val in filterDistinctValues[field.column]" :key="val" :value="val" />
+                </datalist>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="filter-dialog-footer">
+          <button class="filter-apply-btn" @click="applyAndCloseFilterDialog">확인</button>
+        </div>
       </div>
     </div>
 
@@ -124,9 +266,18 @@
     <!-- 메인 컨텐츠 -->
     <div v-else class="viewer-content">
       <!-- 왼쪽: 레이어 패널 -->
-      <div class="layer-panel">
-        <h3>📊 레이어별 노드</h3>
-        <div class="layer-list">
+      <div class="layer-panel" :class="{ 'layer-panel-collapsed': isLayerPanelCollapsed }">
+        <h3 class="layer-panel-header">
+          <span v-if="!isLayerPanelCollapsed">📊 레이어별 노드</span>
+          <button 
+            class="layer-panel-toggle-btn"
+            @click="isLayerPanelCollapsed = !isLayerPanelCollapsed"
+            :title="isLayerPanelCollapsed ? '패널 펼치기' : '패널 접기'"
+          >
+            {{ isLayerPanelCollapsed ? '▶' : '◀' }}
+          </button>
+        </h3>
+        <div v-if="!isLayerPanelCollapsed" class="layer-list">
           <div 
             v-for="layer in layers" 
             :key="layer.id"
@@ -160,21 +311,92 @@
 
       <!-- 중앙: Cytoscape 그래프 -->
       <div class="graph-panel">
-        <div class="graph-toolbar">
-          <button class="tool-btn" @click="undo" :disabled="!canUndo" title="실행 취소 (Ctrl+Z)">↩ 실행취소</button>
-          <button class="tool-btn" @click="redo" :disabled="!canRedo" title="다시 실행 (Ctrl+Y)">↪ 다시실행</button>
-          <div class="toolbar-divider"></div>
-          <button class="tool-btn" @click="fitGraph">🔍 전체 보기</button>
-          <button class="tool-btn" @click="cycleLayout">🔄 레이아웃</button>
-          <select v-model="currentLayout" class="layout-select" @change="applyLayout">
-            <option value="hierarchical">계층형 (Hierarchical)</option>
-            <option value="cose">물리 기반 (Cose)</option>
-            <option value="circle">원형 (Circle)</option>
-            <option value="grid">격자 (Grid)</option>
-          </select>
-          <button class="tool-btn" @click="exportImage">📷 이미지 저장</button>
+        <div 
+          ref="cytoscapeContainer" 
+          class="cytoscape-container"
+          @contextmenu.prevent="onCanvasContextMenu"
+        ></div>
+        
+        <!-- 캔버스 우클릭 컨텍스트 메뉴 (빈 영역 우클릭 → 새 노드 추가) -->
+        <div 
+          v-if="showContextMenu && contextMenuMode === 'canvas'" 
+          class="canvas-context-menu"
+          :style="{ left: contextMenuPos.x + 'px', top: contextMenuPos.y + 'px' }"
+        >
+          <div class="context-menu-header">새 노드 추가</div>
+          <div 
+            v-for="layer in layers" 
+            :key="layer.id"
+            class="context-menu-item"
+            @click="addNewNodeAtPosition(layer.id, contextMenuGraphPos)"
+          >
+            <span class="context-menu-icon" :style="{ color: layer.color }">{{ layer.icon }}</span>
+            <span class="context-menu-label">{{ layer.name }}</span>
+            <span class="context-menu-dot" :style="{ backgroundColor: layer.color }"></span>
+          </div>
         </div>
-        <div ref="cytoscapeContainer" class="cytoscape-container"></div>
+        
+        <!-- 노드 우클릭 컨텍스트 메뉴 (기존 노드 우클릭 → 필터/삭제) -->
+        <div 
+          v-if="showContextMenu && contextMenuMode === 'node'" 
+          class="canvas-context-menu"
+          :style="{ left: contextMenuPos.x + 'px', top: contextMenuPos.y + 'px' }"
+        >
+          <div class="context-menu-header">{{ contextMenuNodeName }}</div>
+          <div 
+            class="context-menu-item"
+            @click="openFilterFromContextMenu"
+          >
+            <span class="context-menu-icon" style="color: #a78bfa;">🔍</span>
+            <span class="context-menu-label">필터 적용</span>
+          </div>
+          <div 
+            class="context-menu-item"
+            @click="openWhatIfFromContextMenu"
+          >
+            <span class="context-menu-icon" style="color: #818cf8;">🔬</span>
+            <span class="context-menu-label">What-if 분석 (현재 필터)</span>
+          </div>
+          <div 
+            class="context-menu-item"
+            @click="openNodeRenameFromContextMenu"
+          >
+            <span class="context-menu-icon" style="color: #63b3ed;">✏️</span>
+            <span class="context-menu-label">이름 변경</span>
+          </div>
+          <div class="context-menu-divider"></div>
+          <div 
+            class="context-menu-item context-menu-danger"
+            @click="deleteNodeFromContextMenu"
+          >
+            <span class="context-menu-icon">🗑️</span>
+            <span class="context-menu-label">삭제</span>
+          </div>
+        </div>
+        
+        <!-- 엣지 우클릭 컨텍스트 메뉴 -->
+        <div 
+          v-if="showContextMenu && contextMenuMode === 'edge'" 
+          class="canvas-context-menu"
+          :style="{ left: contextMenuPos.x + 'px', top: contextMenuPos.y + 'px' }"
+        >
+          <div class="context-menu-header">{{ contextMenuEdgeLabel }}</div>
+          <div 
+            class="context-menu-item"
+            @click="openEdgePropertiesFromContextMenu"
+          >
+            <span class="context-menu-icon" style="color: #63b3ed;">⚙️</span>
+            <span class="context-menu-label">속성 편집</span>
+          </div>
+          <div class="context-menu-divider"></div>
+          <div 
+            class="context-menu-item context-menu-danger"
+            @click="deleteEdgeFromContextMenu"
+          >
+            <span class="context-menu-icon">🗑️</span>
+            <span class="context-menu-label">삭제</span>
+          </div>
+        </div>
         
         <!-- 레전드 -->
         <div class="graph-legend">
@@ -200,8 +422,8 @@
         </div>
       </div>
 
-      <!-- 오른쪽: 상세 패널 -->
-      <div class="detail-panel" v-if="selectedNode" :style="{ width: detailPanelWidth + 'px' }">
+      <!-- 오른쪽: 상세 패널 (노드 선택 또는 릴레이션 편집) -->
+      <div class="detail-panel" v-if="selectedNode || (showRelationEditor && editingRelation)" :style="{ width: detailPanelWidth + 'px' }">
         <!-- 리사이즈 핸들 -->
         <div 
           class="resize-handle"
@@ -209,7 +431,89 @@
           @dblclick="resetPanelWidth"
           title="드래그하여 폭 조절 (더블클릭: 기본값)"
         ></div>
-        <h3>📋 노드 상세</h3>
+        
+        <!-- ===== 릴레이션 속성 편집 패널 ===== -->
+        <template v-if="showRelationEditor && editingRelation && !selectedNode">
+          <div class="detail-header">
+            <h3>🔗 릴레이션 속성</h3>
+            <button class="delete-node-btn" @click="deleteRelationFromEditor" title="릴레이션 삭제">🗑️ 삭제</button>
+          </div>
+          
+          <div class="detail-content">
+            <!-- 관계 미리보기 -->
+            <div class="relation-preview-panel">
+              <div class="rel-endpoint">
+                <span class="rel-dot" :style="{ backgroundColor: getLayerColor(getNodeLayer(editingRelation.source)) }"></span>
+                <span class="rel-name">{{ getNodeName(editingRelation.source) }}</span>
+              </div>
+              <div class="rel-arrow-panel">→</div>
+              <div class="rel-endpoint">
+                <span class="rel-dot" :style="{ backgroundColor: getLayerColor(getNodeLayer(editingRelation.target)) }"></span>
+                <span class="rel-name">{{ getNodeName(editingRelation.target) }}</span>
+              </div>
+            </div>
+            
+            <div class="detail-row">
+              <label>관계 유형</label>
+              <select v-model="editingRelationForm.type" class="form-select" @change="saveRelationEditor">
+                <option v-for="opt in relationTypeOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+              </select>
+            </div>
+            
+            <div class="detail-row">
+              <label>설명</label>
+              <input 
+                v-model="editingRelationForm.description" 
+                type="text" 
+                class="form-input"
+                placeholder="관계에 대한 설명"
+                @blur="saveRelationEditor"
+                @keyup.enter="saveRelationEditor"
+              />
+            </div>
+            
+            <!-- 필드 매핑 -->
+            <div class="field-mapping-section">
+              <h4>📌 필드 매핑</h4>
+              <p class="field-mapping-hint">상위 노드 필터 → 하위 노드 자동 필터링</p>
+              
+              <div class="detail-row">
+                <label>From 필드 <span class="field-node-hint">({{ getNodeName(editingRelation.source) }})</span></label>
+                <select v-if="sourceNodeColumns.length > 0" v-model="editingRelationForm.fromField" class="form-select" @change="saveRelationEditor">
+                  <option value="">(미설정)</option>
+                  <option v-for="col in sourceNodeColumns" :key="col" :value="col">{{ col }}</option>
+                </select>
+                <input v-else v-model="editingRelationForm.fromField" type="text" class="form-input" placeholder="필드명 입력" @blur="saveRelationEditor" />
+              </div>
+              
+              <div class="detail-row">
+                <label>To 필드 <span class="field-node-hint">({{ getNodeName(editingRelation.target) }})</span></label>
+                <select v-if="targetNodeColumns.length > 0" v-model="editingRelationForm.toField" class="form-select" @change="saveRelationEditor">
+                  <option value="">(미설정)</option>
+                  <option v-for="col in targetNodeColumns" :key="col" :value="col">{{ col }}</option>
+                </select>
+                <input v-else v-model="editingRelationForm.toField" type="text" class="form-input" placeholder="필드명 입력" @blur="saveRelationEditor" />
+              </div>
+            </div>
+            
+            <div class="relation-panel-actions">
+              <button class="cancel-btn" @click="closeRelationEditor">닫기</button>
+            </div>
+          </div>
+        </template>
+        
+        <!-- ===== 노드 상세 패널 ===== -->
+        <template v-else-if="selectedNode">
+        <div class="detail-header">
+          <h3>📋 노드 상세</h3>
+          <button 
+            class="delete-node-btn" 
+            @click="confirmDeleteNode"
+            title="노드 삭제"
+          >
+            🗑️ 삭제
+          </button>
+        </div>
         
         <!-- 탭 헤더 -->
         <div class="detail-tabs">
@@ -237,13 +541,56 @@
             🔍 분석
             <span v-if="selectedNode.dataSource && isKPIOrMeasure(selectedNode)" class="data-indicator">●</span>
           </button>
+          <button 
+            :class="['tab-btn', { active: detailPanelTab === 'behavior' }]"
+            @click="detailPanelTab = 'behavior'; loadNodeBehaviors(selectedNode.id)"
+          >
+            🧠 Behavior
+            <span v-if="nodeBehaviors.length > 0" class="data-indicator">●</span>
+          </button>
+          <button 
+            v-if="isProcessNode(selectedNode)"
+            :class="['tab-btn', { active: detailPanelTab === 'bpmn' }]"
+            @click="detailPanelTab = 'bpmn'"
+            :disabled="!selectedNode.bpmnXml"
+            :title="selectedNode.bpmnXml ? 'BPMN 다이어그램 보기' : 'BPMN 데이터 없음'"
+          >
+            📐 BPMN
+            <span v-if="selectedNode.bpmnXml" class="data-indicator">●</span>
+          </button>
         </div>
         
         <!-- 정보 탭 -->
         <div class="detail-content" v-if="detailPanelTab === 'info'">
           <div class="detail-row">
             <label>이름</label>
-            <span>{{ selectedNode.name }}</span>
+            <div class="editable-name-container">
+              <input
+                v-if="isEditingNodeName"
+                ref="nodeNameInput"
+                v-model="editingNodeNameValue"
+                class="node-name-edit-input"
+                @blur="saveNodeName"
+                @keyup.enter="saveNodeName"
+                @keyup.esc="cancelEditNodeName"
+              />
+              <span 
+                v-else 
+                class="editable-node-name"
+                @dblclick="startEditNodeName"
+                title="더블클릭하여 이름 편집"
+              >
+                {{ selectedNode.name }}
+              </span>
+              <button 
+                v-if="!isEditingNodeName"
+                class="edit-name-btn"
+                @click="startEditNodeName"
+                title="이름 편집"
+              >
+                ✏️
+              </button>
+            </div>
           </div>
           <div class="detail-row">
             <label>레이어</label>
@@ -269,6 +616,26 @@
           <div class="detail-row" v-if="selectedNode.targetValue">
             <label>목표값</label>
             <span>{{ selectedNode.targetValue }}</span>
+          </div>
+          
+          <!-- 적용된 필터 칩 표시 -->
+          <div class="detail-row" v-if="getNodeFilterChips(selectedNode.id).length > 0">
+            <label>🔍 적용된 필터</label>
+            <div class="filter-chips">
+              <div 
+                v-for="chip in getNodeFilterChips(selectedNode.id)" 
+                :key="chip.label + chip.value"
+                class="filter-chip"
+                :class="chip.type === 'cascade' ? 'cascade' : 'direct'"
+              >
+                <span class="chip-label">{{ chip.label }}</span>
+                <span class="chip-equals">=</span>
+                <span class="chip-value">{{ chip.value }}</span>
+                <span v-if="chip.type === 'cascade'" class="chip-source" :title="'상위 노드: ' + getNodeName(chip.fromNode!)">
+                  ← {{ getNodeName(chip.fromNode!) }}
+                </span>
+              </div>
+            </div>
           </div>
           
           <!-- 데이터 소스 정보 -->
@@ -306,10 +673,20 @@
                 v-for="rel in getNodeRelations(selectedNode.id)" 
                 :key="rel.id"
                 class="relation-item"
+                @dblclick="openRelationEditor(rel.id)"
+                title="더블클릭하여 릴레이션 편집"
+                style="cursor: pointer;"
               >
-                <span class="rel-source">{{ getNodeName(rel.source) }}</span>
-                <span class="rel-type" :class="rel.type.toLowerCase()">{{ rel.type }}</span>
-                <span class="rel-target">{{ getNodeName(rel.target) }}</span>
+                <div class="rel-main">
+                  <span class="rel-source">{{ getNodeName(rel.source) }}</span>
+                  <span class="rel-type" :class="rel.type.toLowerCase()">{{ rel.type }}</span>
+                  <span class="rel-target">{{ getNodeName(rel.target) }}</span>
+                </div>
+                <div v-if="rel.fromField && rel.toField" class="rel-field-mapping">
+                  <span class="rel-field">{{ rel.fromField }}</span>
+                  <span class="rel-field-arrow">→</span>
+                  <span class="rel-field">{{ rel.toField }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -329,6 +706,73 @@
             :streaming-report="displayedStreamingReport || null"
             @analysis-complete="handleAnalysisComplete"
           />
+        </div>
+        
+        <!-- Behavior 탭 (연결된 모델 정보) -->
+        <div class="detail-content behavior-tab" v-if="detailPanelTab === 'behavior'">
+          <div v-if="behaviorLoading" class="data-loading">
+            <div class="loading-spinner small"></div>
+            <span>모델 정보 조회 중...</span>
+          </div>
+          <div v-else-if="nodeBehaviors.length === 0" class="behavior-empty">
+            <p>이 노드와 연결된 모델이 없습니다.</p>
+            <p class="behavior-hint">What-if 분석에서 모델을 학습/등록하면 여기에 표시됩니다.</p>
+          </div>
+          <div v-else class="behavior-list">
+            <div v-for="bm in nodeBehaviors" :key="bm.modelId" class="behavior-card" :class="bm.role">
+              <!-- 역할 배지 -->
+              <div class="behavior-header">
+                <span class="role-badge" :class="bm.role">
+                  {{ bm.role === 'output' ? '📤 출력 모델' : '📥 입력 모델' }}
+                </span>
+                <span class="behavior-status" :class="bm.status">{{ bm.status }}</span>
+              </div>
+              <!-- 모델 이름 -->
+              <div class="behavior-name">{{ bm.name }}</div>
+              <!-- 설명 -->
+              <div v-if="bm.description" class="behavior-desc">{{ bm.description }}</div>
+              <!-- 입력/출력 필드 -->
+              <div class="behavior-io">
+                <div v-if="bm.inputs.length > 0" class="io-group">
+                  <span class="io-label">입력:</span>
+                  <span v-for="inp in bm.inputs" :key="inp.field" class="io-tag input-tag" :title="inp.field">
+                    {{ inp.field }}
+                  </span>
+                </div>
+                <div v-if="bm.outputs.length > 0" class="io-group">
+                  <span class="io-label">출력:</span>
+                  <span v-for="out in bm.outputs" :key="out.field" class="io-tag output-tag" :title="out.field">
+                    {{ out.field }}
+                  </span>
+                </div>
+              </div>
+              <!-- 메트릭 -->
+              <div v-if="bm.metrics" class="behavior-metrics">
+                <span v-for="(val, key) in JSON.parse(bm.metrics || '{}')" :key="key" class="metric-tag">
+                  {{ key }}: {{ typeof val === 'number' ? val.toFixed(3) : val }}
+                </span>
+              </div>
+              <!-- 삭제 버튼 -->
+              <button class="behavior-delete-btn" @click="deleteBehaviorModel(bm.modelId)" title="모델 삭제">
+                🗑️
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- BPMN 탭 -->
+        <div class="detail-content bpmn-tab" v-if="detailPanelTab === 'bpmn' && isProcessNode(selectedNode)">
+          <BpmnViewer
+            v-if="selectedNode.bpmnXml"
+            :model-value="selectedNode.bpmnXml"
+            :title="selectedNode.name + ' – BPMN'"
+            :node-id="selectedNode.id"
+            @saved="(xml: string) => { if (selectedNode) selectedNode.bpmnXml = xml }"
+          />
+          <div v-else class="bpmn-empty-state">
+            <p>이 프로세스에 연결된 BPMN 다이어그램이 없습니다.</p>
+            <p class="bpmn-hint">문서에서 온톨로지를 생성하면 PDF2BPMN이 자동으로 BPMN을 추출합니다.</p>
+          </div>
         </div>
         
         <!-- 데이터 탭 -->
@@ -380,6 +824,21 @@
               <span class="source-label">{{ nodeDataResult.isObjectType ? '📦 ObjectType' : '🗄️ 테이블' }}</span>
               <code>{{ nodeDataResult.dataSource }}</code>
               <span class="row-count">{{ nodeDataResult.rowCount }}행</span>
+              <span v-if="nodeDataResult.businessDayFiltered" class="biz-day-badge">📅 영업일 필터 적용됨</span>
+            </div>
+            
+            <!-- 영업일 캘린더 필터 토글 -->
+            <div class="business-day-filter-toggle">
+              <label class="toggle-label">
+                <input 
+                  type="checkbox" 
+                  v-model="businessDayFilterEnabled"
+                  @change="selectedNode && fetchNodeData(selectedNode.id)"
+                />
+                <span class="toggle-switch"></span>
+                <span class="toggle-text">📅 영업일 캘린더 적용</span>
+              </label>
+              <span class="toggle-desc">비영업일(주말/공휴일) 데이터를 타임시리즈에서 제외합니다</span>
             </div>
             
             <!-- 차트 영역 -->
@@ -433,6 +892,7 @@
             </div>
           </div>
         </div>
+        </template>
       </div>
     </div>
 
@@ -465,12 +925,36 @@
     <div v-if="showGenerateDialog" class="dialog-overlay" @click.self="!generating && !generateError && (showGenerateDialog = false)">
       <div class="generate-dialog" :class="{ 'dialog-expanded': generating || !!generateError }">
         <div class="dialog-header">
-          <h3>📄 문서에서 온톨로지 생성</h3>
+          <h3>{{ generationMode === 'schema' ? '🗃️ DB 스키마에서 온톨로지 생성' : '📄 문서에서 온톨로지 생성' }}</h3>
           <button class="close-btn" @click="onCloseGenerateDialog" :disabled="generating">✕</button>
         </div>
         
+        <!-- 생성 모드 탭 -->
+        <div class="generation-mode-tabs" v-if="!generating && !generateError">
+          <button 
+            :class="['mode-tab', { active: generationMode === 'document' }]"
+            @click="generationMode = 'document'"
+          >
+            <span>📄</span> 문서 기반
+          </button>
+          <button 
+            :class="['mode-tab', { active: generationMode === 'schema' }]"
+            @click="generationMode = 'schema'"
+          >
+            <span>🗃️</span> DB 스키마 기반
+          </button>
+        </div>
+        
+        <!-- 스키마 기반 생성 모드 -->
+        <div v-if="generationMode === 'schema' && !generating && !generateError" class="schema-generation-content">
+          <SchemaBasedGenerator 
+            @generated="handleSchemaBasedGenerated"
+            @cancel="showGenerateDialog = false"
+          />
+        </div>
+        
         <!-- 오류 전용 화면 (폼으로 돌아가지 않고 먼저 표시) -->
-        <div class="error-result-view" v-if="generateError && !generating">
+        <div class="error-result-view" v-else-if="generateError && !generating">
           <div class="error-result-icon">⚠️</div>
           <h4 class="error-result-title">온톨로지 생성 오류</h4>
           <p class="error-result-message">{{ generateError }}</p>
@@ -480,8 +964,8 @@
           </div>
         </div>
         
-        <!-- 입력 폼 (생성 중도 아니고 오류도 아닐 때만) -->
-        <div class="dialog-content" v-else-if="!generating">
+        <!-- 문서 기반 입력 폼 (생성 중도 아니고 오류도 아닐 때만) -->
+        <div class="dialog-content" v-else-if="generationMode === 'document' && !generating">
           <div class="form-group">
             <label>입력 방식</label>
             <div class="input-type-tabs">
@@ -589,8 +1073,40 @@
             <span class="progress-step">{{ currentStep }}</span>
           </div>
           
-          <!-- 레이어별 진행 상태 -->
+          <!-- 레이어별 진행 상태 (BPMN 포함) -->
           <div class="layer-progress-list">
+            <!-- BPMN 프로세스 추출 (PDF 입력 시 맨 위에 표시) -->
+            <div 
+              v-if="layerProgress['BPMN']"
+              class="layer-progress-item"
+              :class="layerProgress['BPMN']?.status || 'pending'"
+            >
+              <div class="layer-progress-header">
+                <span class="layer-icon" style="color: #8b5cf6">📐</span>
+                <span class="layer-name">BPMN 프로세스 추출</span>
+                <span class="layer-status-badge" :class="layerProgress['BPMN']?.status">
+                  {{ getStatusLabel(layerProgress['BPMN']?.status) }}
+                </span>
+              </div>
+              <div class="layer-progress-bar">
+                <div 
+                  class="progress-fill" 
+                  :style="{ 
+                    width: (layerProgress['BPMN']?.progress || 0) + '%',
+                    backgroundColor: '#8b5cf6' 
+                  }"
+                ></div>
+              </div>
+              <div class="layer-progress-info">
+                <span v-if="layerProgress['BPMN']?.nodesCount">
+                  {{ layerProgress['BPMN']?.nodesCount }} 프로세스 추출됨
+                </span>
+                <span v-if="layerProgress['BPMN']?.message" class="progress-message">
+                  {{ layerProgress['BPMN']?.message }}
+                </span>
+              </div>
+            </div>
+            <!-- 5개 온톨로지 레이어 -->
             <div 
               v-for="layer in layers" 
               :key="layer.id"
@@ -723,6 +1239,7 @@
                   <span v-if="linkingProgress.nodeStatuses[node.id]?.status === 'searching'" class="searching-icon">⏳</span>
                   <span v-else-if="linkingProgress.nodeStatuses[node.id]?.status === 'found'">✅</span>
                   <span v-else-if="linkingProgress.nodeStatuses[node.id]?.status === 'not_found'">❌</span>
+                  <span v-else-if="linkingProgress.nodeStatuses[node.id]?.status === 'error'">⚠️</span>
                   <span v-else>⏸️</span>
                 </span>
                 <span class="node-name">{{ node.name }}</span>
@@ -755,6 +1272,10 @@
               <div class="stat-item not-found">
                 <span class="stat-value">{{ getMappingStats().notFound }}</span>
                 <span class="stat-label">미발견</span>
+              </div>
+              <div class="stat-item error">
+                <span class="stat-value">{{ getMappingStats().error }}</span>
+                <span class="stat-label">오류</span>
               </div>
             </div>
             
@@ -805,7 +1326,10 @@
                             <span v-if="mapping.status === 'confirmed' && mapping.selected_candidate?.table_name === candidate.table_name" class="confirmed-tag">✅ 확정됨</span>
                           </div>
                           <div class="candidate-meta">
-                            <span>📊 {{ candidate.row_count.toLocaleString() }} rows</span>
+                            <span v-if="candidate.row_count === null">📊 ... rows</span>
+                            <span v-else-if="candidate.row_count === -1">📊 - rows</span>
+                            <span v-else-if="candidate.row_count_approx">📊 {{ candidate.row_count.toLocaleString() }}+ rows</span>
+                            <span v-else>📊 {{ candidate.row_count.toLocaleString() }} rows</span>
                             <span>📋 {{ candidate.columns.length }} columns</span>
                           </div>
                           <div class="candidate-reason">{{ candidate.match_reason }}</div>
@@ -953,6 +1477,18 @@
             <div class="search-input-section">
               <label>검색어 (노드 정보 기반 자동 생성)</label>
               <div class="search-input-wrapper">
+                <select
+                  class="search-datasource-select"
+                  v-model="selectedDatasource"
+                  @change="handleDatasourceChange"
+                  :disabled="loadingTables"
+                  :title="selectedDatasource || '데이터 소스 선택'"
+                >
+                  <option value="">데이터 소스</option>
+                  <option v-for="ds in availableDatasources" :key="ds" :value="ds">
+                    {{ ds }}
+                  </option>
+                </select>
                 <input 
                   v-model="nodeSearchQuery"
                   type="text"
@@ -963,18 +1499,18 @@
                 <button 
                   class="search-btn"
                   @click="searchNodeDataSource"
-                  :disabled="nodeSearchLoading"
+                  :disabled="nodeSearchLoading || !selectedDatasource"
                 >
                   {{ nodeSearchLoading ? '검색 중...' : '🔍 검색' }}
                 </button>
               </div>
               <div class="search-hint">
-                💡 노드 이름과 레이어를 기반으로 검색어가 자동 생성됩니다. 필요시 수정하세요.
+                {{ !selectedDatasource ? '⚠️ 데이터 소스를 먼저 선택하세요.' : '💡 노드 이름과 레이어를 기반으로 검색어가 자동 생성됩니다. 필요시 수정하세요.' }}
               </div>
               
               <!-- 검색 진행 상황 표시 -->
-              <div v-if="nodeSearchLoading && nodeSearchStatus" class="search-status">
-                <div class="search-spinner-small"></div>
+              <div v-if="nodeSearchStatus" class="search-status">
+                <div v-if="nodeSearchLoading" class="search-spinner-small"></div>
                 <span>{{ nodeSearchStatus }}</span>
               </div>
               
@@ -1012,7 +1548,10 @@
                     <span class="relevance-badge">{{ (result.relevance_score * 100).toFixed(0) }}%</span>
                   </div>
                   <div class="result-meta">
-                    <span>{{ result.row_count?.toLocaleString() || 0 }} rows</span>
+                    <span v-if="result.row_count === null">... rows</span>
+                    <span v-else-if="result.row_count === -1">- rows</span>
+                    <span v-else-if="result.row_count_approx">{{ result.row_count.toLocaleString() }}+ rows</span>
+                    <span v-else>{{ result.row_count.toLocaleString() }} rows</span>
                     <span>{{ result.columns?.length || 0 }} columns</span>
                   </div>
                   <div class="result-reason">{{ result.match_reason }}</div>
@@ -1028,7 +1567,7 @@
               </div>
             </div>
             
-            <div v-else-if="nodeSearchQuery && !nodeSearchLoading" class="no-results">
+            <div v-else-if="nodeSearchQuery && !nodeSearchLoading && !nodeSearchStatus" class="no-results">
               <p>검색 결과가 없습니다. 다른 검색어를 시도해보세요.</p>
             </div>
           </div>
@@ -1211,6 +1750,8 @@
     </div>
 
 
+    <!-- 릴레이션 속성 편집 다이얼로그는 우측 패널로 이동 (아래 detail-panel 참조) -->
+
     <!-- 엣지 삭제 확인 다이얼로그 -->
     <div v-if="showEdgeDeleteDialog" class="dialog-overlay" @click.self="cancelDeleteEdge">
       <div class="edge-delete-dialog">
@@ -1237,16 +1778,41 @@
         </div>
       </div>
     </div>
+
+    <!-- What-if 분석 하단 패널 (드래그 가능한 세퍼레이터 포함) -->
+    <template v-if="isWhatIfPanelOpen && currentSchemaId">
+      <!-- 드래그 세퍼레이터 -->
+      <div
+        class="whatif-separator"
+        @mousedown="startResizeWhatIf"
+      >
+        <div class="separator-handle"></div>
+      </div>
+      <!-- 패널 -->
+      <div
+        class="whatif-panel-container"
+        :style="{ height: whatifPanelHeight + 'px' }"
+      >
+        <WhatIfPanel
+          :schema-id="currentSchemaId"
+          :filters="whatifFilters"
+          @close="isWhatIfPanelOpen = false"
+        />
+      </div>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick, computed, onUnmounted, watchEffect } from 'vue'
+import { ref, onMounted, watch, nextTick, computed, onUnmounted, watchEffect, Transition } from 'vue'
 import cytoscape from 'cytoscape'
 import edgehandles from 'cytoscape-edgehandles'
 import * as echarts from 'echarts'
+import WhatIfPanel from '@/components/ontology/whatif/WhatIfPanel.vue'
 import LineChart from '@/components/charts/LineChart.vue'
 import CausalAnalysisPanel from '@/components/domain/CausalAnalysisPanel.vue'
+import BpmnViewer from '@/components/domain/BpmnViewer.vue'
+import SchemaBasedGenerator from '@/components/ontology/SchemaBasedGenerator.vue'
 import { text2sqlApi } from '@/services/api'
 import type { ReactRequest, ReactStreamEvent } from '@/types'
 
@@ -1254,6 +1820,13 @@ import type { ReactRequest, ReactStreamEvent } from '@/types'
 cytoscape.use(edgehandles)
 
 // Types
+interface FilterField {
+  column: string
+  label: string
+  type: string
+  dataType: string
+}
+
 interface OntologyNode {
   id: string
   name: string
@@ -1266,6 +1839,8 @@ interface OntologyNode {
   thresholds?: Record<string, number>
   dataSource?: string
   dataSourceSchema?: any
+  filterFields?: FilterField[]
+  position?: { x: number; y: number }
 }
 
 interface OntologyRelationship {
@@ -1278,6 +1853,8 @@ interface OntologyRelationship {
   lag?: number
   sourceLayer?: string
   targetLayer?: string
+  fromField?: string  // source 노드의 연결 필드 (FK/join key)
+  toField?: string    // target 노드의 연결 필드 (FK/join key)
 }
 
 interface LayerInfo {
@@ -1285,6 +1862,20 @@ interface LayerInfo {
   name: string
   color: string
   icon: string
+}
+
+interface NodeSearchCandidate {
+  table_name: string
+  datasource?: string
+  full_table_name?: string
+  columns: string[]
+  sample_data: any[]
+  row_count: number | null
+  row_count_approx: boolean
+  relevance_score: number
+  match_reason: string
+  suggested_sql: string
+  materializedView?: string
 }
 
 // Layer 정의 (KPI가 맨 위, 위에서 아래로 계층 순서)
@@ -1301,6 +1892,7 @@ const cytoscapeContainer = ref<HTMLElement | null>(null)
 let cy: cytoscape.Core | null = null
 let themeObserver: MutationObserver | null = null
 let edgehandlesInstance: any = null
+let tempEdgeFromEdgehandles: any = null  // edgehandles가 자동 생성한 임시 엣지 참조
 
 // 드래그 앤 드롭 연결 상태
 const isDraggingHandle = ref(false)
@@ -1319,8 +1911,43 @@ const loadingMessage = ref('')
 const nodes = ref<OntologyNode[]>([])
 const relationships = ref<OntologyRelationship[]>([])
 const collapsedLayers = ref(new Set<string>())
+const isLayerPanelCollapsed = ref(false)
 const selectedNodeId = ref<string | null>(null)
-const currentLayout = ref('hierarchical')
+const currentLayout = ref('cose')  // 물리 기반 레이아웃을 기본값으로
+
+// 필터 관련 상태
+const activeFilters = ref<Record<string, any>>({})
+const hasActiveFilters = computed(() => {
+  return Object.values(activeFilters.value).some(v => v !== '' && v !== null && v !== undefined)
+})
+
+function onFilterChange() {
+  // 필터 변경 시 데이터 새로고침
+  const targetNodeId = filterTargetNode.value?.id || selectedNodeId.value
+  if (targetNodeId) {
+    // cascading 필터 전파: 현재 노드의 필터를 하위 노드들에 전파
+    const effectiveFilters = getEffectiveFilters(targetNodeId)
+    propagateFiltersFromNode(targetNodeId, effectiveFilters)
+    
+    // 현재 노드 데이터 새로고침
+    fetchNodeData(targetNodeId)
+    
+    // 필터된 노드 시각화 업데이트
+    updateFilteredNodeVisuals()
+  }
+}
+
+function clearAllFilters() {
+  activeFilters.value = {}
+  nodeFilters.value = {}
+  
+  // 시각적 하이라이트 제거
+  updateFilteredNodeVisuals()
+  
+  if (selectedNodeId.value) {
+    fetchNodeData(selectedNodeId.value)
+  }
+}
 
 // 스키마 로드 중 플래그 (watch가 initCytoscape를 덮어쓰지 않도록)
 const isLoadingSchema = ref(false)
@@ -1334,14 +1961,60 @@ const undoStack = ref<HistoryState[]>([])
 const redoStack = ref<HistoryState[]>([])
 const maxHistorySize = 50
 
+// 노드 추가 드롭다운
+const showAddNodeDropdown = ref(false)
+
+// 노드 이름 편집
+const isEditingNodeName = ref(false)
+const editingNodeNameValue = ref('')
+const nodeNameInput = ref<HTMLInputElement | null>(null)
+
+// 캔버스 우클릭 컨텍스트 메뉴
+const showContextMenu = ref(false)
+const contextMenuMode = ref<'canvas' | 'node' | 'edge'>('canvas')
+const contextMenuPos = ref({ x: 0, y: 0 })
+const contextMenuGraphPos = ref({ x: 0, y: 0 })
+const contextMenuNodeId = ref<string | null>(null)
+const contextMenuNodeName = ref('')
+const contextMenuEdgeId = ref<string | null>(null)
+const contextMenuEdgeLabel = ref('')
+
+// 필터 다이얼로그
+const showFilterDialog = ref(false)
+const filterTargetNode = ref<OntologyNode | null>(null)
+const filterDistinctValues = ref<Record<string, any[]>>({})
+const filterDistinctLoading = ref(false)
+
+// 릴레이션 속성 편집 다이얼로그
+const showRelationEditor = ref(false)
+const editingRelation = ref<OntologyRelationship | null>(null)
+const editingRelationForm = ref({
+  type: '',
+  description: '',
+  fromField: '',
+  toField: ''
+})
+const sourceNodeColumns = ref<string[]>([])
+const targetNodeColumns = ref<string[]>([])
+
+// 노드별 필터 상태 (cascading filter용) - { nodeId: { field: value } }
+const nodeFilters = ref<Record<string, Record<string, any>>>({})
+
 // 엣지 삭제 확인 다이얼로그
 const showEdgeDeleteDialog = ref(false)
 const edgeToDelete = ref<{ id: string; source: string; target: string; type: string } | null>(null)
 
 // Generate dialog
 const showGenerateDialog = ref(false)
+const generationMode = ref<'document' | 'schema'>('document')
 const generating = ref(false)
 const generationLogs = ref<{ time: string; message: string; type?: string }[]>([])
+
+// 온톨로지 생성 다이얼로그 열기
+function openGenerateDialog(mode: 'document' | 'schema') {
+  generationMode.value = mode
+  showGenerateDialog.value = true
+}
 const generateForm = ref({
   inputType: 'text',
   text: '',
@@ -1396,9 +2069,10 @@ const nodeSearchQuery = ref('')
 const nodeSearchLoading = ref(false)
 const nodeSearchStatus = ref<string>('') // 검색 진행 상황 메시지
 const nodeSearchConversation = ref<string[]>([]) // 스트리밍 대화 내용
-const nodeSearchResults = ref<any[]>([])
+const nodeSearchResults = ref<NodeSearchCandidate[]>([])
 const selectedSearchResult = ref<number | null>(null)
 const nodeSearchAbortController = ref<AbortController | null>(null)
+const nodeSearchProbeRunId = ref(0)
 const selectedManualTable = ref<string | null>(null)
 const availableDatasources = ref<string[]>([])
 const availableSchemas = ref<string[]>([])
@@ -1413,15 +2087,7 @@ const dataSourceMappings = ref<Record<string, {
   node_name: string
   node_layer: string
   search_query: string
-  candidates: Array<{
-    table_name: string
-    columns: string[]
-    sample_data: any[]
-    row_count: number
-    relevance_score: number
-    match_reason: string
-    suggested_sql: string
-  }>
+  candidates: Array<NodeSearchCandidate>
   selected_candidate: any | null
   status: string
 }>>({})
@@ -1432,9 +2098,10 @@ const sampleDataLoading = ref(false)
 const sampleData = ref<any[]>([])
 
 // 노드 데이터 소스 뷰어 상태
-const detailPanelTab = ref<'info' | 'data' | 'analysis'>('info')
+const detailPanelTab = ref<'info' | 'data' | 'analysis' | 'behavior' | 'bpmn'>('info')
 const nodeDataLoading = ref(false)
 const lastDataError = ref<string | null>(null)
+const businessDayFilterEnabled = ref(false)  // 영업일 캘린더 필터 적용 여부
 const nodeDataResult = ref<{
   hasDataSource: boolean
   dataSource?: string
@@ -1444,11 +2111,13 @@ const nodeDataResult = ref<{
   rowCount: number
   timeColumns: string[]
   numericColumns: string[]
+  businessDayFiltered?: boolean
   chartRecommendation?: {
     type: 'line' | 'bar' | 'table'
     xAxis: string | null
     yAxis: string[]
   }
+  message?: string
 } | null>(null)
 const chartContainerRef = ref<HTMLElement | null>(null)
 let chartInstance: echarts.ECharts | null = null
@@ -1763,7 +2432,7 @@ function handleAnalysisTabClick() {
 }
 
 // 상세 패널 리사이즈
-const detailPanelWidth = ref(380)
+const detailPanelWidth = ref(440)
 const isResizing = ref(false)
 const resizeStartX = ref(0)
 const resizeStartWidth = ref(380)
@@ -1797,7 +2466,7 @@ function stopResize() {
 }
 
 function resetPanelWidth() {
-  detailPanelWidth.value = 380
+  detailPanelWidth.value = 440
 }
 
 // Computed
@@ -1973,6 +2642,7 @@ function selectNode(nodeId: string) {
   selectedNodeId.value = nodeId
   detailPanelTab.value = 'info'  // 탭 초기화
   nodeDataResult.value = null    // 데이터 초기화
+  isEditingNodeName.value = false  // 이름 편집 초기화
   
   // 분석 탭 상태 초기화
   if (analysisState.value) {
@@ -2050,8 +2720,26 @@ async function fetchNodeData(nodeId: string) {
   }
   
   try {
+    // cascading 필터 조건 수집
+    const effectiveFilters = getEffectiveFilters(nodeId)
+    const filterParams = new URLSearchParams({ limit: '500' })
+    
+    // 필터 조건을 쿼리 파라미터로 추가
+    Object.entries(effectiveFilters).forEach(([key, value]) => {
+      if (value !== '' && value !== null && value !== undefined) {
+        filterParams.append(`filter_${key}`, String(value))
+      }
+    })
+    
+    // 영업일 캘린더 필터 적용 여부
+    if (businessDayFilterEnabled.value) {
+      filterParams.append('apply_business_day_filter', 'true')
+    }
+    
+    console.log(`[Filter] fetchNodeData(${nodeId}): effectiveFilters=`, effectiveFilters, `businessDayFilter=${businessDayFilterEnabled.value}`, `URL params: ${filterParams.toString()}`)
+    
     // 1차: 백엔드 API 시도
-    const response = await fetch(`/api/gateway/ontology/ontology-nodes/${nodeId}/data?limit=200`)
+    const response = await fetch(`/api/gateway/ontology/ontology-nodes/${nodeId}/data?${filterParams.toString()}`)
     
     if (response.ok) {
       const result = await response.json()
@@ -2142,7 +2830,9 @@ async function fetchDataViaText2SQL(node: OntologyNode, nodeId: string) {
   try {
     // MindsDB-only: datasource is mandatory for /direct-sql
     const ds =
-      selectedDatasource.value && selectedDatasource.value !== '__ontology__'
+      node.dataSourceSchema?.datasource
+        ? String(node.dataSourceSchema.datasource)
+        : selectedDatasource.value && selectedDatasource.value !== '__ontology__'
         ? selectedDatasource.value
         : (node.dataSource || '').split('.').length === 3
           ? (node.dataSource || '').split('.')[0]
@@ -2436,7 +3126,7 @@ function renderChart() {
     },
     legend: {
       data: yAxes,
-      top: 10,
+      bottom: 0,
       left: 'center',
       itemGap: 20,
       textStyle: {
@@ -2449,7 +3139,8 @@ function renderChart() {
     grid: {
       left: '3%',
       right: '4%',
-      bottom: '3%',
+      top: 40,
+      bottom: '15%',
       containLabel: true
     },
     xAxis: {
@@ -2516,12 +3207,16 @@ function renderChart() {
         return
       }
       
-      // ECharts brush 이벤트에서 coordRange 찾기
-      let range: number[] | null = null
+      // ECharts brush 이벤트에서 브러시 범위 추출
+      // - coordRange: [[xStart, xEnd], [yStart, yEnd]] (축 좌표)
+      // - range: [[x1, y1], [x2, y2]] 또는 [start, end] (픽셀/단순 범위)
+      let range: any = null
+      let rangeSource: 'coordRange' | 'pixelRange' | null = null
       
       // 1. params.areas에서 직접 찾기
       if (params?.areas?.length > 0 && params.areas[0]?.coordRange) {
         range = params.areas[0].coordRange
+        rangeSource = 'coordRange'
         console.log('✅ params.areas[0].coordRange에서 찾음:', range)
       }
       // 2. params.batch[0]에서 찾기
@@ -2536,24 +3231,29 @@ function renderChart() {
         // batchItem에 직접 coordRange가 있는지
         if (batchItem?.coordRange) {
           range = batchItem.coordRange
+          rangeSource = 'coordRange'
           console.log('✅ batchItem.coordRange에서 찾음:', range)
         }
         // batchItem.areas[0].coordRange에서 찾기
         else if (batchItem?.areas?.[0]?.coordRange) {
           range = batchItem.areas[0].coordRange
+          rangeSource = 'coordRange'
           console.log('✅ batchItem.areas[0].coordRange에서 찾음:', range)
         }
         // batchItem.selected[0].areas[0].coordRange에서 찾기
         else if (batchItem?.selected?.[0]?.areas?.[0]?.coordRange) {
           range = batchItem.selected[0].areas[0].coordRange
+          rangeSource = 'coordRange'
           console.log('✅ batchItem.selected[0].areas[0].coordRange에서 찾음:', range)
         }
         // batchItem.range에서 찾기 (다른 형식일 수 있음)
         else if (batchItem?.range) {
           if (Array.isArray(batchItem.range)) {
             range = batchItem.range
+            rangeSource = 'pixelRange'
           } else if (typeof batchItem.range === 'object' && batchItem.range.start != null && batchItem.range.end != null) {
             range = [batchItem.range.start, batchItem.range.end]
+            rangeSource = 'pixelRange'
           }
           if (range) {
             console.log('✅ batchItem.range에서 찾음:', range)
@@ -2566,19 +3266,41 @@ function renderChart() {
         return
       }
       
-      console.log('브러시 범위 (원본):', range, '타입:', Array.isArray(range[0]) ? '2D' : '1D')
+      console.log('브러시 범위 (원본):', range, '타입:', Array.isArray(range[0]) ? '2D' : '1D', '소스:', rangeSource)
       
-      // coordRange가 2D 배열인 경우 처리 [[x1, y1], [x2, y2]] -> [x1, x2]
-      let xRange: number[]
+      // source별로 X 범위를 안전하게 추출
+      let xRange: number[] | null = null
       if (Array.isArray(range[0])) {
-        // 2D 배열: [[x1, y1], [x2, y2]] 형태
-        xRange = [range[0][0], range[1][0]]
-        console.log('2D 배열 감지, X 범위 추출:', xRange)
+        if (rangeSource === 'coordRange') {
+          // coordRange 2D: [[xStart, xEnd], [yStart, yEnd]]
+          const xCoordRange = range[0]
+          if (Array.isArray(xCoordRange) && xCoordRange.length >= 2) {
+            xRange = [Number(xCoordRange[0]), Number(xCoordRange[1])]
+            console.log('2D coordRange 감지, X 축 범위 추출:', xRange)
+          }
+        } else {
+          // pixel range 2D: [[x1, y1], [x2, y2]]
+          const p1 = range[0]
+          const p2 = range[1]
+          if (Array.isArray(p1) && p1.length > 0 && Array.isArray(p2) && p2.length > 0) {
+            xRange = [Number(p1[0]), Number(p2[0])]
+            console.log('2D pixel range 감지, X 좌표 추출:', xRange)
+          }
+        }
       } else {
         // 1D 배열: [x1, x2] 형태
-        xRange = range as number[]
+        xRange = [Number(range[0]), Number(range[1])]
         console.log('1D 배열, X 범위:', xRange)
       }
+      
+      if (!xRange || xRange.length < 2 || !Number.isFinite(xRange[0]) || !Number.isFinite(xRange[1])) {
+        console.log('❌ X 범위 추출 실패:', { range, rangeSource, xRange })
+        return
+      }
+      
+      // 역방향 드래그(오른쪽→왼쪽)도 허용
+      const xStart = Math.min(xRange[0], xRange[1])
+      const xEnd = Math.max(xRange[0], xRange[1])
       
       // rows, xAxis, xData가 클로저에서 접근 가능한지 확인
       if (!rows || !xAxis || !xData) {
@@ -2593,10 +3315,14 @@ function renderChart() {
         return
       }
       
-      const startIdx = Math.max(0, Math.floor(xRange[0]))
-      const endIdx = Math.min(xData.length - 1, Math.ceil(xRange[1]))
+      const startIdx = Math.max(0, Math.floor(xStart))
+      const endIdx = Math.min(xData.length - 1, Math.ceil(xEnd))
       console.log('인덱스 계산:', { 
         range, 
+        rangeSource,
+        xRange,
+        xStart,
+        xEnd,
         startIdx, 
         endIdx, 
         xDataLength: xData.length,
@@ -2689,6 +3415,351 @@ function renderChart() {
   window.addEventListener('resize', resizeHandler)
 }
 
+// 그래프 다시 렌더링 (initCytoscape 래퍼)
+function renderGraph() {
+  nextTick(() => initCytoscape())
+}
+
+// ========== 노드 추가 기능 ==========
+
+function toggleAddNodeDropdown() {
+  showAddNodeDropdown.value = !showAddNodeDropdown.value
+}
+
+// 클릭 외부 시 드롭다운 닫기
+function closeAddNodeDropdown() {
+  showAddNodeDropdown.value = false
+}
+
+// 캔버스 우클릭 핸들러 (브라우저 기본 메뉴 차단용 - 실제 로직은 Cytoscape cxttap에서 처리)
+function onCanvasContextMenu(event: MouseEvent) {
+  // 브라우저 기본 컨텍스트 메뉴만 차단 (Cytoscape cxttap 이벤트가 처리)
+  event.preventDefault()
+}
+
+// 컨텍스트 메뉴 닫기
+function closeContextMenu() {
+  showContextMenu.value = false
+}
+
+// 새 노드 추가 (툴바 버튼) - 캔버스 중앙에 배치
+function addNewNode(layerId: string) {
+  showAddNodeDropdown.value = false
+  
+  // 캔버스 중앙 좌표 계산
+  let position = { x: 300, y: 300 }
+  if (cy) {
+    const ext = cy.extent()
+    position = {
+      x: (ext.x1 + ext.x2) / 2 + (Math.random() - 0.5) * 100,
+      y: (ext.y1 + ext.y2) / 2 + (Math.random() - 0.5) * 100
+    }
+  }
+  
+  addNewNodeAtPosition(layerId, position)
+}
+
+// 새 노드 추가 (우클릭) - 지정된 위치에 배치
+function addNewNodeAtPosition(layerId: string, position: { x: number; y: number }) {
+  showContextMenu.value = false
+  showAddNodeDropdown.value = false
+  
+  // 상태 저장 (undo 가능하도록)
+  saveState()
+  
+  // 고유 ID 생성
+  const timestamp = Date.now()
+  const layerPrefix = layerId.toLowerCase()
+  const existingCount = nodes.value.filter(n => (n.layer || n.label) === layerId).length
+  const nodeId = `${layerPrefix}_${existingCount + 1}_${timestamp}`
+  
+  // 레이어 정보 가져오기
+  const layerInfo = layers.find(l => l.id === layerId)
+  const layerName = layerInfo?.name || layerId
+  
+  // 새 노드 이름 생성
+  const newNodeName = `새 ${layerName} ${existingCount + 1}`
+  
+  // 새 노드 생성
+  const newNode: OntologyNode = {
+    id: nodeId,
+    name: newNodeName,
+    label: layerId,
+    layer: layerId,
+    description: '',
+    position: { x: position.x, y: position.y }
+  }
+  
+  // 노드 배열에 추가
+  nodes.value.push(newNode)
+  
+  // Cytoscape에 직접 노드 추가 (전체 재렌더링 방지)
+  if (cy) {
+    cy.add({
+      data: {
+        id: nodeId,
+        label: newNodeName,
+        layer: layerId,
+        color: getLayerColor(layerId)
+      },
+      position: { x: position.x, y: position.y }
+    })
+    
+    // 새 노드 선택
+    selectNode(nodeId)
+    
+    // Edgehandles 재초기화 (새 노드도 연결 가능하도록)
+    initEdgehandles()
+  }
+}
+
+// ========== 노드 컨텍스트 메뉴 액션 ==========
+
+function openFilterFromContextMenu() {
+  showContextMenu.value = false
+  if (!contextMenuNodeId.value) return
+  
+  const node = nodes.value.find(n => n.id === contextMenuNodeId.value)
+  if (!node) return
+  
+  // 노드를 선택 상태로
+  selectNode(node.id)
+  
+  // 필터 다이얼로그 열기
+  filterTargetNode.value = node
+  showFilterDialog.value = true
+  
+  // 필터 필드의 distinct 값 로드
+  loadFilterDistinctValues(node)
+}
+
+function closeFilterDialog() {
+  showFilterDialog.value = false
+  filterTargetNode.value = null
+  filterDistinctValues.value = {}
+}
+
+function applyAndCloseFilterDialog() {
+  // 필터 적용 및 전파
+  const targetNodeId = filterTargetNode.value?.id
+  if (targetNodeId) {
+    // cascading 필터 전파
+    const effectiveFilters = getEffectiveFilters(targetNodeId)
+    console.log('[Filter] 필터 전파 시작:', targetNodeId, effectiveFilters)
+    propagateFiltersFromNode(targetNodeId, effectiveFilters)
+    console.log('[Filter] 전파 완료. nodeFilters:', JSON.parse(JSON.stringify(nodeFilters.value)))
+    
+    // 시각화 업데이트
+    updateFilteredNodeVisuals()
+    console.log('[Filter] 시각화 업데이트 완료')
+  }
+  
+  closeFilterDialog()
+}
+
+// 필터 필드의 DISTINCT 값을 데이터 소스에서 로드
+async function loadFilterDistinctValues(node: OntologyNode) {
+  if (!node.filterFields || node.filterFields.length === 0) return
+  if (!node.dataSource) return
+  
+  // select, category, search 타입 필드의 컬럼명 수집
+  const selectColumns = node.filterFields
+    .filter(f => f.type === 'select' || f.type === 'category' || f.type === 'search')
+    .map(f => f.column)
+  
+  if (selectColumns.length === 0) return
+  
+  filterDistinctLoading.value = true
+  
+  try {
+    const columnsParam = selectColumns.join(',')
+    const response = await fetch(
+      `/api/gateway/ontology/ontology-nodes/${node.id}/filter-values?columns=${encodeURIComponent(columnsParam)}`
+    )
+    
+    if (response.ok) {
+      const result = await response.json()
+      if (result.distinctValues) {
+        filterDistinctValues.value = result.distinctValues
+      }
+    } else {
+      console.warn('필터 DISTINCT 값 로드 실패:', response.status)
+    }
+  } catch (error) {
+    console.warn('필터 DISTINCT 값 로드 오류:', error)
+  } finally {
+    filterDistinctLoading.value = false
+  }
+}
+
+function openNodeRenameFromContextMenu() {
+  showContextMenu.value = false
+  if (!contextMenuNodeId.value) return
+  
+  // 노드 선택
+  selectNode(contextMenuNodeId.value)
+  
+  // 이름 편집 모드 진입
+  nextTick(() => startEditNodeName())
+}
+
+function deleteNodeFromContextMenu() {
+  showContextMenu.value = false
+  if (!contextMenuNodeId.value) return
+  
+  // 노드 선택
+  selectNode(contextMenuNodeId.value)
+  
+  // 삭제 확인
+  nextTick(() => confirmDeleteNode())
+}
+
+// ========== 엣지 컨텍스트 메뉴 액션 ==========
+
+function openEdgePropertiesFromContextMenu() {
+  showContextMenu.value = false
+  if (!contextMenuEdgeId.value) return
+  
+  // 노드 선택 해제 (릴레이션 패널 표시를 위해)
+  deselectNode()
+  
+  // 릴레이션 편집기 열기
+  openRelationEditor(contextMenuEdgeId.value)
+}
+
+function deleteEdgeFromContextMenu() {
+  showContextMenu.value = false
+  if (!contextMenuEdgeId.value) return
+  
+  const edgeId = contextMenuEdgeId.value
+  
+  // 관계 정보 찾기
+  const rel = relationships.value.find(r => r.id === edgeId)
+  if (!rel) return
+  
+  const sourceName = getNodeName(rel.source)
+  const targetName = getNodeName(rel.target)
+  
+  if (!confirm(`'${sourceName}' → '${targetName}' (${rel.type}) 관계를 삭제하시겠습니까?\n\n💡 삭제 후 Ctrl+Z로 실행 취소할 수 있습니다.`)) return
+  
+  saveState()
+  
+  relationships.value = relationships.value.filter(r => r.id !== edgeId)
+  
+  if (cy) {
+    cy.$(`#${edgeId}`).remove()
+  }
+}
+
+// ========== 노드 이름 편집 기능 ==========
+
+function startEditNodeName() {
+  if (!selectedNode.value) return
+  editingNodeNameValue.value = selectedNode.value.name
+  isEditingNodeName.value = true
+  nextTick(() => {
+    nodeNameInput.value?.focus()
+    nodeNameInput.value?.select()
+  })
+}
+
+function saveNodeName() {
+  if (!selectedNode.value || !isEditingNodeName.value) return
+  
+  const newName = editingNodeNameValue.value.trim()
+  if (!newName) {
+    cancelEditNodeName()
+    return
+  }
+  
+  if (newName !== selectedNode.value.name) {
+    // 상태 저장 (undo 가능하도록)
+    saveState()
+    
+    // nodes 배열에서 해당 노드의 이름 업데이트
+    const nodeIndex = nodes.value.findIndex(n => n.id === selectedNode.value!.id)
+    if (nodeIndex !== -1) {
+      nodes.value[nodeIndex] = {
+        ...nodes.value[nodeIndex],
+        name: newName
+      }
+    }
+    
+    // Cytoscape 노드 라벨 업데이트
+    if (cy) {
+      const cyNode = cy.$(`#${selectedNode.value.id}`)
+      if (cyNode.length > 0) {
+        cyNode.data('label', newName)
+      }
+    }
+  }
+  
+  isEditingNodeName.value = false
+}
+
+function cancelEditNodeName() {
+  isEditingNodeName.value = false
+  editingNodeNameValue.value = ''
+}
+
+// ========== 노드 삭제 기능 ==========
+
+function confirmDeleteNode() {
+  if (!selectedNode.value) return
+  
+  const nodeName = selectedNode.value.name
+  const relCount = getNodeRelations(selectedNode.value.id).length
+  
+  const message = relCount > 0
+    ? `'${nodeName}' 노드를 삭제하시겠습니까?\n\n이 노드와 연결된 ${relCount}개의 관계도 함께 삭제됩니다.\n\n💡 삭제 후 Ctrl+Z로 실행 취소할 수 있습니다.`
+    : `'${nodeName}' 노드를 삭제하시겠습니까?\n\n💡 삭제 후 Ctrl+Z로 실행 취소할 수 있습니다.`
+  
+  if (!confirm(message)) return
+  
+  deleteSelectedNode()
+}
+
+function deleteSelectedNode() {
+  if (!selectedNode.value) return
+  
+  const nodeId = selectedNode.value.id
+  
+  // 상태 저장 (undo 가능하도록)
+  saveState()
+  
+  // 관련 관계 삭제
+  relationships.value = relationships.value.filter(
+    r => r.source !== nodeId && r.target !== nodeId
+  )
+  
+  // 노드 삭제
+  nodes.value = nodes.value.filter(n => n.id !== nodeId)
+  
+  // Cytoscape에서 노드 제거 (연결된 엣지도 자동 제거됨)
+  if (cy) {
+    const cyNode = cy.$(`#${nodeId}`)
+    if (cyNode.length > 0) {
+      cy.remove(cyNode)
+    }
+  }
+  
+  // 선택 해제
+  deselectNode()
+}
+
+// 문서 클릭 시 드롭다운/컨텍스트 메뉴 닫기
+function onDocumentClick(event: MouseEvent) {
+  // 드롭다운 외부 클릭 시 닫기
+  const target = event.target as HTMLElement
+  if (!target.closest('.add-node-dropdown')) {
+    showAddNodeDropdown.value = false
+  }
+  // 컨텍스트 메뉴 외부 클릭 시 닫기
+  if (!target.closest('.canvas-context-menu')) {
+    showContextMenu.value = false
+  }
+}
+
 // ========== Undo/Redo 기능 ==========
 
 function saveState() {
@@ -2749,6 +3820,375 @@ function redo() {
 const canUndo = computed(() => undoStack.value.length > 0)
 const canRedo = computed(() => redoStack.value.length > 0)
 
+// ========== 릴레이션 속성 편집 기능 ==========
+
+function getNodeLayer(nodeId: string): string {
+  const node = nodes.value.find(n => n.id === nodeId)
+  return node?.layer || node?.label || 'Resource'
+}
+
+async function fetchNodeColumns(nodeId: string): Promise<string[]> {
+  const node = nodes.value.find(n => n.id === nodeId)
+  if (!node) return []
+  
+  // 이미 dataSourceSchema에 컬럼 정보가 있으면 사용
+  if (node.dataSourceSchema?.columns) {
+    return node.dataSourceSchema.columns.map((c: any) => typeof c === 'string' ? c : c.name || c)
+  }
+  
+  // filterFields에서 컬럼 추출
+  if (node.filterFields && node.filterFields.length > 0) {
+    return node.filterFields.map(f => f.column)
+  }
+  
+  // dataSource가 있으면 API로 컬럼 정보 조회 시도
+  if (node.dataSource) {
+    try {
+      const response = await fetch(`/api/gateway/ontology/ontology-nodes/${nodeId}/data?limit=1`)
+      if (response.ok) {
+        const result = await response.json()
+        if (result.columns) return result.columns
+      }
+    } catch (e) {
+      console.warn('컬럼 정보 조회 실패:', e)
+    }
+  }
+  
+  return []
+}
+
+async function openRelationEditor(edgeId: string) {
+  // relationships에서 해당 릴레이션 찾기
+  const rel = relationships.value.find(r => r.id === edgeId)
+  if (!rel) {
+    // id가 복합키 형태일 수 있음
+    const relFromEdge = relationships.value.find(r => {
+      const compositeId = `${r.source}-${r.type}-${r.target}`
+      return compositeId === edgeId
+    })
+    if (!relFromEdge) return
+    editingRelation.value = relFromEdge
+  } else {
+    editingRelation.value = rel
+  }
+  
+  // 노드 선택 해제 (릴레이션 패널 표시를 위해)
+  selectedNodeId.value = null
+  
+  // 폼 초기화
+  editingRelationForm.value = {
+    type: editingRelation.value!.type,
+    description: editingRelation.value!.description || '',
+    fromField: editingRelation.value!.fromField || '',
+    toField: editingRelation.value!.toField || ''
+  }
+  
+  // 소스/타겟 노드의 컬럼 정보 로드
+  const [srcCols, tgtCols] = await Promise.all([
+    fetchNodeColumns(editingRelation.value!.source),
+    fetchNodeColumns(editingRelation.value!.target)
+  ])
+  sourceNodeColumns.value = srcCols
+  targetNodeColumns.value = tgtCols
+  
+  showRelationEditor.value = true
+}
+
+function closeRelationEditor() {
+  showRelationEditor.value = false
+  editingRelation.value = null
+  sourceNodeColumns.value = []
+  targetNodeColumns.value = []
+}
+
+function saveRelationEditor() {
+  if (!editingRelation.value) return
+  
+  // 상태 저장 (undo 가능)
+  saveState()
+  
+  const relIndex = relationships.value.findIndex(r => r.id === editingRelation.value!.id)
+  if (relIndex !== -1) {
+    relationships.value[relIndex] = {
+      ...relationships.value[relIndex],
+      type: editingRelationForm.value.type,
+      description: editingRelationForm.value.description || undefined,
+      fromField: editingRelationForm.value.fromField || undefined,
+      toField: editingRelationForm.value.toField || undefined
+    }
+    
+    // Cytoscape 엣지 라벨 업데이트
+    if (cy) {
+      const edge = cy.$(`#${editingRelation.value!.id}`)
+      if (edge.length > 0) {
+        edge.data('type', editingRelationForm.value.type)
+        edge.data('label', editingRelationForm.value.type)
+      }
+    }
+  }
+  
+  closeRelationEditor()
+}
+
+function deleteRelationFromEditor() {
+  if (!editingRelation.value) return
+  
+  const rel = editingRelation.value
+  if (!confirm(`'${getNodeName(rel.source)}' → '${getNodeName(rel.target)}' 관계를 삭제하시겠습니까?`)) return
+  
+  saveState()
+  
+  relationships.value = relationships.value.filter(r => r.id !== rel.id)
+  
+  if (cy) {
+    cy.$(`#${rel.id}`).remove()
+  }
+  
+  closeRelationEditor()
+}
+
+// ========== 캐스케이딩 필터 (Drill-down) 기능 ==========
+
+/**
+ * 상위 노드에 필터가 걸리면, fromField/toField 매핑을 통해
+ * 하위(target) 노드들에 자동으로 필터 조건을 전파합니다.
+ * 
+ * 예: Product 노드에서 product_id=123 필터 → BOM 노드에 product_id=123 필터 자동 적용
+ */
+function propagateFiltersFromNode(nodeId: string, filterValues: Record<string, any>, visited?: Set<string>) {
+  // 순환 참조 방지
+  const visitedSet = visited || new Set<string>()
+  if (visitedSet.has(nodeId)) return
+  visitedSet.add(nodeId)
+  
+  // nodeFilters에 현재 노드의 필터 저장
+  nodeFilters.value[nodeId] = { ...filterValues }
+  
+  // 빈 필터면 전파 불필요
+  const hasActiveValues = Object.values(filterValues).some(v => v !== '' && v !== null && v !== undefined)
+  if (!hasActiveValues) return
+  
+  // ===== 방향 1: 이 노드가 TARGET인 FK 관계 (부모 → 자식 전파) =====
+  // FK 관계: source(자식).fromField → target(부모).toField
+  // 부모에 필터가 걸리면 → 자식의 fromField에 같은 값으로 필터 전파
+  const incomingRels = relationships.value.filter(
+    r => r.target === nodeId && r.fromField && r.toField && !visitedSet.has(r.source)
+  )
+  
+  incomingRels.forEach(rel => {
+    const toFieldValue = filterValues[rel.toField!]
+    if (toFieldValue !== undefined && toFieldValue !== '' && toFieldValue !== null) {
+      // source(자식) 노드에 fromField 기반 필터 전파
+      const childFilter: Record<string, any> = {
+        ...(nodeFilters.value[rel.source] || {}),
+        [rel.fromField!]: toFieldValue
+      }
+      
+      // 재귀적으로 하위 노드들에도 전파 (visited 전달)
+      propagateFiltersFromNode(rel.source, childFilter, visitedSet)
+    }
+  })
+  
+  // ===== 방향 2: 이 노드가 SOURCE인 FK 관계 (자식 → 손자 전파) =====
+  // 이 노드가 자식이면서 동시에 다른 테이블의 부모인 경우
+  const outgoingRels = relationships.value.filter(
+    r => r.source === nodeId && r.fromField && r.toField && !visitedSet.has(r.target)
+  )
+  
+  outgoingRels.forEach(rel => {
+    const fromFieldValue = filterValues[rel.fromField!]
+    if (fromFieldValue !== undefined && fromFieldValue !== '' && fromFieldValue !== null) {
+      const targetFilter: Record<string, any> = {
+        ...(nodeFilters.value[rel.target] || {}),
+        [rel.toField!]: fromFieldValue
+      }
+      propagateFiltersFromNode(rel.target, targetFilter, visitedSet)
+    }
+  })
+}
+
+/**
+ * 노드에 대한 전체 필터 조건 조합 (사용자 직접 필터 + cascading 필터)
+ * fetchNodeData 시 WHERE 조건으로 사용
+ */
+function getEffectiveFilters(nodeId: string): Record<string, any> {
+  const cascadingFilters = nodeFilters.value[nodeId] || {}
+  
+  // activeFilters에서 이 노드에 해당하는 필터 추출
+  const userFilters: Record<string, any> = {}
+  Object.entries(activeFilters.value).forEach(([key, value]) => {
+    if (key.startsWith(`${nodeId}.`) && value !== '' && value !== null && value !== undefined) {
+      const field = key.substring(nodeId.length + 1)
+      // .from, .to, .min, .max 접미사는 제외 (단일 필드 값만 사용)
+      if (!field.includes('.')) {
+        userFilters[field] = value
+      }
+    }
+  })
+  
+  // cascading 필터와 사용자 필터 합치기 (사용자 필터 우선)
+  return { ...cascadingFilters, ...userFilters }
+}
+
+/**
+ * 특정 노드의 상위(parent) 노드에서 전파된 cascading 필터가 있는지 확인
+ */
+function getCascadingFiltersForNode(nodeId: string): Array<{ field: string; value: any; fromNode: string; fromField: string }> {
+  const result: Array<{ field: string; value: any; fromNode: string; fromField: string }> = []
+  
+  // 방향 1: 이 노드가 SOURCE인 FK 관계 (이 노드 = 자식, target = 부모)
+  // 부모에 필터가 걸렸으면 → 이 노드(자식)의 fromField에 cascading 적용
+  const outgoingRels = relationships.value.filter(
+    r => r.source === nodeId && r.fromField && r.toField
+  )
+  
+  outgoingRels.forEach(rel => {
+    const parentFilters = nodeFilters.value[rel.target]
+    if (parentFilters && parentFilters[rel.toField!] !== undefined && parentFilters[rel.toField!] !== '') {
+      result.push({
+        field: rel.fromField!,
+        value: parentFilters[rel.toField!],
+        fromNode: rel.target,
+        fromField: rel.toField!
+      })
+    }
+  })
+  
+  // 방향 2: 이 노드가 TARGET인 관계에서 source 노드에 필터가 있는 경우
+  const incomingRels = relationships.value.filter(
+    r => r.target === nodeId && r.fromField && r.toField
+  )
+  
+  incomingRels.forEach(rel => {
+    const sourceFilters = nodeFilters.value[rel.source]
+    if (sourceFilters && sourceFilters[rel.fromField!] !== undefined && sourceFilters[rel.fromField!] !== '') {
+      result.push({
+        field: rel.toField!,
+        value: sourceFilters[rel.fromField!],
+        fromNode: rel.source,
+        fromField: rel.fromField!
+      })
+    }
+  })
+  
+  return result
+}
+
+// ========== 필터 시각화 (Cytoscape 그래프에 하이라이팅) ==========
+
+/**
+ * 필터가 걸린 노드들을 그래프에서 시각적으로 하이라이팅
+ * - 직접 필터가 걸린 노드: 'filtered-direct' 클래스
+ * - cascading으로 영향받는 노드: 'filtered-cascade' 클래스
+ * - 영향받는 엣지: 'filtered-edge' 클래스
+ * - 필터 비관련 노드: 'filtered-dimmed' 클래스 (흐리게)
+ */
+function updateFilteredNodeVisuals() {
+  if (!cy) return
+  
+  // 모든 필터 클래스 제거
+  cy.elements().removeClass('filtered-direct filtered-cascade filtered-edge filtered-dimmed')
+  
+  // 필터가 걸린 노드 ID 수집
+  const directFilteredNodes = new Set<string>()
+  const cascadeFilteredNodes = new Set<string>()
+  const filteredEdges = new Set<string>()
+  
+  // 1. 직접 필터가 걸린 노드 찾기
+  Object.entries(activeFilters.value).forEach(([key, value]) => {
+    if (value !== '' && value !== null && value !== undefined) {
+      const nodeId = key.split('.')[0]
+      if (nodes.value.some(n => n.id === nodeId)) {
+        directFilteredNodes.add(nodeId)
+      }
+    }
+  })
+  
+  // 2. nodeFilters에서 cascading 필터가 설정된 노드 찾기
+  // propagateFiltersFromNode이 이미 모든 하위 노드에 필터를 설정해놓았으므로
+  // nodeFilters에 값이 있고 직접 필터가 아닌 노드 = cascade 노드
+  Object.entries(nodeFilters.value).forEach(([nodeId, filters]) => {
+    if (directFilteredNodes.has(nodeId)) return
+    const hasValues = Object.values(filters).some(v => v !== '' && v !== null && v !== undefined)
+    if (hasValues && nodes.value.some(n => n.id === nodeId)) {
+      cascadeFilteredNodes.add(nodeId)
+    }
+  })
+  
+  // 3. 영향받는 엣지 찾기 (직접 + cascade 노드 사이의 엣지)
+  const allFilteredNodes = new Set([...directFilteredNodes, ...cascadeFilteredNodes])
+  relationships.value.forEach(rel => {
+    if (rel.fromField && rel.toField) {
+      // source 또는 target 중 하나라도 필터된 노드면 엣지 하이라이트
+      if (allFilteredNodes.has(rel.source) && allFilteredNodes.has(rel.target)) {
+        filteredEdges.add(rel.id)
+      }
+    }
+  })
+  
+  // 4. 필터가 존재할 때만 시각화 적용
+  const hasAnyFilter = directFilteredNodes.size > 0
+  
+  if (hasAnyFilter) {
+    // 모든 노드를 흐리게
+    cy.nodes().addClass('filtered-dimmed')
+    cy.edges().addClass('filtered-dimmed')
+    
+    // 직접 필터 노드 하이라이트
+    directFilteredNodes.forEach(nodeId => {
+      const cyNode = cy!.$(`#${nodeId}`)
+      cyNode.removeClass('filtered-dimmed')
+      cyNode.addClass('filtered-direct')
+    })
+    
+    // cascading 노드 하이라이트
+    cascadeFilteredNodes.forEach(nodeId => {
+      const cyNode = cy!.$(`#${nodeId}`)
+      cyNode.removeClass('filtered-dimmed')
+      cyNode.addClass('filtered-cascade')
+    })
+    
+    // 영향받는 엣지 하이라이트
+    filteredEdges.forEach(edgeId => {
+      const cyEdge = cy!.$(`#${edgeId}`)
+      cyEdge.removeClass('filtered-dimmed')
+      cyEdge.addClass('filtered-edge')
+    })
+  }
+}
+
+/**
+ * 특정 노드에 적용된 모든 필터 정보 반환 (직접 + cascading)
+ * 상세 패널의 필터 칩 표시용
+ */
+function getNodeFilterChips(nodeId: string): Array<{ label: string; value: any; type: 'direct' | 'cascade'; fromNode?: string }> {
+  const chips: Array<{ label: string; value: any; type: 'direct' | 'cascade'; fromNode?: string }> = []
+  
+  // 직접 필터
+  Object.entries(activeFilters.value).forEach(([key, value]) => {
+    if (key.startsWith(`${nodeId}.`) && value !== '' && value !== null && value !== undefined) {
+      const field = key.substring(nodeId.length + 1)
+      // .from, .to, .min, .max 접미사 처리
+      if (!field.includes('.')) {
+        chips.push({ label: field, value, type: 'direct' })
+      }
+    }
+  })
+  
+  // cascading 필터
+  const cascading = getCascadingFiltersForNode(nodeId)
+  cascading.forEach(cf => {
+    chips.push({
+      label: cf.field,
+      value: cf.value,
+      type: 'cascade',
+      fromNode: cf.fromNode
+    })
+  })
+  
+  return chips
+}
+
 // ========== 엣지 삭제 기능 ==========
 
 function showDeleteEdgeConfirm(edgeData: { id: string; source: string; target: string; type: string }) {
@@ -2799,6 +4239,12 @@ function isKPIOrMeasure(node: { layer?: string; label?: string } | null): boolea
   if (!node) return false
   const layer = node.layer || node.label || ''
   return layer === 'KPI' || layer === 'Measure'
+}
+
+function isProcessNode(node: { layer?: string; label?: string } | null): boolean {
+  if (!node) return false
+  const layer = node.layer || node.label || ''
+  return layer === 'Process'
 }
 
 function getNodeName(nodeId: string): string {
@@ -2976,6 +4422,57 @@ function onCloseGenerateDialog() {
     generateError.value = ''
     showGenerateDialog.value = false
   }
+}
+
+// 스키마 기반 온톨로지 생성 완료 핸들러
+interface NodeFilterField {
+  column: string
+  label: string
+  type: string
+  dataType: string
+}
+
+function handleSchemaBasedGenerated(generatedSchema: any) {
+  console.log('📊 스키마 기반 온톨로지 생성 완료:', generatedSchema)
+  
+  if (generatedSchema && generatedSchema.nodes) {
+    // 노드 변환 및 추가 (filterFields 포함)
+    const newNodes: OntologyNode[] = generatedSchema.nodes.map((node: any) => ({
+      id: node.id,
+      name: node.name,
+      label: node.label || node.layer || 'Resource',
+      layer: node.layer,
+      description: node.description || '',
+      dataSource: node.dataSource || '',
+      filterFields: node.filterFields || []
+    }))
+    
+    // 관계 변환 및 추가
+    const newRelationships: OntologyRelationship[] = (generatedSchema.relationships || []).map((rel: any) => ({
+      id: rel.id,
+      source: rel.source,
+      target: rel.target,
+      type: rel.type || 'RELATED_TO',
+      description: rel.description || '',
+      fromField: rel.fromField || rel.from_field || undefined,
+      toField: rel.toField || rel.to_field || undefined
+    }))
+    
+    // 새 노드/관계로 교체 (기존 것 덮어쓰기)
+    nodes.value = newNodes
+    relationships.value = newRelationships
+    
+    // Cytoscape 갱신
+    nextTick(() => {
+      if (cy) {
+        renderGraph()
+      }
+    })
+    
+    addLog(`✅ 스키마 기반 온톨로지 생성 완료: ${newNodes.length}개 노드, ${newRelationships.length}개 관계`, 'success')
+  }
+  
+  showGenerateDialog.value = false
 }
 
 // Cytoscape 스타일 생성 (다크/라이트 모드 지원)
@@ -3278,8 +4775,147 @@ function getCytoscapeStyles(): cytoscape.Stylesheet[] {
       style: {
         'opacity': 0.15
       }
+    },
+    // 필터 관련 스타일
+    {
+      selector: '.filtered-dimmed',
+      style: {
+        'opacity': 0.2
+      }
+    },
+    {
+      selector: '.filtered-direct',
+      style: {
+        'opacity': 1,
+        'border-width': 6,
+        'border-color': '#f59e0b',
+        'border-opacity': 1,
+        'overlay-color': '#f59e0b',
+        'overlay-opacity': 0.15
+      }
+    },
+    {
+      selector: '.filtered-cascade',
+      style: {
+        'opacity': 1,
+        'border-width': 4,
+        'border-color': '#a78bfa',
+        'border-opacity': 0.8,
+        'border-style': 'dashed',
+        'overlay-color': '#a78bfa',
+        'overlay-opacity': 0.1
+      }
+    },
+    {
+      selector: '.filtered-edge',
+      style: {
+        'opacity': 1,
+        'line-color': '#f59e0b',
+        'target-arrow-color': '#f59e0b',
+        'width': 3
+      }
+    },
+    // 모델 오버레이 노드
+    {
+      selector: 'node.model-overlay',
+      style: {
+        'background-color': '#6366f1',
+        'border-color': '#4f46e5',
+        'border-width': 3,
+        'shape': 'round-rectangle',
+        'width': 'label',
+        'height': 'label',
+        'padding': '12px',
+        'color': '#ffffff',
+        'font-weight': 'bold' as any,
+        'font-size': '11px',
+        'text-valign': 'center' as any,
+        'text-halign': 'center' as any,
+        'label': 'data(label)',
+        'text-wrap': 'wrap' as any,
+        'text-max-width': '120px',
+        'overlay-opacity': 0,
+        'z-index': 100
+      }
+    },
+    // 모델 엣지 (READS_FIELD)
+    {
+      selector: 'edge.model-overlay[type="READS_FIELD"]',
+      style: {
+        'line-color': '#f59e0b',
+        'target-arrow-color': '#f59e0b',
+        'width': 2,
+        'line-style': 'dashed' as any,
+        'curve-style': 'bezier' as any,
+        'target-arrow-shape': 'triangle' as any,
+        'opacity': 0.7,
+        'z-index': 99
+      }
+    },
+    // 모델 엣지 (PREDICTS_FIELD)
+    {
+      selector: 'edge.model-overlay[type="PREDICTS_FIELD"]',
+      style: {
+        'line-color': '#22c55e',
+        'target-arrow-color': '#22c55e',
+        'width': 2,
+        'line-style': 'dashed' as any,
+        'curve-style': 'bezier' as any,
+        'target-arrow-shape': 'triangle' as any,
+        'opacity': 0.7,
+        'z-index': 99
+      }
     }
   ]
+}
+
+function sanitizeRelationshipsForCanvas(
+  rawRelationships: OntologyRelationship[],
+  rawNodes: OntologyNode[]
+): { relationships: OntologyRelationship[]; skipped: number; rekeyed: number } {
+  const nodeIds = new Set(rawNodes.map(node => node.id).filter(Boolean))
+  const usedRelationshipIds = new Set<string>()
+  const sanitizedRelationships: OntologyRelationship[] = []
+  let skipped = 0
+  let rekeyed = 0
+
+  rawRelationships.forEach((rawRel, index) => {
+    if (!rawRel?.source || !rawRel?.target) {
+      skipped += 1
+      return
+    }
+
+    if (!nodeIds.has(rawRel.source) || !nodeIds.has(rawRel.target)) {
+      skipped += 1
+      return
+    }
+
+    const relType = rawRel.type || 'RELATED_TO'
+    const baseId = (rawRel.id || `rel_${rawRel.source}_${rawRel.target}_${relType}`).trim() || `rel_${index + 1}`
+    let uniqueId = baseId
+
+    if (usedRelationshipIds.has(uniqueId)) {
+      let suffix = 2
+      while (usedRelationshipIds.has(`${baseId}__${suffix}`)) {
+        suffix += 1
+      }
+      uniqueId = `${baseId}__${suffix}`
+      rekeyed += 1
+    }
+
+    usedRelationshipIds.add(uniqueId)
+    sanitizedRelationships.push({
+      ...rawRel,
+      id: uniqueId,
+      type: relType
+    })
+  })
+
+  return {
+    relationships: sanitizedRelationships,
+    skipped,
+    rekeyed
+  }
 }
 
 // Cytoscape
@@ -3484,6 +5120,104 @@ function initCytoscape(shouldRestoreSelection: boolean = false) {
     }
   })
   
+  // 모델 노드 클릭 → 상세 정보 표시 (모델 오버레이)
+  cy.on('tap', 'node.model-overlay', (evt) => {
+    const modelCyId = evt.target.id() // "model-xxx"
+    const modelId = modelCyId.replace('model-', '')
+    const model = modelOverlayData.value.find(m => m.modelId === modelId)
+    if (model) {
+      const detail = `모델: ${model.name}\n상태: ${model.status}\n입력: ${model.inputs.map(i => i.field).join(', ')}\n출력: ${model.outputs.map(o => o.field).join(', ')}`
+      if (confirm(`${detail}\n\n이 모델을 삭제하시겠습니까?`)) {
+        deleteModelFromOverlay(modelId)
+      }
+    }
+  })
+
+  // 노드 우클릭 → 컨텍스트 메뉴 (필터/이름변경/삭제)
+  cy.on('cxttap', 'node:not(.model-overlay)', (evt) => {
+    const nodeId = evt.target.id()
+    const node = nodes.value.find(n => n.id === nodeId)
+    if (!node) return
+    
+    // 브라우저 기본 컨텍스트 메뉴 차단은 @contextmenu.prevent로 처리됨
+    const container = cytoscapeContainer.value
+    if (!container) return
+    
+    const graphPanel = container.parentElement
+    const graphRect = graphPanel?.getBoundingClientRect() || container.getBoundingClientRect()
+    
+    // 노드의 렌더링 좌표를 스크린 좌표로 변환
+    const renderedPos = evt.target.renderedPosition()
+    const containerRect = container.getBoundingClientRect()
+    
+    contextMenuPos.value = {
+      x: containerRect.left + renderedPos.x - graphRect.left,
+      y: containerRect.top + renderedPos.y - graphRect.top
+    }
+    contextMenuMode.value = 'node'
+    contextMenuNodeId.value = nodeId
+    contextMenuNodeName.value = node.name
+    showContextMenu.value = true
+  })
+  
+  // 엣지 우클릭 → 속성 편집/삭제 컨텍스트 메뉴
+  cy.on('cxttap', 'edge', (evt) => {
+    const edge = evt.target
+    const edgeId = edge.id()
+    const edgeType = edge.data('type') || edge.data('label') || 'RELATION'
+    const sourceName = getNodeName(edge.data('source'))
+    const targetName = getNodeName(edge.data('target'))
+    
+    const container = cytoscapeContainer.value
+    if (!container) return
+    
+    const graphPanel = container.parentElement
+    const graphRect = graphPanel?.getBoundingClientRect() || container.getBoundingClientRect()
+    const containerRect = container.getBoundingClientRect()
+    
+    // 엣지 중간점의 렌더링 좌표 (renderedMidpoint 사용)
+    const midpoint = edge.renderedMidpoint ? edge.renderedMidpoint() : edge.midpoint()
+    
+    contextMenuPos.value = {
+      x: containerRect.left + midpoint.x - graphRect.left,
+      y: containerRect.top + midpoint.y - graphRect.top
+    }
+    contextMenuMode.value = 'edge'
+    contextMenuEdgeId.value = edgeId
+    contextMenuEdgeLabel.value = `${sourceName} → ${targetName}`
+    showContextMenu.value = true
+  })
+  
+  // 캔버스 빈 영역 우클릭 → 새 노드 추가 컨텍스트 메뉴
+  cy.on('cxttap', (evt) => {
+    if (evt.target === cy) {
+      const container = cytoscapeContainer.value
+      if (!container) return
+      
+      const graphPanel = container.parentElement
+      const graphRect = graphPanel?.getBoundingClientRect() || container.getBoundingClientRect()
+      const containerRect = container.getBoundingClientRect()
+      
+      const originalEvent = evt.originalEvent as MouseEvent
+      
+      contextMenuPos.value = {
+        x: originalEvent.clientX - graphRect.left,
+        y: originalEvent.clientY - graphRect.top
+      }
+      
+      // Cytoscape 캔버스 좌표 (노드 배치용)
+      const zoom = cy!.zoom()
+      const pan = cy!.pan()
+      contextMenuGraphPos.value = {
+        x: (originalEvent.clientX - containerRect.left - pan.x) / zoom,
+        y: (originalEvent.clientY - containerRect.top - pan.y) / zoom
+      }
+      
+      contextMenuMode.value = 'canvas'
+      showContextMenu.value = true
+    }
+  })
+  
   // 노드 드래그 완료 시 위치 동기화
   cy.on('dragfree', 'node', (evt) => {
     const nodeId = evt.target.id()
@@ -3499,16 +5233,11 @@ function initCytoscape(shouldRestoreSelection: boolean = false) {
     }
   })
   
-  // 엣지 더블클릭 - 삭제 확인
+  // 엣지 더블클릭 - 릴레이션 속성 편집 다이얼로그
   cy.on('dblclick', 'edge', (evt) => {
     const edge = evt.target
-    const edgeData = {
-      id: edge.id(),
-      source: edge.data('source'),
-      target: edge.data('target'),
-      type: edge.data('type')
-    }
-    showDeleteEdgeConfirm(edgeData)
+    const edgeId = edge.id()
+    openRelationEditor(edgeId)
   })
   
   // Edgehandles 초기화 - 노드 테두리에서 드래그하여 관계 생성
@@ -3596,7 +5325,10 @@ function initEdgehandles() {
     edgeParams: () => ({
       data: { type: 'CAUSES' }
     }),
-    complete: (sourceNode: any, targetNode: any) => {
+    complete: (sourceNode: any, targetNode: any, addedEles: any) => {
+      // edgehandles가 자동 생성한 임시 엣지 참조 저장 (나중에 제거하기 위해)
+      tempEdgeFromEdgehandles = addedEles
+      
       // 새 관계 생성 완료 시
       const sourceId = sourceNode.id()
       const targetId = targetNode.id()
@@ -3615,6 +5347,12 @@ function initEdgehandles() {
           description: ''
         }
         showNewRelationDialog.value = true
+      } else {
+        // 중복이거나 자기 자신에게 연결 → 임시 엣지 즉시 제거
+        if (tempEdgeFromEdgehandles) {
+          tempEdgeFromEdgehandles.remove()
+          tempEdgeFromEdgehandles = null
+        }
       }
     }
   })
@@ -4274,7 +6012,8 @@ async function confirmDataSourceMapping(nodeId: string, candidate: any) {
           dataSourceSchema: {
             columns: candidate.columns || [],
             sql: candidate.suggested_sql || '',
-            row_count: candidate.row_count || 0
+            row_count: typeof candidate.row_count === 'number' && candidate.row_count > 0 ? candidate.row_count : 0,
+            datasource: candidate.datasource || '',
           }
         }
         // Vue 반응성을 위해 배열 교체
@@ -4316,6 +6055,85 @@ async function confirmDataSourceMapping(nodeId: string, candidate: any) {
   }
 }
 
+function normalizeTableRef(tableName: string, datasource: string): string {
+  const clean = String(tableName || '').replace(/["`]/g, '')
+  const parts = clean.split('.').filter(Boolean)
+  const ds = String(datasource || '').trim()
+  if (!ds) return clean
+  if (parts.length === 3 && parts[0].toLowerCase() === ds.toLowerCase()) {
+    return `${parts[1]}.${parts[2]}`
+  }
+  if (parts.length >= 2) {
+    return `${parts[parts.length - 2]}.${parts[parts.length - 1]}`
+  }
+  return clean
+}
+
+function toObjectRows(rows: any[], columns: any[]): any[] {
+  if (!Array.isArray(rows) || rows.length === 0) return []
+  if (Array.isArray(rows[0])) {
+    return rows.map((row: any[]) => {
+      const out: Record<string, any> = {}
+      columns.forEach((c: any, i: number) => {
+        out[String(c)] = row[i]
+      })
+      return out
+    })
+  }
+  return rows
+}
+
+async function probeRowCounts(runId: number) {
+  const PROBE_LIMIT = 11
+  const CONCURRENCY = 2
+
+  for (let i = 0; i < nodeSearchResults.value.length; i += CONCURRENCY) {
+    if (runId !== nodeSearchProbeRunId.value) {
+      return
+    }
+
+    const batch = nodeSearchResults.value.slice(i, i + CONCURRENCY)
+    await Promise.allSettled(batch.map(async (candidate) => {
+      if (runId !== nodeSearchProbeRunId.value) {
+        return
+      }
+
+      try {
+        const tableRef = normalizeTableRef(candidate.table_name, candidate.datasource || '')
+        const sql = `SELECT * FROM ${tableRef} LIMIT ${PROBE_LIMIT}`
+        const response = await fetch('/api/gateway/text2sql/direct-sql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sql,
+            datasource: candidate.datasource,
+            max_sql_seconds: 15,
+            format_with_ai: false
+          })
+        })
+
+        if (!response.ok) {
+          candidate.row_count = -1
+          candidate.row_count_approx = false
+          return
+        }
+
+        const result = await response.json()
+        const rowsRaw = result.rows || result.data || []
+        const columns = result.columns || []
+        const hasMoreThanTen = rowsRaw.length >= PROBE_LIMIT
+        candidate.row_count = hasMoreThanTen ? PROBE_LIMIT - 1 : rowsRaw.length
+        candidate.row_count_approx = hasMoreThanTen
+        candidate.columns = columns.length > 0 ? columns : candidate.columns
+        candidate.sample_data = toObjectRows(rowsRaw.slice(0, 10), columns.length > 0 ? columns : candidate.columns)
+      } catch (err) {
+        candidate.row_count = -1
+        candidate.row_count_approx = false
+      }
+    }))
+  }
+}
+
 async function loadSampleData(candidate: any) {
   sampleDataLoading.value = true
   sampleData.value = []
@@ -4325,12 +6143,35 @@ async function loadSampleData(candidate: any) {
     // 후보의 sample_data가 이미 있으면 사용
     if (candidate.sample_data && candidate.sample_data.length > 0) {
       sampleData.value = candidate.sample_data
+    } else if (candidate?.table_name && candidate?.datasource) {
+      // 자연어 검색 결과 후보는 노드 미확정 상태일 수 있으므로 후보 자체로 직접 조회
+      const tableRef = normalizeTableRef(candidate.table_name, candidate.datasource)
+      const sql = `SELECT * FROM ${tableRef} LIMIT 10`
+      const response = await fetch('/api/gateway/text2sql/direct-sql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sql,
+          datasource: candidate.datasource,
+          max_sql_seconds: 30,
+          format_with_ai: false
+        })
+      })
+      if (response.ok) {
+        const result = await response.json()
+        const rowsRaw = result.rows || result.data || []
+        const columns = result.columns || []
+        sampleData.value = toObjectRows(rowsRaw, columns)
+      }
     } else {
       // API 호출하여 샘플 데이터 가져오기
       const response = await fetch(`/api/gateway/ontology/node/${selectedMappingNodeId.value}/sample-data?limit=10`)
       if (response.ok) {
         const result = await response.json()
-        sampleData.value = result.data?.data || result.data || []
+        const nested = result.data || {}
+        const rowsRaw = nested.data || nested.rows || []
+        const columns = nested.columns || []
+        sampleData.value = toObjectRows(rowsRaw, columns)
       }
     }
   } catch (err) {
@@ -4389,6 +6230,7 @@ function getMappingStats() {
     total: mappings.length,
     found: mappings.filter(m => m.status === 'found' || m.status === 'confirmed').length,
     notFound: mappings.filter(m => m.status === 'not_found').length,
+    error: mappings.filter(m => m.status === 'error').length,
     confirmed: mappings.filter(m => m.status === 'confirmed').length
   }
 }
@@ -4401,6 +6243,7 @@ function openNodeDataSourceDialog(nodeId: string) {
   currentNodeForDataSource.value = node
   showNodeDataSourceDialog.value = true
   nodeDataSourceTab.value = 'search'
+  nodeSearchProbeRunId.value += 1
   nodeSearchQuery.value = ''
   nodeSearchResults.value = []
   selectedSearchResult.value = null
@@ -4427,12 +6270,18 @@ function openNodeDataSourceDialog(nodeId: string) {
 async function searchNodeDataSource() {
   if (!currentNodeForDataSource.value || !nodeSearchQuery.value.trim()) return
   
+  const runId = nodeSearchProbeRunId.value + 1
+  nodeSearchProbeRunId.value = runId
   nodeSearchLoading.value = true
   nodeSearchStatus.value = '🔍 관련 테이블 검색 중...'
   nodeSearchResults.value = []
   selectedSearchResult.value = null
   
   try {
+    if (!selectedDatasource.value && availableDatasources.value.length === 1) {
+      selectedDatasource.value = availableDatasources.value[0]
+    }
+
     if (!selectedDatasource.value) {
       nodeSearchStatus.value = '❌ 데이터소스를 선택해주세요'
       return
@@ -4458,13 +6307,12 @@ async function searchNodeDataSource() {
       const usedTables = provenance.tables || []
       const tableData = result.table || {}
       const columns = tableData.columns || []
-      const rows = tableData.rows || []
       
       if (usedTables.length > 0 || result.sql) {
         nodeSearchStatus.value = `✅ ${usedTables.length}개 테이블 발견`
         // 테이블 정보를 후보 형식으로 변환
         // usedTables는 이미 datasource.schema.table 형식일 수 있음
-        const candidates = usedTables.map((tableName: string, idx: number) => {
+        const candidates: NodeSearchCandidate[] = usedTables.map((tableName: string, idx: number) => {
           // tableName이 이미 datasource.schema.table 형식인지 확인
           const parts = tableName.split('.')
           let fullTableName = tableName
@@ -4483,10 +6331,12 @@ async function searchNodeDataSource() {
           
           return {
             table_name: tableName,  // 원본 (datasource.schema.table 또는 schema.table)
+            datasource: selectedDatasource.value || '',
             full_table_name: fullTableName,  // SQL용 (따옴표 포함)
             columns: columns,
-            sample_data: rows.slice(0, 5),
-            row_count: rows.length,
+            sample_data: [],
+            row_count: null,
+            row_count_approx: false,
             relevance_score: 0.8 - (idx * 0.1),
             match_reason: `Text2SQL 검색: ${nodeSearchQuery.value}`,
             suggested_sql: result.sql || `SELECT * FROM ${fullTableName} LIMIT 100`
@@ -4495,21 +6345,26 @@ async function searchNodeDataSource() {
         
         nodeSearchResults.value = candidates
         nodeSearchStatus.value = '' // 성공 시 상태 메시지 제거
+        void probeRowCounts(runId)
       } else {
         // 직접 SQL에서 테이블 추출 시도
         if (result.sql) {
           nodeSearchStatus.value = '📋 SQL에서 테이블 정보 추출 중...'
           const tableMatch = result.sql.match(/FROM\s+["`]?(\w+)["`]?/i)
           if (tableMatch) {
-            nodeSearchResults.value = [{
+            const fallbackCandidates: NodeSearchCandidate[] = [{
               table_name: tableMatch[1],
+              datasource: selectedDatasource.value || '',
               columns: columns,
-              sample_data: rows.slice(0, 5),
-              row_count: rows.length,
+              sample_data: [],
+              row_count: null,
+              row_count_approx: false,
               relevance_score: 0.7,
               match_reason: `SQL에서 추출: ${result.sql.substring(0, 50)}...`,
               suggested_sql: result.sql
             }]
+            nodeSearchResults.value = fallbackCandidates
+            void probeRowCounts(runId)
             nodeSearchStatus.value = '✅ 테이블 정보 추출 완료'
           } else {
             nodeSearchStatus.value = '⚠️ 테이블 정보를 찾을 수 없습니다'
@@ -4590,9 +6445,10 @@ async function loadDatasources() {
     if (response.ok) {
       const datasources = await response.json()
       availableDatasources.value = datasources
-      // "온톨로지" 옵션 추가 (ObjectType용)
-      if (datasources.length > 0) {
-        // 데이터 소스 목록에 "온톨로지" 추가하지 않고, 별도로 처리
+      // 단일 데이터소스 환경에서는 자연어 검색 첫 클릭 동작을 위해 자동 선택
+      if (datasources.length === 1) {
+        selectedDatasource.value = datasources[0]
+        await loadSchemasForDatasource(selectedDatasource.value)
       }
     } else {
       const error = await response.json().catch(() => ({ detail: '데이터 소스 목록 조회 실패' }))
@@ -4793,6 +6649,7 @@ async function confirmNodeDataSource() {
     candidate = {
       ...searchResult,
       table_name: searchResult.table_name || searchResult.full_table_name?.replace(/"/g, ''),
+      datasource: searchResult.datasource || (selectedDatasource.value !== '__ontology__' ? selectedDatasource.value : ''),
       suggested_sql: searchResult.suggested_sql || `SELECT * FROM ${searchResult.full_table_name || `"${searchResult.table_name}"`} LIMIT 100`
     }
   } else if (nodeDataSourceTab.value === 'manual' && selectedManualTable.value) {
@@ -4810,9 +6667,11 @@ async function confirmNodeDataSource() {
       
       candidate = {
         table_name: tableNameForDataSource,
+        datasource: selectedDatasource.value !== '__ontology__' ? selectedDatasource.value : '',
         columns: [],
         sample_data: [],
         row_count: 0,
+        row_count_approx: false,
         relevance_score: 1.0,
         match_reason: selectedDatasource.value === '__ontology__' ? '온톨로지 (ObjectType) 선택' : '수동 선택',
         suggested_sql: `SELECT * FROM ${table.fullName} LIMIT 100`,
@@ -4856,6 +6715,7 @@ function getStatusIcon(status: string) {
     case 'confirmed': return '✅'
     case 'found': return '🔍'
     case 'not_found': return '❌'
+    case 'error': return '⚠️'
     case 'searching': return '⏳'
     default: return '⏳'
   }
@@ -4866,6 +6726,7 @@ function getStatusText(status: string) {
     case 'confirmed': return '확정됨'
     case 'found': return '후보 발견'
     case 'not_found': return '미발견'
+    case 'error': return '오류'
     case 'searching': return '검색 중'
     default: return '대기'
   }
@@ -4896,13 +6757,21 @@ async function createRelation() {
     source: newRelation.value.sourceId,
     target: newRelation.value.targetId,
     type: newRelation.value.type,
-    description: newRelation.value.description || undefined
+    description: newRelation.value.description || undefined,
+    fromField: undefined,
+    toField: undefined
   }
   
   // 로컬 상태에 추가
   relationships.value.push(rel)
   
-  // Cytoscape에 엣지 추가
+  // edgehandles가 자동 생성한 임시 엣지 제거 (ID가 맞지 않아 더블클릭 시 문제 발생)
+  if (tempEdgeFromEdgehandles) {
+    tempEdgeFromEdgehandles.remove()
+    tempEdgeFromEdgehandles = null
+  }
+  
+  // Cytoscape에 올바른 ID로 엣지 추가
   if (cy) {
     cy.add({
       data: {
@@ -4917,17 +6786,15 @@ async function createRelation() {
   
   // 다이얼로그 닫기
   showNewRelationDialog.value = false
-  
-  // TODO: 백엔드에 저장
-  // await saveRelationToBackend(rel)
 }
 
 function cancelRelation() {
   showNewRelationDialog.value = false
   
-  // Cytoscape에서 임시 엣지 제거 (edgehandles가 생성한 것)
-  if (cy) {
-    cy.edges().filter(e => e.data('id') === undefined).remove()
+  // edgehandles가 자동 생성한 임시 엣지 제거
+  if (tempEdgeFromEdgehandles) {
+    tempEdgeFromEdgehandles.remove()
+    tempEdgeFromEdgehandles = null
   }
 }
 
@@ -5132,7 +6999,17 @@ function handleStreamEvent(event: any) {
       currentStep.value = '완료'
       if (event.data?.success && event.data?.schema) {
         nodes.value = event.data.schema.nodes || []
-        relationships.value = event.data.schema.relationships || []
+        const sanitizedFromGeneration = sanitizeRelationshipsForCanvas(
+          event.data.schema.relationships || [],
+          nodes.value
+        )
+        relationships.value = sanitizedFromGeneration.relationships
+        if (sanitizedFromGeneration.skipped > 0 || sanitizedFromGeneration.rekeyed > 0) {
+          addLog(
+            `관계 정제 적용: 잘못된 관계 ${sanitizedFromGeneration.skipped}개 제외, 중복 ID ${sanitizedFromGeneration.rekeyed}개 보정`,
+            'warning'
+          )
+        }
         
         // 스키마 ID가 있으면 저장
         if (event.data.schema.id) {
@@ -5558,7 +7435,19 @@ async function loadSchema(schemaId: string) {
     
     // 노드와 관계 로드
     nodes.value = schema.nodes || []
-    relationships.value = schema.relationships || []
+    const sanitizedFromSchema = sanitizeRelationshipsForCanvas(schema.relationships || [], nodes.value)
+    relationships.value = sanitizedFromSchema.relationships
+    if (sanitizedFromSchema.skipped > 0 || sanitizedFromSchema.rekeyed > 0) {
+      console.warn('스키마 관계 정제 적용:', {
+        schemaId,
+        skipped: sanitizedFromSchema.skipped,
+        rekeyed: sanitizedFromSchema.rekeyed
+      })
+      addLog(
+        `관계 정제 적용: 잘못된 관계 ${sanitizedFromSchema.skipped}개 제외, 중복 ID ${sanitizedFromSchema.rekeyed}개 보정`,
+        'warning'
+      )
+    }
     
     console.log(`스키마 로드 완료: ${schema.name} (${nodes.value.length}개 노드, ${relationships.value.length}개 관계)`)
     
@@ -5656,6 +7545,196 @@ async function saveToNeo4j() {
 const currentSchemaId = ref<string | null>(null)
 const schemaName = ref('')
 
+// What-if 분석 패널 상태
+const isWhatIfPanelOpen = ref(false)
+
+// What-if에 전달할 필터 (nodeFilters 스냅샷)
+const whatifFilters = ref<Record<string, Record<string, any>>>({})
+
+function openWhatIfFromContextMenu() {
+  showContextMenu.value = false
+  whatifFilters.value = JSON.parse(JSON.stringify(nodeFilters.value || {}))
+  isWhatIfPanelOpen.value = true
+}
+
+// ── Behavior 탭 (노드 상세 패널) ──
+const behaviorLoading = ref(false)
+const nodeBehaviors = ref<Array<{
+  modelId: string; name: string; description: string; status: string;
+  role: 'input' | 'output';  // 이 노드가 입력인지 출력인지
+  metrics: string;
+  inputs: Array<{ sourceId: string; field: string }>;
+  outputs: Array<{ targetId: string; field: string }>;
+}>>([])
+
+async function loadNodeBehaviors(nodeId: string) {
+  if (!currentSchemaId.value) return
+  behaviorLoading.value = true
+  nodeBehaviors.value = []
+  try {
+    const resp = await fetch(`/api/gateway/domain-whatif/models/${currentSchemaId.value}`)
+    if (!resp.ok) return
+    const data = await resp.json()
+    const allModels = data.models || []
+
+    // 이 노드와 연결된 모델 필터 + 역할(input/output) 판별
+    for (const m of allModels) {
+      const isInput = (m.inputs || []).some((i: any) => i.sourceId === nodeId)
+      const isOutput = (m.outputs || []).some((o: any) => o.targetId === nodeId)
+      if (isInput || isOutput) {
+        nodeBehaviors.value.push({
+          modelId: m.modelId,
+          name: m.name || m.modelId,
+          description: m.description || '',
+          status: m.status || 'pending',
+          role: isOutput ? 'output' : 'input',
+          metrics: m.metrics || '{}',
+          inputs: (m.inputs || []).map((i: any) => ({ sourceId: i.sourceId, field: i.field })),
+          outputs: (m.outputs || []).map((o: any) => ({ targetId: o.targetId, field: o.field })),
+        })
+      }
+    }
+  } catch (e) {
+    console.warn('Behavior 로드 실패:', e)
+  } finally {
+    behaviorLoading.value = false
+  }
+}
+
+async function deleteBehaviorModel(modelId: string) {
+  if (!currentSchemaId.value || !confirm('이 모델을 삭제하시겠습니까?')) return
+  try {
+    await fetch(`/api/gateway/domain-whatif/models/${currentSchemaId.value}/${modelId}`, { method: 'DELETE' })
+    nodeBehaviors.value = nodeBehaviors.value.filter(b => b.modelId !== modelId)
+  } catch (e) { console.warn('모델 삭제 실패:', e) }
+}
+
+// ── 모델 오버레이 표시 (캔버스용 — 유지하되 버튼 제거됨) ──
+const showModelOverlay = ref(false)
+const modelOverlayData = ref<Array<{
+  modelId: string; name: string; status: string;
+  inputs: Array<{ sourceId: string; field: string }>;
+  outputs: Array<{ targetId: string; field: string }>;
+}>>([])
+
+async function toggleModelOverlay() {
+  showModelOverlay.value = !showModelOverlay.value
+  if (showModelOverlay.value && currentSchemaId.value) {
+    try {
+      const resp = await fetch(`/api/gateway/domain-whatif/models/${currentSchemaId.value}`)
+      if (resp.ok) {
+        const data = await resp.json()
+        modelOverlayData.value = (data.models || []).map((m: any) => ({
+          modelId: m.modelId, name: m.name, status: m.status,
+          inputs: (m.inputs || []).map((i: any) => ({ sourceId: i.sourceId, field: i.field })),
+          outputs: (m.outputs || []).map((o: any) => ({ targetId: o.targetId, field: o.field })),
+        }))
+        addModelNodesToCytoscape()
+      }
+    } catch (e) { console.warn('모델 로드 실패:', e) }
+  } else {
+    removeModelNodesFromCytoscape()
+  }
+}
+
+function addModelNodesToCytoscape() {
+  if (!cy) return
+  // 기존 모델 노드/엣지 제거
+  cy.elements('.model-overlay').remove()
+
+  for (const model of modelOverlayData.value) {
+    // 모델 노드 추가
+    const inputPositions = model.inputs.map(inp => {
+      const n = cy!.getElementById(inp.sourceId)
+      return n.length > 0 ? n.position() : null
+    }).filter(Boolean)
+    const outputPositions = model.outputs.map(out => {
+      const n = cy!.getElementById(out.targetId)
+      return n.length > 0 ? n.position() : null
+    }).filter(Boolean)
+
+    // 모델 위치: 입력과 출력의 중간
+    const allPos = [...inputPositions, ...outputPositions] as Array<{ x: number; y: number }>
+    const avgX = allPos.length > 0 ? allPos.reduce((s, p) => s + p.x, 0) / allPos.length : 400
+    const avgY = allPos.length > 0 ? allPos.reduce((s, p) => s + p.y, 0) / allPos.length + 60 : 400
+
+    cy.add({
+      group: 'nodes',
+      data: { id: `model-${model.modelId}`, label: model.name, layer: 'Model', color: '#6366f1', isModel: true, modelStatus: model.status },
+      position: { x: avgX, y: avgY },
+      classes: 'model-overlay',
+    })
+
+    // 입력 엣지 (OntologyType → Model)
+    for (const inp of model.inputs) {
+      if (cy.getElementById(inp.sourceId).length > 0) {
+        cy.add({
+          group: 'edges',
+          data: { id: `me-${inp.sourceId}-${model.modelId}`, source: inp.sourceId, target: `model-${model.modelId}`, label: 'READS', type: 'READS_FIELD' },
+          classes: 'model-overlay',
+        })
+      }
+    }
+
+    // 출력 엣지 (Model → OntologyType)
+    for (const out of model.outputs) {
+      if (cy.getElementById(out.targetId).length > 0) {
+        cy.add({
+          group: 'edges',
+          data: { id: `me-${model.modelId}-${out.targetId}`, source: `model-${model.modelId}`, target: out.targetId, label: 'PREDICTS', type: 'PREDICTS_FIELD' },
+          classes: 'model-overlay',
+        })
+      }
+    }
+  }
+}
+
+function removeModelNodesFromCytoscape() {
+  if (!cy) return
+  cy.elements('.model-overlay').remove()
+}
+
+async function deleteModelFromOverlay(modelId: string) {
+  if (!currentSchemaId.value) return
+  if (!confirm('이 모델을 삭제하시겠습니까?')) return
+  try {
+    await fetch(`/api/gateway/domain-whatif/models/${currentSchemaId.value}/${modelId}`, { method: 'DELETE' })
+    modelOverlayData.value = modelOverlayData.value.filter(m => m.modelId !== modelId)
+    if (cy) {
+      cy.getElementById(`model-${modelId}`).remove()
+    }
+  } catch (e) { console.warn('모델 삭제 실패:', e) }
+}
+const whatifPanelHeight = ref(350) // 기본 높이 (px)
+let isResizingWhatIf = false
+let resizeStartY = 0
+let resizeStartHeight = 0
+
+function startResizeWhatIf(e: MouseEvent) {
+  isResizingWhatIf = true
+  resizeStartY = e.clientY
+  resizeStartHeight = whatifPanelHeight.value
+  document.body.style.cursor = 'row-resize'
+  document.body.style.userSelect = 'none'
+  document.addEventListener('mousemove', onResizeWhatIf)
+  document.addEventListener('mouseup', stopResizeWhatIf)
+}
+
+function onResizeWhatIf(e: MouseEvent) {
+  if (!isResizingWhatIf) return
+  const delta = resizeStartY - e.clientY // 위로 드래그 = 패널 커짐
+  const newHeight = Math.max(150, Math.min(window.innerHeight * 0.75, resizeStartHeight + delta))
+  whatifPanelHeight.value = newHeight
+}
+
+function stopResizeWhatIf() {
+  isResizingWhatIf = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  document.removeEventListener('mousemove', onResizeWhatIf)
+  document.removeEventListener('mouseup', stopResizeWhatIf)
+}
+
 // 온톨로지 이름 자동 생성 함수
 function generateOntologyName(nodes: OntologyNode[], relationships: OntologyRelationship[], domainHint?: string): string {
   if (nodes.length === 0) {
@@ -5731,6 +7810,9 @@ onMounted(async () => {
     }
   })
   
+  // 노드 추가 드롭다운 및 컨텍스트 메뉴 외부 클릭 시 닫기
+  document.addEventListener('click', onDocumentClick)
+  
   // 온톨로지 목록 로드 및 최근 온톨로지 자동 열기
   await loadOntologyList()
   
@@ -5742,6 +7824,9 @@ onMounted(async () => {
 onUnmounted(() => {
   // 키보드 단축키 해제
   window.removeEventListener('keydown', handleKeyDown)
+  
+  // 클릭 이벤트 해제
+  document.removeEventListener('click', onDocumentClick)
   
   if (themeObserver) {
     themeObserver.disconnect()
@@ -5833,6 +7918,148 @@ watch(detailPanelTab, (newTab, oldTab) => {
   font-size: 1.25rem;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.95);
+}
+
+/* 필터 바 스타일 */
+.filter-bar {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(147, 51, 234, 0.08));
+  border-bottom: 1px solid rgba(59, 130, 246, 0.25);
+  padding: 12px 24px;
+}
+
+.filter-bar-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.filter-icon { font-size: 1rem; }
+
+.filter-title {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 0.95rem;
+}
+
+.clear-all-filters-btn {
+  margin-left: auto;
+  padding: 4px 12px;
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 6px;
+  color: #fca5a5;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.filter-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 140px;
+}
+
+.filter-field label {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 500;
+}
+
+.filter-field input,
+.filter-field select {
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.8rem;
+}
+
+.filter-field input:focus,
+.filter-field select:focus {
+  outline: none;
+  border-color: rgba(59, 130, 246, 0.6);
+}
+
+.date-range-filter,
+.range-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.date-range-filter span,
+.range-filter span {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.8rem;
+}
+
+.date-range-filter input,
+.range-filter input {
+  flex: 1;
+  min-width: 90px;
+}
+
+.no-filter-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.85rem;
+}
+
+.no-filter-fields .hint {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* 생성 모드 탭 */
+.generation-mode-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.mode-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+}
+
+.mode-tab:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.mode-tab.active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: white;
+}
+
+.schema-generation-content {
+  padding: 0;
+  max-height: 60vh;
+  overflow-y: auto;
 }
 
 .header-actions {
@@ -6090,6 +8317,52 @@ watch(detailPanelTab, (newTab, oldTab) => {
   /* backdrop-filter 제거하여 오른쪽과 동일한 불투명도 유지 */
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 4px 0 24px rgba(0, 0, 0, 0.2);
+  transition: width 0.3s ease, min-width 0.3s ease;
+}
+
+.layer-panel.layer-panel-collapsed {
+  width: 44px;
+  min-width: 44px;
+  overflow: hidden;
+}
+
+.layer-panel-header {
+  margin: 0;
+  padding: 16px 20px;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  /* graph-toolbar와 동일한 배경으로 통일 */
+  background: rgba(30, 30, 40, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  white-space: nowrap;
+}
+
+.layer-panel-collapsed .layer-panel-header {
+  padding: 16px 0;
+  justify-content: center;
+}
+
+.layer-panel-toggle-btn {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  line-height: 1;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.layer-panel-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.95);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
 .layer-panel h3 {
@@ -6194,6 +8467,8 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 .graph-toolbar {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 12px 16px;
   /* 왼쪽/오른쪽 패널과 통일된 배경 */
@@ -6237,6 +8512,602 @@ watch(detailPanelTab, (newTab, oldTab) => {
   font-size: 0.8125rem;
   background: rgba(255, 255, 255, 0.06);
   color: rgba(255, 255, 255, 0.9);
+}
+
+/* 헤더에 배치된 레이아웃 드롭다운 */
+.header-layout-select {
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  font-size: 0.8125rem;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  height: 36px;
+}
+
+.header-layout-select:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* ========== 노드 추가 드롭다운 ========== */
+.add-node-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.add-node-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(34, 197, 94, 0.1) !important;
+  border-color: rgba(34, 197, 94, 0.3) !important;
+  color: #22c55e !important;
+}
+
+.add-node-btn:hover {
+  background: rgba(34, 197, 94, 0.2) !important;
+  border-color: rgba(34, 197, 94, 0.5) !important;
+}
+
+.dropdown-arrow-small {
+  font-size: 0.65rem;
+  margin-left: 2px;
+}
+
+.add-node-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: rgba(30, 30, 45, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+  z-index: 1000;
+  min-width: 160px;
+  padding: 6px 0;
+  animation: fadeIn 0.15s ease;
+}
+
+.add-node-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.85rem;
+}
+
+.add-node-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.add-node-icon {
+  font-size: 1rem;
+}
+
+.add-node-label {
+  flex: 1;
+}
+
+.add-node-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+/* ========== 캔버스 우클릭 컨텍스트 메뉴 ========== */
+.canvas-context-menu {
+  position: absolute;
+  z-index: 1000;
+  background: rgba(25, 25, 40, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(16px);
+  min-width: 180px;
+  padding: 6px 0;
+  animation: contextMenuFadeIn 0.12s ease;
+}
+
+@keyframes contextMenuFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.context-menu-header {
+  padding: 8px 16px 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 4px;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.85rem;
+}
+
+.context-menu-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.context-menu-item:first-of-type {
+  border-radius: 0;
+}
+
+.context-menu-item:last-child {
+  border-radius: 0 0 12px 12px;
+}
+
+.context-menu-icon {
+  font-size: 1rem;
+  width: 20px;
+  text-align: center;
+}
+
+.context-menu-label {
+  flex: 1;
+  font-weight: 500;
+}
+
+.context-menu-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.context-menu-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 4px 12px;
+}
+
+.context-menu-danger {
+  color: #f87171 !important;
+}
+
+.context-menu-danger:hover {
+  background: rgba(239, 68, 68, 0.15) !important;
+}
+
+/* ========== 필터 다이얼로그 ========== */
+.filter-dialog {
+  background: rgba(25, 25, 40, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(20px);
+  width: 560px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  animation: dialogFadeIn 0.2s ease;
+}
+
+@keyframes dialogFadeIn {
+  from { opacity: 0; transform: scale(0.95) translateY(-10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.filter-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.filter-dialog-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.filter-dialog-icon {
+  font-size: 1.2rem;
+}
+
+.filter-dialog-actions-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.filter-dialog-close {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.filter-dialog-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.filter-dialog-body {
+  padding: 20px 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.filter-dialog-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.filter-field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.filter-field-row label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.filter-field-row input[type="date"],
+.filter-field-row input[type="number"],
+.filter-field-row input[type="text"],
+.filter-field-row select {
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.filter-field-row input:focus,
+.filter-field-row select:focus {
+  border-color: rgba(99, 179, 237, 0.5);
+  box-shadow: 0 0 0 2px rgba(99, 179, 237, 0.1);
+}
+
+.filter-field-row .date-range-filter,
+.filter-field-row .range-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-field-row .date-range-filter input,
+.filter-field-row .range-filter input {
+  flex: 1;
+  min-width: 0;
+}
+
+.filter-field-row .date-range-filter span,
+.filter-field-row .range-filter span {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.85rem;
+}
+
+.filter-dialog-footer {
+  padding: 16px 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.filter-apply-btn {
+  padding: 8px 24px;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.filter-apply-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.select-filter-wrapper,
+.search-filter-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.select-filter-wrapper .select-filter,
+.search-filter-wrapper .search-filter {
+  width: 100%;
+}
+
+.filter-loading-hint {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.35);
+  font-style: italic;
+}
+
+.filter-count-hint {
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.3);
+  text-align: right;
+}
+
+/* ========== 필터 칩 (상세 패널) ========== */
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  max-width: 100%;
+}
+
+.filter-chip.direct {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+}
+
+.filter-chip.cascade {
+  background: rgba(167, 139, 250, 0.12);
+  border: 1px solid rgba(167, 139, 250, 0.25);
+  color: #c4b5fd;
+}
+
+.chip-label {
+  font-weight: 600;
+}
+
+.chip-equals {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.chip-value {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.7rem;
+}
+
+.chip-source {
+  font-size: 0.65rem;
+  color: rgba(167, 139, 250, 0.6);
+  margin-left: 2px;
+}
+
+/* ========== 릴레이션 속성 편집 다이얼로그 ========== */
+/* 릴레이션 편집 다이얼로그 (레거시 - 우측 패널로 이동) */
+.relation-editor-dialog {
+  background: rgba(25, 25, 40, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(20px);
+  width: 600px;
+  max-width: 90vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  animation: dialogFadeIn 0.2s ease;
+}
+
+.relation-editor-dialog .dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ========== 릴레이션 우측 패널 ========== */
+.relation-preview-panel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.rel-endpoint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.rel-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.rel-name {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rel-arrow-panel {
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 1.1rem;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.relation-panel-actions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dialog-footer-right {
+  display: flex;
+  gap: 10px;
+}
+
+.field-mapping-section {
+  margin-top: 20px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+}
+
+.field-mapping-section h4 {
+  margin: 0 0 6px 0;
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.field-mapping-hint {
+  margin: 0 0 16px 0;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.45);
+  line-height: 1.5;
+}
+
+.field-mapping-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.field-mapping-col {
+  flex: 1;
+  min-width: 0;
+}
+
+.field-mapping-col label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.field-node-hint {
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.7rem;
+}
+
+.field-mapping-arrow {
+  padding-top: 28px;
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 1.2rem;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+/* ========== Cascading 필터 정보 ========== */
+.cascading-filters-info {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: rgba(167, 139, 250, 0.08);
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  border-radius: 10px;
+}
+
+.cascading-filters-info h5 {
+  margin: 0 0 10px 0;
+  font-size: 0.8rem;
+  color: #a78bfa;
+  font-weight: 600;
+}
+
+.cascading-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  font-size: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.cf-from {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.75rem;
+}
+
+.cf-arrow {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.cf-field {
+  color: #a78bfa;
+  font-weight: 500;
+}
+
+.cf-equals {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.cf-value {
+  padding: 2px 8px;
+  background: rgba(167, 139, 250, 0.15);
+  border-radius: 4px;
+  color: #c4b5fd;
+  font-size: 0.75rem;
 }
 
 .cytoscape-container {
@@ -6416,6 +9287,30 @@ watch(detailPanelTab, (newTab, oldTab) => {
   padding: 16px 20px;
 }
 
+/* BPMN 탭 - 다이어그램 영역을 최대한 활용 */
+.detail-content.bpmn-tab {
+  padding: 0;
+  display: block;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.bpmn-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: #888;
+  text-align: center;
+  gap: 8px;
+}
+
+.bpmn-hint {
+  font-size: 0.8rem;
+  color: #aaa;
+}
+
 /* 데이터 탭 스타일 */
 .detail-content.data-tab {
   padding: 16px;
@@ -6513,6 +9408,80 @@ watch(detailPanelTab, (newTab, oldTab) => {
 .row-count {
   color: rgba(255, 255, 255, 0.5);
   font-size: 0.75rem;
+}
+
+.biz-day-badge {
+  font-size: 0.6875rem;
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.12);
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.business-day-filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: rgba(30, 30, 40, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    white-space: nowrap;
+    
+    input[type="checkbox"] {
+      display: none;
+    }
+    
+    .toggle-switch {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 10px;
+      transition: background 0.2s ease;
+      flex-shrink: 0;
+      
+      &::after {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 16px;
+        height: 16px;
+        background: rgba(255, 255, 255, 0.6);
+        border-radius: 50%;
+        transition: all 0.2s ease;
+      }
+    }
+    
+    input:checked + .toggle-switch {
+      background: rgba(34, 197, 94, 0.5);
+      
+      &::after {
+        left: 18px;
+        background: #22c55e;
+      }
+    }
+    
+    .toggle-text {
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.8);
+    }
+  }
+  
+  .toggle-desc {
+    font-size: 0.6875rem;
+    color: rgba(255, 255, 255, 0.35);
+    flex: 1;
+  }
 }
 
 .datasource-badge {
@@ -6726,6 +9695,94 @@ watch(detailPanelTab, (newTab, oldTab) => {
   border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
+/* ========== 노드 상세 헤더 + 삭제 버튼 ========== */
+.detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.detail-header h3 {
+  margin: 0;
+}
+
+.delete-node-btn {
+  padding: 5px 12px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.delete-node-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #ef4444;
+}
+
+/* ========== 노드 이름 인라인 편집 ========== */
+.editable-name-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.editable-node-name {
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+}
+
+.editable-node-name:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin: -2px -6px;
+}
+
+.edit-name-btn {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  line-height: 1;
+}
+
+.edit-name-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(99, 179, 237, 0.4);
+  color: #63b3ed;
+}
+
+.node-name-edit-input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid rgba(99, 179, 237, 0.5);
+  border-radius: 8px;
+  background: rgba(30, 30, 50, 0.8);
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 0.9375rem;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s ease;
+  min-width: 0;
+}
+
+.node-name-edit-input:focus {
+  border-color: #63b3ed;
+  box-shadow: 0 0 0 3px rgba(99, 179, 237, 0.15);
+}
+
 .detail-row {
   margin-bottom: 20px;
 }
@@ -6802,9 +9859,8 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 .relation-item {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
   padding: 12px 14px;
   /* Glassmorphism 효과 */
   background: rgba(30, 30, 40, 0.5);
@@ -6813,6 +9869,37 @@ watch(detailPanelTab, (newTab, oldTab) => {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
   font-size: 0.8125rem;
+  transition: border-color 0.2s ease;
+}
+
+.relation-item:hover {
+  border-color: rgba(99, 179, 237, 0.3);
+}
+
+.rel-main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rel-field-mapping {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  padding-left: 4px;
+}
+
+.rel-field {
+  color: #a78bfa;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.7rem;
+}
+
+.rel-field-arrow {
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 0.65rem;
 }
 
 .rel-source, .rel-target {
@@ -7760,6 +10847,11 @@ watch(detailPanelTab, (newTab, oldTab) => {
   background: rgba(239, 68, 68, 0.1);
 }
 
+.node-progress-item.error {
+  border-left-color: #f97316;
+  background: rgba(249, 115, 22, 0.1);
+}
+
 .node-status-icon {
   font-size: 1rem;
   width: 24px;
@@ -7841,6 +10933,7 @@ watch(detailPanelTab, (newTab, oldTab) => {
 .stat-item.found .stat-value { color: #22c55e; }
 .stat-item.confirmed .stat-value { color: #3b82f6; }
 .stat-item.not-found .stat-value { color: #ef4444; }
+.stat-item.error .stat-value { color: #f97316; }
 
 .mapping-list {
   max-height: 400px;
@@ -8289,6 +11382,30 @@ watch(detailPanelTab, (newTab, oldTab) => {
   display: flex;
   gap: 8px;
   margin-bottom: 8px;
+  align-items: stretch;
+}
+
+.search-datasource-select {
+  width: 180px;
+  min-width: 140px;
+  padding: 10px 12px;
+  background: var(--color-bg-secondary, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-bright);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.search-datasource-select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.search-datasource-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .search-input {
@@ -8299,6 +11416,7 @@ watch(detailPanelTab, (newTab, oldTab) => {
   border-radius: var(--radius-sm);
   color: var(--color-text-bright);
   font-size: 0.875rem;
+  min-width: 0;
 }
 
 .search-input:focus {
@@ -9143,6 +12261,36 @@ watch(detailPanelTab, (newTab, oldTab) => {
   color: #1e293b !important;
 }
 
+/* 라이트 모드 필터 바 */
+.light-mode .filter-bar {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.06), rgba(147, 51, 234, 0.04)) !important;
+  border-bottom: 1px solid rgba(59, 130, 246, 0.15) !important;
+}
+
+.light-mode .filter-title {
+  color: #1e293b !important;
+}
+
+.light-mode .filter-field label {
+  color: #64748b !important;
+}
+
+.light-mode .filter-field input,
+.light-mode .filter-field select {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border: 1px solid rgba(0, 0, 0, 0.15) !important;
+  color: #1e293b !important;
+}
+
+.light-mode .no-filter-fields {
+  background: rgba(0, 0, 0, 0.05) !important;
+  color: #64748b !important;
+}
+
+.light-mode .no-filter-fields .hint {
+  color: #94a3b8 !important;
+}
+
 .light-mode .action-btn {
   background: rgba(255, 255, 255, 0.9) !important;
   border: 1px solid rgba(0, 0, 0, 0.1) !important;
@@ -9177,10 +12325,22 @@ watch(detailPanelTab, (newTab, oldTab) => {
   box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04) !important;
 }
 
-.light-mode .layer-panel h3 {
+.light-mode .layer-panel h3,
+.light-mode .layer-panel-header {
   color: #0f172a !important;
   border-bottom: 1px solid #e2e8f0 !important;
   background: #f8fafc !important;
+}
+
+.light-mode .layer-panel-toggle-btn {
+  border-color: #cbd5e1 !important;
+  color: #475569 !important;
+}
+
+.light-mode .layer-panel-toggle-btn:hover {
+  background: #e2e8f0 !important;
+  color: #0f172a !important;
+  border-color: #94a3b8 !important;
 }
 
 .light-mode .layer-list {
@@ -9266,15 +12426,214 @@ watch(detailPanelTab, (newTab, oldTab) => {
   border-color: #667eea !important;
 }
 
-.light-mode .layout-select {
+.light-mode .layout-select,
+.light-mode .header-layout-select {
   background: rgba(255, 255, 255, 0.9) !important;
   border: 1px solid rgba(0, 0, 0, 0.1) !important;
   color: #334155 !important;
 }
 
+.light-mode .header-layout-select:hover {
+  background: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.2) !important;
+}
+
 .light-mode .graph-legend {
   background: rgba(255, 255, 255, 0.9) !important;
   border: 1px solid rgba(0, 0, 0, 0.1) !important;
+}
+
+.light-mode .add-node-btn {
+  background: rgba(34, 197, 94, 0.08) !important;
+  border-color: rgba(34, 197, 94, 0.25) !important;
+  color: #16a34a !important;
+}
+
+.light-mode .add-node-btn:hover {
+  background: rgba(34, 197, 94, 0.15) !important;
+}
+
+.light-mode .add-node-menu {
+  background: rgba(255, 255, 255, 0.98) !important;
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15) !important;
+}
+
+.light-mode .add-node-menu-item {
+  color: #334155 !important;
+}
+
+.light-mode .add-node-menu-item:hover {
+  background: rgba(0, 0, 0, 0.04) !important;
+}
+
+.light-mode .canvas-context-menu {
+  background: rgba(255, 255, 255, 0.98) !important;
+  border: 1px solid rgba(0, 0, 0, 0.12) !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15) !important;
+}
+
+.light-mode .context-menu-header {
+  color: rgba(0, 0, 0, 0.4) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.06) !important;
+}
+
+.light-mode .context-menu-item {
+  color: #334155 !important;
+}
+
+.light-mode .context-menu-item:hover {
+  background: rgba(0, 0, 0, 0.04) !important;
+}
+
+.light-mode .context-menu-divider {
+  background: rgba(0, 0, 0, 0.06) !important;
+}
+
+.light-mode .context-menu-danger {
+  color: #dc2626 !important;
+}
+
+.light-mode .context-menu-danger:hover {
+  background: rgba(239, 68, 68, 0.06) !important;
+}
+
+.light-mode .filter-dialog {
+  background: rgba(255, 255, 255, 0.98) !important;
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15) !important;
+}
+
+.light-mode .filter-dialog-header {
+  border-bottom-color: rgba(0, 0, 0, 0.06) !important;
+}
+
+.light-mode .filter-dialog-title {
+  color: #0f172a !important;
+}
+
+.light-mode .filter-dialog-close {
+  background: rgba(0, 0, 0, 0.04) !important;
+  color: #94a3b8 !important;
+}
+
+.light-mode .filter-dialog-close:hover {
+  background: rgba(0, 0, 0, 0.08) !important;
+  color: #475569 !important;
+}
+
+.light-mode .filter-field-row label {
+  color: #64748b !important;
+}
+
+.light-mode .filter-field-row input,
+.light-mode .filter-field-row select {
+  background: white !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  color: #1e293b !important;
+}
+
+.light-mode .filter-field-row input:focus,
+.light-mode .filter-field-row select:focus {
+  border-color: #667eea !important;
+}
+
+.light-mode .filter-dialog-footer {
+  border-top-color: rgba(0, 0, 0, 0.06) !important;
+}
+
+.light-mode .filter-loading-hint {
+  color: #94a3b8 !important;
+}
+
+.light-mode .filter-count-hint {
+  color: #94a3b8 !important;
+}
+
+.light-mode .filter-chip.direct {
+  background: rgba(245, 158, 11, 0.08) !important;
+  border-color: rgba(245, 158, 11, 0.2) !important;
+  color: #d97706 !important;
+}
+
+.light-mode .filter-chip.cascade {
+  background: rgba(139, 92, 246, 0.06) !important;
+  border-color: rgba(139, 92, 246, 0.15) !important;
+  color: #7c3aed !important;
+}
+
+.light-mode .chip-equals {
+  color: #cbd5e1 !important;
+}
+
+.light-mode .chip-source {
+  color: rgba(139, 92, 246, 0.5) !important;
+}
+
+.light-mode .relation-editor-dialog {
+  background: rgba(255, 255, 255, 0.98) !important;
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15) !important;
+}
+
+.light-mode .relation-preview-panel {
+  background: rgba(0, 0, 0, 0.02) !important;
+  border-color: rgba(0, 0, 0, 0.06) !important;
+}
+
+.light-mode .rel-name {
+  color: #1e293b !important;
+}
+
+.light-mode .rel-arrow-panel {
+  color: #cbd5e1 !important;
+}
+
+.light-mode .field-mapping-section {
+  background: rgba(0, 0, 0, 0.02) !important;
+  border-color: rgba(0, 0, 0, 0.06) !important;
+}
+
+.light-mode .field-mapping-section h4 {
+  color: #334155 !important;
+}
+
+.light-mode .field-mapping-hint {
+  color: #94a3b8 !important;
+}
+
+.light-mode .field-mapping-col label {
+  color: #475569 !important;
+}
+
+.light-mode .field-node-hint {
+  color: #94a3b8 !important;
+}
+
+.light-mode .field-mapping-arrow {
+  color: #cbd5e1 !important;
+}
+
+.light-mode .cascading-filters-info {
+  background: rgba(139, 92, 246, 0.04) !important;
+  border-color: rgba(139, 92, 246, 0.15) !important;
+}
+
+.light-mode .cascading-filters-info h5 {
+  color: #7c3aed !important;
+}
+
+.light-mode .cf-from {
+  color: #94a3b8 !important;
+}
+
+.light-mode .cf-field {
+  color: #7c3aed !important;
+}
+
+.light-mode .cf-value {
+  background: rgba(139, 92, 246, 0.08) !important;
+  color: #6d28d9 !important;
 }
 
 .light-mode .legend-item {
@@ -9380,6 +12739,42 @@ watch(detailPanelTab, (newTab, oldTab) => {
   color: #94a3b8 !important;
 }
 
+.light-mode .biz-day-badge {
+  color: #16a34a !important;
+  background: rgba(22, 163, 74, 0.1) !important;
+}
+
+.light-mode .business-day-filter-toggle {
+  background: rgba(0, 0, 0, 0.02) !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  
+  .toggle-label {
+    .toggle-switch {
+      background: rgba(0, 0, 0, 0.12) !important;
+      
+      &::after {
+        background: rgba(0, 0, 0, 0.3) !important;
+      }
+    }
+    
+    input:checked + .toggle-switch {
+      background: rgba(34, 197, 94, 0.4) !important;
+      
+      &::after {
+        background: #16a34a !important;
+      }
+    }
+    
+    .toggle-text {
+      color: #334155 !important;
+    }
+  }
+  
+  .toggle-desc {
+    color: #94a3b8 !important;
+  }
+}
+
 .light-mode .chart-section,
 .light-mode .data-table-section {
   background: rgba(0, 0, 0, 0.02) !important;
@@ -9468,6 +12863,43 @@ watch(detailPanelTab, (newTab, oldTab) => {
   border-color: rgba(0, 0, 0, 0.08) !important;
 }
 
+.light-mode .delete-node-btn {
+  border-color: rgba(239, 68, 68, 0.2) !important;
+  background: rgba(239, 68, 68, 0.06) !important;
+  color: #dc2626 !important;
+}
+
+.light-mode .delete-node-btn:hover {
+  background: rgba(239, 68, 68, 0.12) !important;
+  border-color: rgba(239, 68, 68, 0.4) !important;
+}
+
+.light-mode .editable-node-name:hover {
+  background: rgba(0, 0, 0, 0.03) !important;
+}
+
+.light-mode .edit-name-btn {
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  background: rgba(0, 0, 0, 0.03) !important;
+  color: #94a3b8 !important;
+}
+
+.light-mode .edit-name-btn:hover {
+  background: rgba(0, 0, 0, 0.06) !important;
+  border-color: #667eea !important;
+  color: #667eea !important;
+}
+
+.light-mode .node-name-edit-input {
+  background: white !important;
+  border-color: #667eea !important;
+  color: #1e293b !important;
+}
+
+.light-mode .node-name-edit-input:focus {
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15) !important;
+}
+
 .light-mode .related-section h4 {
   color: #334155 !important;
 }
@@ -9475,6 +12907,18 @@ watch(detailPanelTab, (newTab, oldTab) => {
 .light-mode .relation-item {
   background: rgba(0, 0, 0, 0.03) !important;
   border-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+.light-mode .relation-item:hover {
+  border-color: rgba(102, 126, 234, 0.3) !important;
+}
+
+.light-mode .rel-field {
+  color: #7c3aed !important;
+}
+
+.light-mode .rel-field-arrow {
+  color: #cbd5e1 !important;
 }
 
 .light-mode .rel-source,
@@ -9719,7 +13163,8 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 .light-mode .datasource-selector select,
 .light-mode .schema-selector select,
-.light-mode .table-search input {
+.light-mode .table-search input,
+.light-mode .search-datasource-select {
   background: #f8fafc !important;
   border-color: #e2e8f0 !important;
   color: #1e293b !important;
@@ -9828,6 +13273,11 @@ watch(detailPanelTab, (newTab, oldTab) => {
 .light-mode .node-progress-item.not_found {
   background: rgba(239, 68, 68, 0.08) !important;
   border-left: 3px solid #ef4444 !important;
+}
+
+.light-mode .node-progress-item.error {
+  background: rgba(249, 115, 22, 0.08) !important;
+  border-left: 3px solid #f97316 !important;
 }
 
 .light-mode .mapping-item {
@@ -9946,5 +13396,244 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 .light-mode .preview-btn:hover {
   background: rgba(99, 102, 241, 0.1) !important;
+}
+
+/* 온톨로지 생성 다이얼로그 - 모드 탭 라이트 모드 */
+.light-mode .generation-mode-tabs {
+  background: rgba(0, 0, 0, 0.04) !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+}
+
+.light-mode .mode-tab {
+  color: #475569 !important;
+  border-color: #cbd5e1 !important;
+}
+
+.light-mode .mode-tab:hover {
+  background: rgba(0, 0, 0, 0.05) !important;
+  color: #1e293b !important;
+}
+
+.light-mode .mode-tab.active {
+  background: #2563eb !important;
+  border-color: #2563eb !important;
+  color: white !important;
+}
+
+/* 온톨로지 생성 다이얼로그 - 다이얼로그 푸터 라이트 모드 */
+.light-mode .dialog-footer {
+  background: #f8fafc !important;
+  border-top: 1px solid rgba(0, 0, 0, 0.08) !important;
+}
+
+.light-mode .cancel-btn {
+  color: #475569 !important;
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+}
+
+.light-mode .cancel-btn:hover {
+  background: #f1f5f9 !important;
+}
+
+/* SchemaBasedGenerator 자식 컴포넌트 라이트 모드 */
+.light-mode :deep(.schema-based-generator) {
+  color: #1e293b !important;
+}
+
+.light-mode :deep(.schema-based-generator .step-section h4) {
+  color: #1e293b !important;
+}
+
+.light-mode :deep(.schema-based-generator .back-btn) {
+  color: #475569 !important;
+  border-color: #cbd5e1 !important;
+}
+
+.light-mode :deep(.schema-based-generator .back-btn:hover) {
+  background: #f1f5f9 !important;
+  color: #1e293b !important;
+}
+
+.light-mode :deep(.schema-based-generator .datasource-item),
+.light-mode :deep(.schema-based-generator .schema-item) {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+.light-mode :deep(.schema-based-generator .datasource-item:hover),
+.light-mode :deep(.schema-based-generator .schema-item:hover) {
+  background: #f1f5f9 !important;
+  border-color: #2563eb !important;
+}
+
+.light-mode :deep(.schema-based-generator .ds-name),
+.light-mode :deep(.schema-based-generator .schema-name) {
+  color: #1e293b !important;
+}
+
+.light-mode :deep(.schema-based-generator .ds-type),
+.light-mode :deep(.schema-based-generator .table-count) {
+  color: #64748b !important;
+}
+
+.light-mode :deep(.schema-based-generator .selected-info) {
+  background: #f1f5f9 !important;
+  border: 1px solid #e2e8f0 !important;
+}
+
+.light-mode :deep(.schema-based-generator .info-separator) {
+  color: #64748b !important;
+}
+
+.light-mode :deep(.schema-based-generator .form-group label) {
+  color: #475569 !important;
+}
+
+.light-mode :deep(.schema-based-generator .form-input),
+.light-mode :deep(.schema-based-generator .form-textarea) {
+  background: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+.light-mode :deep(.schema-based-generator .form-input:focus),
+.light-mode :deep(.schema-based-generator .form-textarea:focus) {
+  border-color: #2563eb !important;
+}
+
+.light-mode :deep(.schema-based-generator .form-input::placeholder),
+.light-mode :deep(.schema-based-generator .form-textarea::placeholder) {
+  color: #94a3b8 !important;
+}
+
+.light-mode :deep(.schema-based-generator .checkbox-group label) {
+  color: #334155 !important;
+}
+
+.light-mode :deep(.schema-based-generator .error-message) {
+  background: rgba(239, 68, 68, 0.08) !important;
+  border-color: rgba(239, 68, 68, 0.2) !important;
+  color: #dc2626 !important;
+}
+
+.light-mode :deep(.schema-based-generator .success-message) {
+  background: rgba(34, 197, 94, 0.08) !important;
+  border-color: rgba(34, 197, 94, 0.2) !important;
+  color: #059669 !important;
+}
+
+.light-mode :deep(.schema-based-generator .cancel-btn) {
+  color: #475569 !important;
+  border-color: #cbd5e1 !important;
+}
+
+.light-mode :deep(.schema-based-generator .generate-btn) {
+  background: #2563eb !important;
+}
+
+.light-mode :deep(.schema-based-generator .generate-btn:hover:not(:disabled)) {
+  background: #1d4ed8 !important;
+}
+
+.light-mode :deep(.schema-based-generator .loading-state) {
+  color: #64748b !important;
+}
+
+/* What-if 분석 버튼 */
+/* Behavior 탭 스타일 */
+.behavior-tab { padding: 12px !important; }
+.behavior-empty {
+  text-align: center; padding: 24px 0; color: rgba(255,255,255,0.4);
+  p { margin: 4px 0; font-size: 0.85rem; }
+  .behavior-hint { font-size: 0.75rem; color: rgba(255,255,255,0.25); }
+}
+.behavior-list { display: flex; flex-direction: column; gap: 8px; }
+.behavior-card {
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px; padding: 10px 14px; position: relative;
+  &.output { border-left: 3px solid #22c55e; }
+  &.input { border-left: 3px solid #f59e0b; }
+}
+.behavior-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.role-badge {
+  font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 6px;
+  &.output { background: rgba(34,197,94,0.15); color: #22c55e; }
+  &.input { background: rgba(245,158,11,0.15); color: #f59e0b; }
+}
+.behavior-status {
+  font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 600;
+  &.trained, &[class*="trained"] { background: rgba(34,197,94,0.15); color: #22c55e; }
+  &.pending, &[class*="pending"] { background: rgba(100,100,100,0.2); color: #94a3b8; }
+  &.disabled, &[class*="disabled"] { background: rgba(239,68,68,0.15); color: #ef4444; }
+  &.training, &[class*="training"] { background: rgba(99,102,241,0.15); color: #a5b4fc; }
+}
+.behavior-name { font-weight: 700; font-size: 0.9rem; color: rgba(255,255,255,0.95); }
+.behavior-desc { font-size: 0.75rem; color: rgba(255,255,255,0.5); margin-top: 2px; }
+.behavior-io { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.io-group { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.io-label { font-size: 0.65rem; color: rgba(255,255,255,0.4); font-weight: 600; min-width: 30px; }
+.io-tag { font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 600;
+  &.input-tag { background: rgba(245,158,11,0.1); color: #f59e0b; }
+  &.output-tag { background: rgba(34,197,94,0.1); color: #22c55e; }
+}
+.behavior-metrics { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+.metric-tag { font-size: 0.6rem; padding: 1px 6px; border-radius: 4px; background: rgba(99,102,241,0.1); color: #a5b4fc; font-family: monospace; }
+.behavior-delete-btn {
+  position: absolute; top: 8px; right: 8px; background: none; border: none;
+  cursor: pointer; font-size: 0.8rem; opacity: 0.3;
+  &:hover { opacity: 1; }
+}
+
+.whatif-toggle-btn {
+  background: rgba(99, 102, 241, 0.15) !important;
+  border-color: rgba(99, 102, 241, 0.4) !important;
+  color: #a5b4fc !important;
+}
+
+.whatif-toggle-btn:hover {
+  background: rgba(99, 102, 241, 0.3) !important;
+  border-color: rgba(99, 102, 241, 0.7) !important;
+}
+
+.whatif-toggle-btn.active {
+  background: #6366f1 !important;
+  color: #fff !important;
+  border-color: #6366f1 !important;
+}
+
+/* What-if 드래그 세퍼레이터 */
+.whatif-separator {
+  flex-shrink: 0;
+  height: 6px;
+  background: linear-gradient(90deg, transparent 30%, #6366f1 50%, transparent 70%);
+  cursor: row-resize;
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.whatif-separator:hover,
+.whatif-separator:active {
+  background: #6366f1;
+}
+
+.separator-handle {
+  width: 40px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 2px;
+}
+
+.whatif-separator:hover .separator-handle {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+/* What-if 패널 컨테이너 */
+.whatif-panel-container {
+  flex-shrink: 0;
+  overflow: hidden;
 }
 </style>
