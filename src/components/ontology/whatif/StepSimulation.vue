@@ -16,7 +16,6 @@ import {
   type SnapshotResponse,
   type SimulateResponse,
   type SimulationTrace,
-  type TimelineEntry,
 } from '@/services/whatif-domain-api'
 
 const props = defineProps<{
@@ -63,6 +62,7 @@ const simResult = ref<SimulateResponse | null>(null)
 // 애니메이션 상태
 const animationStep = ref(-1) // -1 = 미시작, 0+ = 현재 표시 중인 trace index
 const isAnimating = ref(false)
+const showZeroDeltaTraces = ref(false)
 
 // Timeline days (정렬됨)
 const timelineDays = computed(() => {
@@ -72,30 +72,59 @@ const timelineDays = computed(() => {
     .sort((a, b) => a - b)
 })
 
+function dedupeTraces(traces: SimulationTrace[]): SimulationTrace[] {
+  const seen = new Set<string>()
+  return traces.filter(t => {
+    if (seen.has(t.model_id)) return false
+    seen.add(t.model_id)
+    return true
+  })
+}
+
+const allDagTraces = computed(() => {
+  if (!simResult.value?.traces) return []
+  return dedupeTraces(simResult.value.traces)
+})
+
+const impactDagTraces = computed(() => (
+  allDagTraces.value.filter(t => Math.abs(t.delta) > 1e-6)
+))
+
+const zeroDeltaTraceCount = computed(() => (
+  allDagTraces.value.filter(t => Math.abs(t.delta) <= 1e-6).length
+))
+
+const visibleDagTraces = computed(() => (
+  showZeroDeltaTraces.value ? allDagTraces.value : impactDagTraces.value
+))
+
+const dagEmptyMessage = computed(() => {
+  if (!simResult.value) return ''
+  if (allDagTraces.value.length === 0) {
+    return '실행된 모델 trace가 없습니다.'
+  }
+  if (impactDagTraces.value.length === 0 && !showZeroDeltaTraces.value) {
+    return '모델은 실행됐지만 전파 결과 변화가 0이라 DAG에 표시할 항목이 없습니다.'
+  }
+  return ''
+})
+
 // ── VueFlow DAG ──
 // 3종류 노드: 입력변수(주황), 모델(보라), 출력변수(초록/빨강)
 // 같은 입력변수는 1개 노드에서 여러 모델로 분기
 
 const dagNodes = computed<Node[]>(() => {
-  if (!simResult.value?.traces) return []
+  if (visibleDagTraces.value.length === 0) return []
 
   const nodes: Node[] = []
   const addedInputs = new Set<string>()
   const addedModels = new Set<string>()
   const addedOutputs = new Set<string>()
 
-  // 중복 모델 제거
-  const seen = new Set<string>()
-  const traces = simResult.value.traces.filter(t => {
-    if (seen.has(t.model_id)) return false
-    seen.add(t.model_id)
-    return Math.abs(t.delta) > 1e-6
-  })
-
   // wave별 모델 수 카운트 (Y 위치 결정)
   const waveModelCount = new Map<number, number>()
 
-  for (const t of traces) {
+  for (const t of visibleDagTraces.value) {
     const wave = t.wave
     const yIdx = waveModelCount.get(wave) || 0
     waveModelCount.set(wave, yIdx + 1)
@@ -148,12 +177,19 @@ const dagNodes = computed<Node[]>(() => {
     const outKey = t.output_field
     if (!addedOutputs.has(outKey)) {
       addedOutputs.add(outKey)
+      const isNeutral = Math.abs(t.delta) <= 1e-6
       const isUp = t.delta > 0
-      const bg = isUp ? 'linear-gradient(135deg, #dcfce7, #bbf7d0)' : 'linear-gradient(135deg, #fef2f2, #fecaca)'
-      const color = isUp ? '#166534' : '#991b1b'
-      const shadow = isUp ? '0 4px 12px rgba(34,197,94,0.2)' : '0 4px 12px rgba(239,68,68,0.2)'
-      const border = isUp ? '2px solid #22c55e' : '2px solid #ef4444'
-      const pctStr = `${isUp ? '⬆' : '⬇'} ${t.pct_change > 0 ? '+' : ''}${t.pct_change.toFixed(1)}%`
+      const bg = isNeutral
+        ? 'linear-gradient(135deg, #e5e7eb, #d1d5db)'
+        : isUp ? 'linear-gradient(135deg, #dcfce7, #bbf7d0)' : 'linear-gradient(135deg, #fef2f2, #fecaca)'
+      const color = isNeutral ? '#374151' : isUp ? '#166534' : '#991b1b'
+      const shadow = isNeutral
+        ? '0 4px 12px rgba(107,114,128,0.18)'
+        : isUp ? '0 4px 12px rgba(34,197,94,0.2)' : '0 4px 12px rgba(239,68,68,0.2)'
+      const border = isNeutral ? '2px solid #9ca3af' : isUp ? '2px solid #22c55e' : '2px solid #ef4444'
+      const pctStr = isNeutral
+        ? '변화 없음'
+        : `${isUp ? '⬆' : '⬇'} ${t.pct_change > 0 ? '+' : ''}${t.pct_change.toFixed(1)}%`
 
       nodes.push({
         id: `out-${outKey}`,
@@ -175,25 +211,18 @@ const dagNodes = computed<Node[]>(() => {
 })
 
 const dagEdges = computed<Edge[]>(() => {
-  if (!simResult.value?.traces) return []
+  if (visibleDagTraces.value.length === 0) return []
 
   const edges: Edge[] = []
   const addedEdges = new Set<string>()
 
-  const seen = new Set<string>()
-  const traces = simResult.value.traces.filter(t => {
-    if (seen.has(t.model_id)) return false
-    seen.add(t.model_id)
-    return Math.abs(t.delta) > 1e-6
-  })
-
   // 어떤 output이 어떤 out-노드에 매핑되는지
   const outputToOutNode = new Map<string, string>()
-  for (const t of traces) {
+  for (const t of visibleDagTraces.value) {
     outputToOutNode.set(t.output_field, `out-${t.output_field}`)
   }
 
-  for (const t of traces) {
+  for (const t of visibleDagTraces.value) {
     // 입력 → 모델
     for (const tv of t.triggered_by) {
       // tv가 다른 모델의 출력이면 out-노드에서, 아니면 in-노드에서
@@ -216,29 +245,19 @@ const dagEdges = computed<Edge[]>(() => {
     const outEdgeKey = `mdl-${t.model_id}-out-${t.output_field}`
     if (!addedEdges.has(outEdgeKey)) {
       addedEdges.add(outEdgeKey)
+      const stroke = Math.abs(t.delta) <= 1e-6 ? '#9ca3af' : t.delta > 0 ? '#22c55e' : '#ef4444'
       edges.push({
         id: outEdgeKey,
         source: `mdl-${t.model_id}`,
         target: `out-${t.output_field}`,
         animated: true,
-        style: { stroke: t.delta > 0 ? '#22c55e' : '#ef4444', strokeWidth: 2.5 },
+        style: { stroke, strokeWidth: 2.5 },
         type: 'smoothstep',
       })
     }
   }
 
   return edges
-})
-
-// 중복 제거된 traces (model_id 유니크)
-const uniqueTraces = computed(() => {
-  if (!simResult.value?.traces) return []
-  const seen = new Set<string>()
-  return simResult.value.traces.filter(t => {
-    if (seen.has(t.model_id)) return false
-    seen.add(t.model_id)
-    return true
-  })
 })
 
 // timeline 내 중복 제거
@@ -250,13 +269,6 @@ function deduplicatedTimeline(day: number) {
     seen.add(e.model_id)
     return true
   })
-}
-
-// DAG 노드 클래스 (애니메이션 상태)
-function dagNodeClass(trace: SimulationTrace, idx: number) {
-  if (animationStep.value < 0) return 'idle'
-  if (idx <= animationStep.value) return trace.delta > 0.01 ? 'done-positive' : trace.delta < -0.01 ? 'done-negative' : 'done-neutral'
-  return 'idle'
 }
 
 // 최종 요약 테이블 데이터 (delta 크기 순 정렬)
@@ -302,6 +314,7 @@ async function loadSnapshot(date?: string) {
     // 결과 초기화
     simResult.value = null
     animationStep.value = -1
+    showZeroDeltaTraces.value = false
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -328,6 +341,7 @@ async function runSimulation() {
   isAnimating.value = true
   animationStep.value = -1
   simResult.value = null
+  showZeroDeltaTraces.value = false
   error.value = ''
 
   try {
@@ -340,6 +354,8 @@ async function runSimulation() {
       props.schemaId,
       `What-if @ ${selectedDate.value}`,
       interventions,
+      selectedDate.value,
+      props.filters,
     )
 
     // 애니메이션 시작 — trace를 0.5초 간격으로 하나씩 표시
@@ -620,8 +636,28 @@ function getColor(i: number): string {
         <!-- ① DAG 모델 체인 시각화 (VueFlow) -->
         <div class="dag-section">
           <h5>🔗 모델 체인 DAG ({{ simResult.propagation_waves }}단계 전파)</h5>
+          <div v-if="allDagTraces.length > 0" class="dag-toolbar">
+            <span class="dag-meta">
+              {{ visibleDagTraces.length }}개 표시 / {{ allDagTraces.length }}개 실행
+            </span>
+            <label v-if="zeroDeltaTraceCount > 0" class="dag-toggle">
+              <input v-model="showZeroDeltaTraces" type="checkbox" />
+              변화 없는 실행도 보기 ({{ zeroDeltaTraceCount }}건)
+            </label>
+          </div>
           <div class="dag-canvas">
+            <div v-if="dagEmptyMessage" class="dag-empty-state">
+              <p>{{ dagEmptyMessage }}</p>
+              <button
+                v-if="zeroDeltaTraceCount > 0 && !showZeroDeltaTraces"
+                class="dag-empty-btn"
+                @click="showZeroDeltaTraces = true"
+              >
+                변화 없는 실행 보기
+              </button>
+            </div>
             <VueFlow
+              v-else
               :nodes="dagNodes"
               :edges="dagEdges"
               :default-viewport="{ x: 10, y: 10, zoom: 0.85 }"
@@ -659,7 +695,7 @@ function getColor(i: number): string {
                   {{ entry.baseline_value.toFixed(2) }} → {{ entry.predicted_value.toFixed(2) }}
                 </span>
                 <span class="log-delta" :class="deltaClass(entry.delta)">
-                  {{ deltaIcon(entry.delta) }}{{ entry.pct_change > 0 ? '+' : '' }}{{ entry.pct_change.toFixed(1) }}%
+                  {{ Math.abs(entry.delta) <= 1e-6 ? '변화 없음 0.0%' : `${deltaIcon(entry.delta)}${entry.pct_change > 0 ? '+' : ''}${entry.pct_change.toFixed(1)}%` }}
                 </span>
               </div>
             </template>
@@ -806,12 +842,62 @@ function getColor(i: number): string {
 .dag-section {
   margin-bottom: 16px; background: var(--color-bg-secondary); border-radius: 10px; border: 1px solid var(--color-border); padding: 12px;
 }
+.dag-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin: -4px 0 10px;
+  flex-wrap: wrap;
+}
+.dag-meta {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+.dag-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--color-text);
+  cursor: pointer;
+  input { accent-color: #6366f1; }
+}
 .dag-canvas {
   height: 400px;
   border-radius: 10px;
   overflow: hidden;
   background: linear-gradient(135deg, rgba(15,15,35,0.6), rgba(20,20,50,0.4));
   border: 1px solid rgba(99,102,241,0.15);
+}
+.dag-empty-state {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  color: var(--color-text-muted);
+  p {
+    margin: 0;
+    max-width: 420px;
+    line-height: 1.5;
+  }
+}
+.dag-empty-btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(99,102,241,0.35);
+  background: rgba(99,102,241,0.16);
+  color: var(--color-text-bright);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  &:hover {
+    background: rgba(99,102,241,0.24);
+  }
 }
 .dag-canvas :deep(.vue-flow__node) {
   cursor: default;
