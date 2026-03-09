@@ -4,7 +4,7 @@
  * Step 3: 모델 학습 + Neo4j OntologyBehavior:Model 등록
  * - 기존 모델이 있으면 교체/추가 선택 다이얼로그
  */
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { whatifDomainApi, type ModelSpec, type TrainModelsResponse, type RegisteredModel } from '@/services/whatif-domain-api'
 
 const props = defineProps<{
@@ -27,7 +27,23 @@ const existingModels = ref<RegisteredModel[]>([])
 const showConfirmDialog = ref(false)
 const isCheckingExisting = ref(true)
 
+const hasPreparedTrainingInput = computed(() => {
+  return props.modelSpecs.length > 0 && props.featureViewSql.trim().length > 0
+})
+
+const missingTrainingInputMessage = computed(() => {
+  if (props.modelSpecs.length === 0) {
+    return '학습할 모델 구성이 없습니다. 먼저 `관계 발견`과 `모델 구성` 단계를 다시 실행해주세요.'
+  }
+  return '학습용 Feature View SQL이 비어 있습니다. `관계 발견` 단계부터 다시 실행해주세요.'
+})
+
 onMounted(async () => {
+  if (!hasPreparedTrainingInput.value) {
+    isCheckingExisting.value = false
+    return
+  }
+
   // 기존 모델 확인
   try {
     const status = await whatifDomainApi.getModelStatus(props.schemaId)
@@ -61,6 +77,11 @@ async function handleAddNew() {
 }
 
 async function trainModels() {
+  if (!hasPreparedTrainingInput.value) {
+    error.value = missingTrainingInputMessage.value
+    return
+  }
+
   isTraining.value = true
   error.value = ''
   try {
@@ -88,6 +109,10 @@ function confirmTraining() {
     <div class="step-header">
       <h4>⚙️ 모델 학습 및 Neo4j 등록</h4>
       <p class="step-desc">MindsDB AutoML로 모델을 학습하고, Neo4j 온톨로지에 OntologyBehavior:Model 노드와 READS_FIELD/PREDICTS_FIELD 관계를 등록합니다.</p>
+    </div>
+
+    <div v-if="!hasPreparedTrainingInput" class="warning-msg">
+      {{ missingTrainingInputMessage }}
     </div>
 
     <!-- 기존 모델 확인 다이얼로그 -->
@@ -197,6 +222,7 @@ function confirmTraining() {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .error-msg { padding: 12px; background: #fef2f2; border: 1px solid #fca5a5; border-radius: 8px; color: #dc2626; margin-bottom: 16px; }
+.warning-msg { padding: 12px; background: #fff7ed; border: 1px solid #fdba74; border-radius: 8px; color: #c2410c; margin-bottom: 16px; }
 
 .summary {
   display: flex; align-items: center; gap: 12px; margin-bottom: 16px;

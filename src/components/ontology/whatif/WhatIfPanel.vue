@@ -35,6 +35,7 @@ const steps = [
 
 const currentStep = ref(0)
 const loading = ref(false)
+const reusingExistingModels = ref(false)
 
 // 기존 학습된 모델 존재 여부
 const existingModelsCount = ref(0)
@@ -62,16 +63,24 @@ onMounted(async () => {
 })
 
 function reuseExistingModels() {
-  // 기존 모델 재사용 → 학습/등록 완료로 취급, 바로 시뮬레이션으로
+  // 기존 모델 재사용 → 스냅샷/시뮬레이션만 바로 허용
   showReuseDialog.value = false
-  trainResult.value = { success: true, mindsdb_available: false, models_registered: existingModelsCount.value, results: [] }
-  validationResult.value = { success: true, schema_id: props.schemaId, chain_length: 0, validated_count: 0, model_results: [], summary: { mean_r2: 0, mean_rmse: 0, all_valid: false } }
+  reusingExistingModels.value = true
+  trainResult.value = null
+  validationResult.value = null
   currentStep.value = 4 // 시뮬레이션 탭으로 바로 이동
 }
 
 function retrainModels() {
   // 처음부터 다시 학습
   showReuseDialog.value = false
+  reusingExistingModels.value = false
+  discoveredEdges.value = []
+  featureViewSql.value = ''
+  fieldDescriptions.value = {}
+  modelSpecs.value = []
+  trainResult.value = null
+  validationResult.value = null
   currentStep.value = 0
 }
 
@@ -90,12 +99,16 @@ const stepCompleted = computed(() => {
 function canGoToStep(idx: number): boolean {
   if (idx === 0) return true
   if (idx === 5) return true  // 모델 관리 탭은 항상 접근 가능
-  if (trainResult.value !== null && idx <= 4) return true
+  if (reusingExistingModels.value && idx === 4) return true
+  if (trainResult.value !== null && idx === 4) return true
   return stepCompleted.value[idx - 1]
 }
 
 function goToStep(idx: number) {
   if (canGoToStep(idx)) {
+    if (reusingExistingModels.value && idx < 4) {
+      reusingExistingModels.value = false
+    }
     currentStep.value = idx
   }
 }
@@ -108,27 +121,37 @@ function nextStep() {
 
 // Step 1 완료 핸들러
 function handleEdgesDiscovered(edges: EdgeCandidate[], sql: string, descs?: Record<string, string>) {
+  reusingExistingModels.value = false
   discoveredEdges.value = edges
   featureViewSql.value = sql
   if (descs) fieldDescriptions.value = descs
+  modelSpecs.value = []
+  trainResult.value = null
+  validationResult.value = null
   nextStep()
 }
 
 // Step 2 완료 핸들러
 function handleModelsBuilt(specs: ModelSpec[]) {
+  reusingExistingModels.value = false
   modelSpecs.value = specs
+  trainResult.value = null
+  validationResult.value = null
   nextStep()
 }
 
 // Step 3 완료 핸들러
 function handleModelsTrained(result: TrainModelsResponse) {
+  reusingExistingModels.value = false
   trainResult.value = result
   emit('models-updated', result.results)
+  validationResult.value = null
   nextStep()
 }
 
 // Step 4 완료 핸들러
 function handleValidated(result: ValidateResponse) {
+  reusingExistingModels.value = false
   validationResult.value = result
   nextStep()
 }
