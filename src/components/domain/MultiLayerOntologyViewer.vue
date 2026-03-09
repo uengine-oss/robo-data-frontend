@@ -257,14 +257,14 @@
       </div>
     </div>
 
-    <!-- 로딩 상태 -->
-    <div v-if="loading" class="loading-overlay">
+    <!-- 로딩 오버레이 (v-show로 컨텐츠 DOM을 유지하면서 표시) -->
+    <div v-show="loading" class="loading-overlay">
       <div class="loading-spinner"></div>
       <p>{{ loadingMessage }}</p>
     </div>
 
-    <!-- 메인 컨텐츠 -->
-    <div v-else class="viewer-content">
+    <!-- 메인 컨텐츠 (v-show로 전환하여 저장 시 Cytoscape DOM이 파괴되지 않도록 함) -->
+    <div v-show="!loading" class="viewer-content">
       <!-- 왼쪽: 레이어 패널 -->
       <div class="layer-panel" :class="{ 'layer-panel-collapsed': isLayerPanelCollapsed }">
         <h3 class="layer-panel-header">
