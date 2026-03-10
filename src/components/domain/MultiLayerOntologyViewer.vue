@@ -257,14 +257,14 @@
       </div>
     </div>
 
-    <!-- 로딩 상태 -->
-    <div v-if="loading" class="loading-overlay">
+    <!-- 로딩 오버레이 (v-show로 컨텐츠 DOM을 유지하면서 표시) -->
+    <div v-show="loading" class="loading-overlay">
       <div class="loading-spinner"></div>
       <p>{{ loadingMessage }}</p>
     </div>
 
-    <!-- 메인 컨텐츠 -->
-    <div v-else class="viewer-content">
+    <!-- 메인 컨텐츠 (v-show로 전환하여 저장 시 Cytoscape DOM이 파괴되지 않도록 함) -->
+    <div v-show="!loading" class="viewer-content">
       <!-- 왼쪽: 레이어 패널 -->
       <div class="layer-panel" :class="{ 'layer-panel-collapsed': isLayerPanelCollapsed }">
         <h3 class="layer-panel-header">
@@ -1069,81 +1069,87 @@
         <!-- 진행 상태 뷰어 (생성 중일 때) -->
         <div class="progress-viewer" v-else-if="generating">
           <div class="progress-header">
-            <h4>🤖 에이전트 진행 상태</h4>
-            <span class="progress-step">{{ currentStep }}</span>
-          </div>
-          
-          <!-- 레이어별 진행 상태 (BPMN 포함) -->
-          <div class="layer-progress-list">
-            <!-- BPMN 프로세스 추출 (PDF 입력 시 맨 위에 표시) -->
-            <div 
-              v-if="layerProgress['BPMN']"
-              class="layer-progress-item"
-              :class="layerProgress['BPMN']?.status || 'pending'"
-            >
-              <div class="layer-progress-header">
-                <span class="layer-icon" style="color: #8b5cf6">📐</span>
-                <span class="layer-name">BPMN 프로세스 추출</span>
-                <span class="layer-status-badge" :class="layerProgress['BPMN']?.status">
-                  {{ getStatusLabel(layerProgress['BPMN']?.status) }}
-                </span>
-              </div>
-              <div class="layer-progress-bar">
+            <div class="progress-title-row">
+              <h4>🤖 에이전트 진행 상태</h4>
+              <span class="progress-step-label">{{ currentStep }}</span>
+            </div>
+            <div class="progress-summary-bar">
+              <div class="summary-track">
                 <div 
-                  class="progress-fill" 
-                  :style="{ 
-                    width: (layerProgress['BPMN']?.progress || 0) + '%',
-                    backgroundColor: '#8b5cf6' 
-                  }"
+                  class="summary-fill" 
+                  :style="{ width: overallProgressPercent + '%' }"
                 ></div>
               </div>
-              <div class="layer-progress-info">
-                <span v-if="layerProgress['BPMN']?.nodesCount">
-                  {{ layerProgress['BPMN']?.nodesCount }} 프로세스 추출됨
-                </span>
-                <span v-if="layerProgress['BPMN']?.message" class="progress-message">
-                  {{ layerProgress['BPMN']?.message }}
+              <div class="summary-stats">
+                <span class="summary-percent">{{ overallProgressPercent }}%</span>
+                <span class="summary-detail">
+                  {{ completedLayerCount }}/{{ totalLayerCount }} 완료<template v-if="totalExtractedNodes > 0"> · {{ totalExtractedNodes }}개 추출</template>
                 </span>
               </div>
+            </div>
+          </div>
+          
+          <!-- 레이어별 진행 상태 (컴팩트 그리드) -->
+          <div class="layer-progress-list">
+            <!-- BPMN 프로세스 추출 -->
+            <div 
+              v-if="layerProgress['BPMN']"
+              class="layer-progress-row"
+              :class="layerProgress['BPMN']?.status || 'pending'"
+            >
+              <span class="lp-icon" style="color: #8b5cf6">📐</span>
+              <span class="lp-name">BPMN</span>
+              <div class="lp-bar-wrap">
+                <div class="lp-bar-track">
+                  <div 
+                    class="lp-bar-fill" 
+                    :style="{ width: (layerProgress['BPMN']?.progress || 0) + '%', backgroundColor: '#8b5cf6' }"
+                  ></div>
+                </div>
+              </div>
+              <span class="lp-badge" :class="layerProgress['BPMN']?.status">
+                {{ getStatusLabel(layerProgress['BPMN']?.status) }}
+              </span>
+              <span class="lp-detail" :title="layerProgress['BPMN']?.message || ''">
+                <template v-if="layerProgress['BPMN']?.nodesCount">{{ layerProgress['BPMN']?.nodesCount }}개</template>
+                <template v-if="layerProgress['BPMN']?.message"> · {{ layerProgress['BPMN']?.message }}</template>
+              </span>
             </div>
             <!-- 5개 온톨로지 레이어 -->
             <div 
               v-for="layer in layers" 
               :key="layer.id"
-              class="layer-progress-item"
+              class="layer-progress-row"
               :class="layerProgress[layer.id]?.status || 'pending'"
             >
-              <div class="layer-progress-header">
-                <span class="layer-icon" :style="{ color: layer.color }">{{ layer.icon }}</span>
-                <span class="layer-name">{{ layer.name }}</span>
-                <span class="layer-status-badge" :class="layerProgress[layer.id]?.status">
-                  {{ getStatusLabel(layerProgress[layer.id]?.status) }}
-                </span>
+              <span class="lp-icon" :style="{ color: layer.color }">{{ layer.icon }}</span>
+              <span class="lp-name">{{ layer.name }}</span>
+              <div class="lp-bar-wrap">
+                <div class="lp-bar-track">
+                  <div 
+                    class="lp-bar-fill" 
+                    :style="{ width: (layerProgress[layer.id]?.progress || 0) + '%', backgroundColor: layer.color }"
+                  ></div>
+                </div>
               </div>
-              <div class="layer-progress-bar">
-                <div 
-                  class="progress-fill" 
-                  :style="{ 
-                    width: (layerProgress[layer.id]?.progress || 0) + '%',
-                    backgroundColor: layer.color 
-                  }"
-                ></div>
-              </div>
-              <div class="layer-progress-info">
-                <span v-if="layerProgress[layer.id]?.nodesCount">
-                  {{ layerProgress[layer.id]?.nodesCount }} 노드 추출됨
-                </span>
-                <span v-if="layerProgress[layer.id]?.message" class="progress-message">
-                  {{ layerProgress[layer.id]?.message }}
-                </span>
-              </div>
+              <span class="lp-badge" :class="layerProgress[layer.id]?.status">
+                {{ getStatusLabel(layerProgress[layer.id]?.status) }}
+              </span>
+              <span class="lp-detail" :title="layerProgress[layer.id]?.message || ''">
+                <template v-if="layerProgress[layer.id]?.nodesCount">{{ layerProgress[layer.id]?.nodesCount }}개</template>
+                <template v-if="layerProgress[layer.id]?.message"> · {{ layerProgress[layer.id]?.message }}</template>
+              </span>
             </div>
           </div>
           
-          <!-- 생성 로그 -->
-          <div class="generation-logs">
-            <h4>📝 추출 로그</h4>
-            <div class="log-list" ref="logListRef">
+          <!-- 접이식 추출 로그 -->
+          <div class="generation-logs" :class="{ expanded: logsExpanded }">
+            <div class="logs-toggle" @click="logsExpanded = !logsExpanded">
+              <span class="logs-toggle-icon">{{ logsExpanded ? '▼' : '▶' }}</span>
+              <span class="logs-toggle-label">📝 추출 로그</span>
+              <span class="logs-count">{{ generationLogs.length }}건</span>
+            </div>
+            <div v-if="logsExpanded" class="log-list" ref="logListRef">
               <div v-for="(log, idx) in generationLogs" :key="idx" class="log-item" :class="log.type">
                 <span class="log-time">{{ log.time }}</span>
                 <span class="log-message">{{ log.message }}</span>
@@ -2042,6 +2048,29 @@ const layerProgress = ref<Record<string, {
   message?: string 
 }>>({})
 const logListRef = ref<HTMLElement | null>(null)
+const logsExpanded = ref(false)
+
+const allProgressKeys = computed(() => {
+  const keys = layers.map(l => l.id)
+  if (layerProgress.value['BPMN']) keys.unshift('BPMN')
+  return keys
+})
+
+const totalLayerCount = computed(() => allProgressKeys.value.length)
+
+const completedLayerCount = computed(() =>
+  allProgressKeys.value.filter(k => layerProgress.value[k]?.status === 'completed').length
+)
+
+const totalExtractedNodes = computed(() =>
+  allProgressKeys.value.reduce((sum, k) => sum + (layerProgress.value[k]?.nodesCount || 0), 0)
+)
+
+const overallProgressPercent = computed(() => {
+  if (totalLayerCount.value === 0) return 0
+  const total = allProgressKeys.value.reduce((sum, k) => sum + (layerProgress.value[k]?.progress || 0), 0)
+  return Math.round(total / totalLayerCount.value)
+})
 
 // Human-in-the-loop
 const pendingQuestion = ref<{
@@ -4356,7 +4385,9 @@ function handleFileSelect(event: Event) {
 function addLog(message: string, type: string = 'info') {
   const time = new Date().toLocaleTimeString()
   generationLogs.value.push({ time, message, type })
-  // Auto-scroll log list
+  if (type === 'error' || type === 'warning') {
+    logsExpanded.value = true
+  }
   nextTick(() => {
     if (logListRef.value) {
       logListRef.value.scrollTop = logListRef.value.scrollHeight
@@ -4376,6 +4407,60 @@ function getStatusLabel(status?: string): string {
   return labels[status || 'pending'] || status || '대기'
 }
 
+function isCompletionLikeMessage(message?: string): boolean {
+  return /완료|성공|즉시 반환/.test(message || '')
+}
+
+function isFailureLikeMessage(message?: string): boolean {
+  return /실패|오류/.test(message || '')
+}
+
+function resolveLayerEventStatus(
+  layer: string,
+  progress?: number,
+  message?: string,
+  explicitStatus?: string
+): string {
+  const previousStatus = layerProgress.value[layer]?.status
+
+  if (explicitStatus) return explicitStatus
+  if (previousStatus === 'completed') return 'completed'
+  if (isFailureLikeMessage(message)) return 'failed'
+  if ((progress ?? 0) >= 100 || isCompletionLikeMessage(message)) return 'completed'
+
+  return 'running'
+}
+
+function normalizeStepMessage(message?: string): string {
+  return (message || '').replace(/^\[[^\]]+\]\s*/, '').trim()
+}
+
+function updateCurrentStepForLayer(
+  layer: string,
+  status: string,
+  message?: string
+) {
+  const normalized = normalizeStepMessage(message)
+
+  switch (status) {
+    case 'completed':
+      currentStep.value = `${layer} 레이어 완료`
+      break
+    case 'failed':
+      currentStep.value = `${layer} 레이어 실패`
+      break
+    case 'needs_info':
+      currentStep.value = `${layer} 추가 정보 필요`
+      break
+    case 'searching':
+      currentStep.value = `${layer} 웹 검색 중`
+      break
+    default:
+      currentStep.value = normalized || `${layer} 레이어 처리 중`
+      break
+  }
+}
+
 function resetProgress() {
   layers.forEach(layer => {
     layerProgress.value[layer.id] = {
@@ -4385,6 +4470,8 @@ function resetProgress() {
   })
   generationLogs.value = []
   currentStep.value = ''
+  logsExpanded.value = false
+  isSearchingWeb.value = false
   pendingQuestion.value = null
   userResponse.value = ''
 }
@@ -4394,6 +4481,9 @@ function skipQuestion() {
   if (generateForm.value.enableWebSearch) {
     // Web search will be triggered
     addLog(`${pendingQuestion.value?.layer} 레이어 - 웹 검색으로 대체`, 'search')
+    if (pendingQuestion.value?.layer) {
+      currentStep.value = `${pendingQuestion.value.layer} 웹 검색 준비`
+    }
   }
   pendingQuestion.value = null
   userResponse.value = ''
@@ -4402,6 +4492,7 @@ function skipQuestion() {
 function submitAnswer() {
   if (pendingQuestion.value && userResponse.value.trim()) {
     addLog(`${pendingQuestion.value.layer} 레이어 - 사용자 응답 제출됨`, 'success')
+    currentStep.value = `${pendingQuestion.value.layer} 응답 반영 중`
     // The answer will be processed by the streaming handler
   }
   pendingQuestion.value = null
@@ -4414,6 +4505,7 @@ function cancelGeneration() {
     abortController = null
   }
   generating.value = false
+  currentStep.value = '생성 취소됨'
   addLog('사용자에 의해 취소됨', 'warning')
 }
 
@@ -6946,21 +7038,38 @@ function handleStreamEvent(event: any) {
       break
       
     case 'layer_progress':
+      {
+      const status = resolveLayerEventStatus(event.layer, event.progress, event.message)
+      const previous = layerProgress.value[event.layer]
+      const hasNewCompletion = status === 'completed' && previous?.status !== 'completed'
       layerProgress.value[event.layer] = {
-        status: 'running',
-        progress: event.progress,
+        status,
+        progress: status === 'completed' ? 100 : Math.max(0, Math.min(100, event.progress || 0)),
+        nodesCount: previous?.nodesCount,
         message: event.message
       }
-      addLog(`[${event.layer}] ${event.message}`, 'info')
+      updateCurrentStepForLayer(event.layer, status, event.message)
+      addLog(
+        `[${event.layer}] ${event.message}`,
+        hasNewCompletion ? 'success' : status === 'failed' ? 'error' : 'info'
+      )
+      }
       break
       
     case 'layer_complete':
+      {
+      const previous = layerProgress.value[event.layer]
       layerProgress.value[event.layer] = {
         status: 'completed',
         progress: 100,
-        nodesCount: event.nodeCount
+        nodesCount: event.nodeCount,
+        message: `${event.nodeCount}개 노드 추출 완료`
       }
-      addLog(`[${event.layer}] 완료 - ${event.nodeCount}개 노드 추출`, 'success')
+      updateCurrentStepForLayer(event.layer, 'completed')
+      if (previous?.status !== 'completed' || previous?.nodesCount !== event.nodeCount) {
+        addLog(`[${event.layer}] 완료 - ${event.nodeCount}개 노드 추출`, 'success')
+      }
+      }
       break
       
     case 'needs_info':
@@ -6970,6 +7079,7 @@ function handleStreamEvent(event: any) {
         progress: 50,
         message: '추가 정보 필요'
       }
+      updateCurrentStepForLayer(event.layer, 'needs_info')
       pendingQuestion.value = {
         layer: event.layer,
         question: event.question,
@@ -6987,11 +7097,13 @@ function handleStreamEvent(event: any) {
         progress: 60,
         message: '웹 검색 중...'
       }
+      updateCurrentStepForLayer(event.layer, 'searching')
       addLog(`[${event.layer}] 웹에서 정보 검색 중...`, 'search')
       break
       
     case 'web_search_complete':
       isSearchingWeb.value = false
+      currentStep.value = `${event.layer} 웹 검색 완료`
       addLog(`[${event.layer}] 웹 검색 완료 - ${event.resultsCount}개 결과`, 'success')
       break
       
@@ -7050,6 +7162,7 @@ function handleStreamEvent(event: any) {
       break
       
     case 'error':
+      currentStep.value = '생성 오류'
       addLog(`오류: ${event.message}`, 'error')
       generateError.value = event.message || '온톨로지 생성 중 오류가 발생했습니다.'
       // Mark all running layers as failed
@@ -10024,6 +10137,7 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 .generate-dialog.dialog-expanded {
   width: 750px;
+  max-height: 90vh;
 }
 
 /* 온톨로지 삭제 확인 다이얼로그 */
@@ -10434,141 +10548,243 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 /* Progress viewer */
 .progress-viewer {
-  padding: 20px;
+  flex: 1;
+  min-height: 0;
+  padding: 16px 20px;
   border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .progress-header {
+  flex-shrink: 0;
+  margin-bottom: 14px;
+}
+
+.progress-title-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
 .progress-header h4 {
   margin: 0;
   font-size: 0.9375rem;
   color: var(--color-text-bright);
+  flex-shrink: 0;
 }
 
-.progress-step {
-  padding: 4px 12px;
-  background: var(--color-accent);
-  color: white;
-  border-radius: 12px;
+.progress-step-label {
   font-size: 0.75rem;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.layer-progress-list {
+.progress-summary-bar {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 6px;
 }
 
-.layer-progress-item {
-  background: var(--color-bg-tertiary);
-  border-radius: var(--radius-md);
-  padding: 12px;
-  border-left: 3px solid var(--color-border);
+.summary-track {
+  height: 6px;
+  background: var(--color-bg-hover);
+  border-radius: 3px;
+  overflow: hidden;
 }
 
-.layer-progress-item.running {
-  border-left-color: var(--color-accent);
+.summary-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-success));
+  transition: width 0.4s ease;
 }
 
-.layer-progress-item.completed {
-  border-left-color: var(--color-success);
-}
-
-.layer-progress-item.needs_info {
-  border-left-color: var(--color-warning);
-}
-
-.layer-progress-item.searching {
-  border-left-color: #06b6d4;
-}
-
-.layer-progress-item.failed {
-  border-left-color: var(--color-error);
-}
-
-.layer-progress-header {
+.summary-stats {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
+  font-size: 0.75rem;
 }
 
-.layer-progress-header .layer-icon {
-  font-size: 1rem;
+.summary-percent {
+  font-weight: 700;
+  font-size: 0.8125rem;
+  color: var(--color-accent);
+  min-width: 32px;
 }
 
-.layer-progress-header .layer-name {
+.summary-detail {
+  color: var(--color-text-muted);
+}
+
+/* Compact layer progress rows — CSS Grid for perfect alignment */
+.layer-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
   flex: 1;
-  font-weight: 500;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.layer-progress-row {
+  display: grid;
+  grid-template-columns: 22px 68px 1fr 58px minmax(0, 130px);
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.layer-progress-row.running {
+  border-left-color: var(--color-accent);
+  background: rgba(34, 139, 230, 0.06);
+}
+
+.layer-progress-row.completed {
+  border-left-color: var(--color-success);
+  opacity: 0.8;
+}
+
+.layer-progress-row.needs_info {
+  border-left-color: var(--color-warning);
+  background: rgba(250, 176, 5, 0.06);
+}
+
+.layer-progress-row.searching {
+  border-left-color: #06b6d4;
+  background: rgba(6, 182, 212, 0.06);
+}
+
+.layer-progress-row.failed {
+  border-left-color: var(--color-error);
+  background: rgba(250, 82, 82, 0.06);
+}
+
+.lp-icon {
   font-size: 0.875rem;
+  text-align: center;
+  line-height: 1;
+}
+
+.lp-name {
+  font-weight: 600;
+  font-size: 0.8125rem;
   color: var(--color-text-bright);
-}
-
-.layer-status-badge {
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 0.6875rem;
-  text-transform: uppercase;
-}
-
-.layer-status-badge.pending { background: var(--color-bg-hover); color: var(--color-text-muted); }
-.layer-status-badge.running { background: rgba(34, 139, 230, 0.15); color: var(--color-accent); }
-.layer-status-badge.completed { background: rgba(64, 192, 87, 0.15); color: var(--color-success); }
-.layer-status-badge.needs_info { background: rgba(250, 176, 5, 0.15); color: var(--color-warning); }
-.layer-status-badge.searching { background: rgba(6, 182, 212, 0.15); color: #06b6d4; }
-.layer-status-badge.failed { background: rgba(250, 82, 82, 0.15); color: var(--color-error); }
-
-.layer-progress-bar {
-  height: 4px;
-  background: var(--color-bg-hover);
-  border-radius: 2px;
+  white-space: nowrap;
   overflow: hidden;
-  margin-bottom: 4px;
+  text-overflow: ellipsis;
 }
 
-.progress-fill {
+.lp-bar-wrap {
+  min-width: 0;
+}
+
+.lp-bar-track {
+  height: 5px;
+  background: var(--color-bg-hover);
+  border-radius: 2.5px;
+  overflow: hidden;
+}
+
+.lp-bar-fill {
   height: 100%;
-  border-radius: 2px;
+  border-radius: 2.5px;
   transition: width 0.3s ease;
 }
 
-.layer-progress-info {
-  font-size: 0.75rem;
+.lp-badge {
+  padding: 2px 0;
+  border-radius: 10px;
+  font-size: 0.6875rem;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.lp-badge.pending { background: var(--color-bg-hover); color: var(--color-text-muted); }
+.lp-badge.running { background: rgba(34, 139, 230, 0.15); color: var(--color-accent); }
+.lp-badge.completed { background: rgba(64, 192, 87, 0.15); color: var(--color-success); }
+.lp-badge.needs_info { background: rgba(250, 176, 5, 0.15); color: var(--color-warning); }
+.lp-badge.searching { background: rgba(6, 182, 212, 0.15); color: #06b6d4; }
+.lp-badge.failed { background: rgba(250, 82, 82, 0.15); color: var(--color-error); }
+
+.lp-detail {
+  font-size: 0.6875rem;
   color: var(--color-text-muted);
-  display: flex;
-  gap: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.progress-message {
-  color: var(--color-text-light);
-}
-
-/* Generation logs */
+/* Collapsible generation logs */
 .generation-logs {
-  padding: 12px;
+  flex-shrink: 0;
   border-top: 1px solid var(--color-border);
   background: var(--color-bg);
-  max-height: 150px;
-  overflow-y: auto;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  margin-top: auto;
+  padding-top: 0;
+}
+
+.logs-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease;
   border-radius: 0 0 var(--radius-md) var(--radius-md);
 }
 
-.generation-logs h4 {
-  margin: 0 0 8px;
-  font-size: 0.75rem;
+.logs-toggle:hover {
+  background: var(--color-bg-hover);
+}
+
+.logs-toggle-icon {
+  font-size: 0.5625rem;
   color: var(--color-text-muted);
 }
 
-.log-list {
+.logs-toggle-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.logs-count {
+  font-size: 0.6875rem;
+  color: var(--color-text-light);
+  margin-left: auto;
+  background: var(--color-bg-tertiary);
+  padding: 1px 8px;
+  border-radius: 8px;
+}
+
+.generation-logs.expanded .logs-toggle {
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+}
+
+.generation-logs .log-list {
   font-family: var(--font-mono);
   font-size: 0.6875rem;
+  max-height: min(22vh, 160px);
+  overflow-y: auto;
+  padding: 6px 12px 8px;
 }
 
 .log-item {

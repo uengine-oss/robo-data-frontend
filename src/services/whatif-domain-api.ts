@@ -425,12 +425,16 @@ export const whatifDomainApi = {
   async simulate(
     schemaId: string,
     scenarioName: string,
-    interventions: Array<{ nodeId: string; field: string; value: number; description?: string }>
+    interventions: Array<{ nodeId: string; field: string; value: number; description?: string }>,
+    snapshotDate?: string,
+    filters?: Record<string, Record<string, unknown>>
   ): Promise<SimulateResponse> {
     return apiPost('/simulate', {
       schema_id: schemaId,
       scenario_name: scenarioName,
       interventions,
+      snapshot_date: snapshotDate ?? null,
+      filters: filters ?? null,
     })
   },
 
