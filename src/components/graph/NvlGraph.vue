@@ -124,6 +124,7 @@ const pendingNodeCount = ref(0)
 const totalNodeCount = ref(0)        // 전체 노드 수
 const hiddenNodeCount = ref(0)       // 숨겨진 노드 수 (limit 초과)
 const isLimitApplied = ref(false)    // limit 적용 여부
+const showAllMode = ref(false)       // 전체 보기 모드 (limit 무시)
 const displayedRelationshipCount = ref(0)  // 표시된 관계 수
 
 // 통계 데이터
@@ -310,25 +311,27 @@ function toNvlRelationship(link: GraphData['links'][0], isSelected: boolean = fa
  */
 function updateNodeStats(): void {
   const stats = new Map<string, NodeStat>()
-  
+
   // 전체 props.graphData에서 통계 계산 (limit 적용 전)
+  // 다중 라벨 노드는 각 라벨별로 카운트 (Method+Command → Method +1, Command +1)
   for (const node of props.graphData.nodes) {
     const labels = node.labels || []
-    const primaryLabel = labels[0] || '_Placeholder'
-    
-    if (primaryLabel === '_Placeholder') continue
-    
-    const existing = stats.get(primaryLabel)
-    if (existing) {
-      existing.count++
-    } else {
-      stats.set(primaryLabel, { 
-        count: 1, 
-        color: getNodeColor(labels)
-      })
+    if (labels.length === 0) continue
+
+    for (const label of labels) {
+      if (label === '_Placeholder') continue
+      const existing = stats.get(label)
+      if (existing) {
+        existing.count++
+      } else {
+        stats.set(label, {
+          count: 1,
+          color: getNodeColor([label])
+        })
+      }
     }
   }
-  
+
   nodeStats.value = stats
 }
 
@@ -469,21 +472,21 @@ function syncGraphData(data: GraphData): { newNodes: NvlNode[]; newRels: NvlRela
   
   // 전체 노드 수 저장
   totalNodeCount.value = data.nodes.length
-  
-  // 확장된 노드가 있으면 limit 무시
-  const shouldIgnoreLimit = expandedNodeId.value !== null
-  
-  // 노드 limit 적용 (props.maxNodes 사용, 확장 모드에서는 무시)
+
+  // 확장된 노드가 있거나 showAll 모드면 limit 무시
+  const shouldIgnoreLimit = expandedNodeId.value !== null || showAllMode.value
+
+  // 노드 limit 적용 (props.maxNodes 사용, limit 무시 모드에서는 전체 표시)
   const maxDisplayNodes = shouldIgnoreLimit ? data.nodes.length : (props.maxNodes || DEFAULT_MAX_NODES)
-  
+
   // 라벨 필터 적용 후 limit 적용
   const filteredNodes = data.nodes.filter(n => matchesLabelFilter(n))
   const limitedNodes = filteredNodes.slice(0, maxDisplayNodes)
-  
+
   // 숨겨진 노드 제외
   const visibleNodes = limitedNodes.filter(n => !hiddenNodeIds.has(n.id))
   const displayedNodeIds = new Set(visibleNodes.map(n => n.id))
-  
+
   hiddenNodeCount.value = shouldIgnoreLimit ? 0 : Math.max(0, data.nodes.length - maxDisplayNodes)
   isLimitApplied.value = shouldIgnoreLimit ? false : (data.nodes.length > maxDisplayNodes)
   
@@ -1102,19 +1105,26 @@ watch(() => props.graphData, (newData) => {
   }
 }, { deep: true })
 
+// limit/필터 변경 → 재렌더링 (debounce로 이중 트리거 방지)
+let _rerenderTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleRerender() {
+  if (_rerenderTimer) clearTimeout(_rerenderTimer)
+  _rerenderTimer = setTimeout(() => {
+    _rerenderTimer = null
+    if (props.graphData.nodes.length > 0) {
+      resetGraph()
+      initNvl()
+    }
+  }, 0)
+}
+
 watch(() => props.maxNodes, () => {
-  if (props.graphData.nodes.length > 0) {
-    resetGraph()
-    initNvl()
-  }
+  showAllMode.value = false
+  scheduleRerender()
 })
 
-// 라벨 필터 변경 시 그래프 재렌더링
 watch(() => props.labelFilters, () => {
-  if (props.graphData.nodes.length > 0) {
-    resetGraph()
-    initNvl()
-  }
+  scheduleRerender()
 }, { deep: true })
 
 watch([() => props.selectedNodeId, () => props.selectedRelationshipId], ([newNodeId, newRelId], [oldNodeId, oldRelId]) => {
@@ -1327,8 +1337,17 @@ function filterToNode(nodeId: string, depth: number = 1): void {
   })
 }
 
+/**
+ * 전체 보기 모드 — limit 무시하고 전체 노드 표시
+ */
+function showAll(): void {
+  showAllMode.value = true
+  scheduleRerender()
+}
+
 defineExpose({
   resetGraph,
+  showAll,
   updateGraph,
   updateNodeStyles,
   expandNodeChildren: expandNode,

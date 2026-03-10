@@ -393,29 +393,19 @@ export interface DetectTypesResponse {
 }
 
 export const roboApi = {
-  /**
-   * 파일 내용을 분석하여 소스 코드 타입 자동 감지
-   * 
-   * Request Body:
-   *   files: [{ fileName: string, content: string }, ...]
-   * 
-   * Response: JSON
-   *   files: [{ fileName, fileType, confidence, details, suggestedStrategy, suggestedTarget }, ...]
-   *   summary: { total, byType, suggestedStrategy, suggestedTarget }
-   */
-  async detectTypes(files: FileContentForDetection[]): Promise<DetectTypesResponse> {
-    const response = await fetch(`${ROBO_BASE_URL}/detect-types/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ files })
-    })
-    
-    if (!response.ok) {
-      await handleHttpError(response)
-    }
-    
-    return response.json()
-  },
+  // [주석] /detect-types/ 엔드포인트 삭제 예정
+  // /**
+  //  * 파일 내용을 분석하여 소스 코드 타입 자동 감지
+  //  */
+  // async detectTypes(files: FileContentForDetection[]): Promise<DetectTypesResponse> {
+  //   const response = await fetch(`${ROBO_BASE_URL}/detect-types/`, {
+  //     method: 'POST',
+  //     headers: { 'Content-Type': 'application/json' },
+  //     body: JSON.stringify({ files })
+  //   })
+  //   if (!response.ok) await handleHttpError(response)
+  //   return response.json()
+  // },
 
   /**
    * 소스 파일 분석 → Neo4j 그래프 생성

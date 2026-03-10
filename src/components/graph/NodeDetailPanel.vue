@@ -217,9 +217,9 @@ const showSearchResults = computed(() => {
   return query.length > 0 && isSearchFocused.value
 })
 
-/** limit 적용 여부 (isLimitApplied 또는 totalNodes > displayedNodes로 판단) */
+/** limit 적용 여부 */
 const showLimitWarning = computed(() => {
-  return props.isLimitApplied || (props.totalNodes > props.displayedNodes && props.displayedNodes >= props.maxDisplayNodes)
+  return props.isLimitApplied
 })
 
 // ============================================================================
@@ -522,8 +522,8 @@ function getNodeSubInfo(node: GraphNode): string {
             </div>
           </div>
           <!-- 전체 보기 버튼 (필터링된 상태에서만 표시) -->
-          <button 
-            v-if="displayedNodes < totalNodes"
+          <button
+            v-if="isLimitApplied || activeFilters.length > 0"
             class="reset-graph-btn"
             @click="emit('reset-graph')"
             title="전체 그래프 다시 로드"

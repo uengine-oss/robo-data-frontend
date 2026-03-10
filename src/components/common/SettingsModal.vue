@@ -10,17 +10,18 @@
  */
 
 import { ref, computed, watch } from 'vue'
-import { useSessionStore } from '@/stores/session'
+import { useSessionStore, type ApiProvider } from '@/stores/session'
 import { useProjectStore } from '@/stores/project'
 import { storeToRefs } from 'pinia'
-import { 
-  IconSettings, 
-  IconX, 
-  IconBarChart, 
+import {
+  IconSettings,
+  IconX,
+  IconBarChart,
   IconAlertTriangle,
   IconRefresh,
   IconTrash,
-  IconEdit
+  IconEdit,
+  IconKey
 } from '@/components/icons'
 import { getAppTitle, setAppTitle, DEFAULT_APP_TITLE } from '@/config/appSettings'
 
@@ -45,7 +46,7 @@ const emit = defineEmits<{
 const sessionStore = useSessionStore()
 const projectStore = useProjectStore()
 
-const { theme: storeTheme } = storeToRefs(sessionStore)
+const { theme: storeTheme, apiKey: storeApiKey, apiProvider: storeApiProvider } = storeToRefs(sessionStore)
 const { graphData } = storeToRefs(projectStore)
 
 // ============================================================================
@@ -64,11 +65,16 @@ const tempTheme = ref<'dark' | 'light'>('dark')
 /** 앱 타이틀 */
 const tempAppTitle = ref(DEFAULT_APP_TITLE)
 
+/** LLM API Key */
+const tempApiKey = ref('')
+const tempApiProvider = ref<ApiProvider>('openai')
+const showApiKey = ref(false)
+
 /** 변경 여부 */
 const hasChanges = ref(false)
 
 /** 활성 설정 섹션 */
-const activeSection = ref<'general' | 'display' | 'danger'>('general')
+const activeSection = ref<'general' | 'api' | 'display' | 'danger'>('general')
 
 // ============================================================================
 // Computed
@@ -117,7 +123,11 @@ function handleSaveAndApply() {
   
   // 테마 저장
   sessionStore.setTheme(tempTheme.value)
-  
+
+  // API Key 저장
+  sessionStore.setApiKey(tempApiKey.value)
+  sessionStore.setApiProvider(tempApiProvider.value)
+
   // 이벤트 발생
   emit('update:nodeLimit', tempNodeLimit.value)
   emit('update:umlDepth', tempUmlDepth.value)
@@ -136,7 +146,7 @@ function handleSaveAndApply() {
 // ============================================================================
 
 // 값 변경 감지 (저장 버튼 활성화용)
-watch([tempNodeLimit, tempUmlDepth, tempAppTitle, tempTheme], () => {
+watch([tempNodeLimit, tempUmlDepth, tempAppTitle, tempTheme, tempApiKey, tempApiProvider], () => {
   if (props.isOpen) {
     hasChanges.value = true
   }
@@ -163,6 +173,10 @@ watch(() => props.isOpen, (isOpen) => {
     }
     // 앱 타이틀 로드
     tempAppTitle.value = getAppTitle()
+    // API Key 로드
+    tempApiKey.value = storeApiKey.value
+    tempApiProvider.value = storeApiProvider.value
+    showApiKey.value = false
   }
 })
 </script>
@@ -196,7 +210,14 @@ watch(() => props.isOpen, (isOpen) => {
                 <IconEdit :size="16" />
                 일반 설정
               </button>
-              <button 
+              <button
+                :class="{ active: activeSection === 'api' }"
+                @click="activeSection = 'api'"
+              >
+                <IconKey :size="16" />
+                API Key
+              </button>
+              <button
                 :class="{ active: activeSection === 'display' }"
                 @click="activeSection = 'display'"
               >
@@ -235,6 +256,72 @@ watch(() => props.isOpen, (isOpen) => {
                       class="title-input"
                     />
                   </div>
+                </div>
+              </div>
+
+              <!-- API Key 설정 -->
+              <div v-if="activeSection === 'api'" class="settings-section">
+                <h3>API Key 설정</h3>
+
+                <div class="setting-item">
+                  <div class="setting-label">
+                    <span class="label-text">LLM Provider</span>
+                    <span class="label-desc">
+                      사용할 LLM API 제공자를 선택합니다.
+                    </span>
+                  </div>
+                  <div class="setting-control provider-control">
+                    <button
+                      class="provider-btn"
+                      :class="{ active: tempApiProvider === 'openai' }"
+                      @click="tempApiProvider = 'openai'"
+                    >
+                      OpenAI
+                    </button>
+                    <button
+                      class="provider-btn"
+                      :class="{ active: tempApiProvider === 'anthropic' }"
+                      @click="tempApiProvider = 'anthropic'"
+                    >
+                      Anthropic
+                    </button>
+                  </div>
+                </div>
+
+                <div class="setting-item">
+                  <div class="setting-label">
+                    <span class="label-text">API Key</span>
+                    <span class="label-desc">
+                      {{ tempApiProvider === 'openai' ? 'OpenAI' : 'Anthropic' }} API Key를 입력합니다.
+                      입력하지 않으면 서버 환경변수의 키를 사용합니다.
+                    </span>
+                  </div>
+                  <div class="setting-control api-key-control">
+                    <div class="api-key-input-wrapper">
+                      <input
+                        :type="showApiKey ? 'text' : 'password'"
+                        v-model="tempApiKey"
+                        :placeholder="tempApiProvider === 'openai' ? 'sk-...' : 'sk-ant-...'"
+                        class="api-key-input"
+                      />
+                      <button
+                        class="toggle-visibility-btn"
+                        @click="showApiKey = !showApiKey"
+                        type="button"
+                      >
+                        {{ showApiKey ? '숨기기' : '보기' }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="tempApiKey" class="api-key-status">
+                  <span class="status-dot status-set"></span>
+                  <span>API Key가 설정되어 있습니다</span>
+                </div>
+                <div v-else class="api-key-status">
+                  <span class="status-dot status-unset"></span>
+                  <span>API Key 미설정 (서버 환경변수 사용)</span>
                 </div>
               </div>
 
@@ -707,6 +794,121 @@ watch(() => props.isOpen, (isOpen) => {
   font-size: 14px;
   font-weight: 500;
   color: var(--color-text);
+}
+
+// ============================================================================
+// API Key 설정
+// ============================================================================
+
+.provider-control {
+  display: flex;
+  gap: 8px;
+}
+
+.provider-btn {
+  padding: 8px 20px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+
+  &:hover {
+    border-color: var(--color-accent);
+    background: var(--color-bg-tertiary);
+  }
+
+  &.active {
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+    color: white;
+  }
+}
+
+.api-key-control {
+  flex-direction: column;
+  align-items: stretch !important;
+}
+
+.api-key-input-wrapper {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+
+  .api-key-input {
+    flex: 1;
+    width: auto !important;
+    max-width: none !important;
+    padding: 10px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    color: var(--color-text-bright);
+    background: var(--color-bg);
+    transition: all 0.15s;
+
+    &:focus {
+      outline: none;
+      border-color: var(--color-accent);
+      box-shadow: 0 0 0 3px rgba(34, 139, 230, 0.15);
+    }
+
+    &::placeholder {
+      color: var(--color-text-light);
+      opacity: 0.5;
+    }
+  }
+
+  .toggle-visibility-btn {
+    flex-shrink: 0;
+    padding: 8px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-light);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+
+    &:hover {
+      border-color: var(--color-accent);
+      color: var(--color-accent);
+    }
+  }
+}
+
+.api-key-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  font-size: 12px;
+  color: var(--color-text-light);
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .status-set {
+    background: #22c55e;
+    box-shadow: 0 0 6px rgba(34, 197, 94, 0.4);
+  }
+
+  .status-unset {
+    background: var(--color-text-light);
+    opacity: 0.5;
+  }
 }
 
 // ============================================================================

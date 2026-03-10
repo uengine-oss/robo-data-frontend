@@ -392,7 +392,7 @@ function handleSearchSelect(node: GraphNode): void {
   const directory = getDirectory(node)
   const className = getClassName(node)
   
-  if (!directory || !className) return
+  if (!className) return
   
   if (activeView.value === 'uml') {
     const exists = selectedClasses.value.some(
@@ -466,15 +466,10 @@ function handleClearFilters(): void {
  * 전체 그래프 다시 로드 (필터 초기화)
  */
 function handleResetGraph(): void {
-  // 선택 초기화
   selectedNode.value = null
   selectedRelationship.value = null
   labelFilters.value = []
-  
-  // NvlGraph 리셋
-  if (nvlGraphRef.value) {
-    nvlGraphRef.value.resetGraph?.()
-  }
+  nvlGraphRef.value?.showAll?.()
 }
 
 function handleNodeDelete(nodeId: string): void {
@@ -672,7 +667,7 @@ watch(hasGraph, (has, prev) => {
       
       <!-- 플로팅: 우측 패널 토글 (그래프 뷰에서만) -->
       <button 
-        v-if="!showNodePanel && activeView === 'graph'"
+        v-if="!showNodePanel && (activeView === 'graph' || activeView === 'uml')"
         class="panel-toggle right"
         @click="showNodePanel = !showNodePanel"
       >
@@ -748,7 +743,7 @@ watch(hasGraph, (has, prev) => {
     <Transition name="slide-right">
       <div 
         class="floating-panel right" 
-        v-if="showNodePanel && activeView === 'graph'" 
+        v-if="showNodePanel && (activeView === 'graph' || activeView === 'uml')"
         :style="{ width: `${panelWidth}px` }"
       >
         <div class="panel-header">

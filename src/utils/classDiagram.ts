@@ -16,7 +16,7 @@ import type { GraphNode, GraphLink } from '@/types'
 export const CLASS_LABELS = ['CLASS', 'Class', 'INTERFACE', 'Interface', 'ENUM', 'Enum']
 
 /** 클래스 관계 타입 */
-export const CLASS_RELATION_TYPES = ['EXTENDS', 'IMPLEMENTS', 'ASSOCIATION', 'COMPOSITION', 'DEPENDENCY']
+export const CLASS_RELATION_TYPES = ['EXTENDS', 'IMPLEMENTS', 'ASSOCIATION', 'AGGREGATION', 'COMPOSITION', 'DEPENDENCY']
 
 /** 소유 관계 타입 (상속 체인 필터링에 사용) */
 export const OWNERSHIP_TYPES = new Set(['COMPOSITION', 'ASSOCIATION'])
@@ -128,7 +128,9 @@ export function getClassName(node: GraphNode): string {
  * GraphNode에서 디렉토리 추출
  */
 export function getDirectory(node: GraphNode): string {
-  return (node.properties?.directory as string) || ''
+  return (node.properties?.directory as string)
+    || (node.properties?.package_name as string)
+    || ''
 }
 
 /**
@@ -494,7 +496,7 @@ export function isConstructorNode(node: GraphNode): boolean {
 }
 
 /**
- * PARENT_OF 관계를 통해 클래스별 필드/메서드 맵 생성
+ * HAS_FIELD / HAS_METHOD 관계를 통해 클래스별 필드/메서드 맵 생성
  */
 export function buildClassMembersMap(
   nodes: GraphNode[],
@@ -503,9 +505,10 @@ export function buildClassMembersMap(
   const map = new Map<string, { fields: GraphNode[]; methods: GraphNode[] }>()
   const nodeMap = new Map(nodes.map(n => [n.id, n]))
   
-  // PARENT_OF 관계 처리
+  // HAS_FIELD / HAS_METHOD 관계 처리
   for (const link of links) {
-    if (link.type !== 'PARENT_OF') continue
+    const type = (link.type || '').toUpperCase()
+    if (type !== 'HAS_FIELD' && type !== 'HAS_METHOD') continue
     
     const parentNode = nodeMap.get(link.source)
     const childNode = nodeMap.get(link.target)
@@ -519,9 +522,9 @@ export function buildClassMembersMap(
       map.set(parentNode.id, members)
     }
     
-    if (isFieldNode(childNode)) {
+    if (type === 'HAS_FIELD' && isFieldNode(childNode)) {
       members.fields.push(childNode)
-    } else if (isMethodNode(childNode)) {
+    } else if (type === 'HAS_METHOD' && isMethodNode(childNode)) {
       members.methods.push(childNode)
     }
   }

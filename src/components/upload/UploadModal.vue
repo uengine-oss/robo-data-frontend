@@ -251,13 +251,12 @@ watch(files, (newFiles) => {
   }
 }, { deep: true })
 
-// 유효성 검사
-const isValid = computed(() => hasFiles.value && !!selectedDatasource.value)
+// 유효성 검사: 파일만 있으면 업로드 가능하도록 변경
+const isValid = computed(() => hasFiles.value)
 
 // 유효성 오류 메시지
 const validationError = computed(() => {
   if (!hasFiles.value) return '파일을 추가해주세요'
-  if (!selectedDatasource.value) return '타겟 데이터 소스를 선택해주세요'
   return ''
 })
 

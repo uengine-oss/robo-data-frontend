@@ -115,74 +115,45 @@ const handleFilesDrop = async (files: File[]) => {
   showModal.value = true
   
   try {
-    // 분석 대상 파일만 필터링 (확장자 기준)
-    const analyzableFiles = files.filter(f => {
-      const ext = f.name.toLowerCase().match(/\.[^.]+$/)?.[0] || ''
-      return ANALYZABLE_EXTENSIONS.includes(ext)
-    })
-    
-    if (analyzableFiles.length > 0) {
-      // 파일 내용 읽기 (최대 100개, 각 파일 최대 50KB만)
-      const filesToAnalyze = analyzableFiles.slice(0, 100)
-      const fileContents = await Promise.all(
-        filesToAnalyze.map(async (file) => {
-          try {
-            const content = await readFileContent(file)
-            // 내용이 너무 길면 앞부분만 분석
-            return {
-              fileName: file.webkitRelativePath || file.name,
-              content: content.slice(0, 50000)
-            }
-          } catch {
-            return { fileName: file.name, content: '' }
-          }
-        })
-      )
-      
-      // 백엔드에 타입 감지 요청
-      const result = await roboApi.detectTypes(fileContents)
-      detectedTypes.value = result
-      
-      console.log('[UploadTab] 파일 타입 감지 완료:', result.summary)
-      
-      // DDL로 감지된 파일들을 자동으로 ddl/ 폴더로 이동
-      const ddlFileNames = new Set(
-        result.files
-          .filter(f => f.fileType === 'oracle_ddl' || f.fileType === 'postgresql_ddl')
-          .map(f => f.fileName)
-      )
-      
-      if (ddlFileNames.size > 0) {
-        console.log('[UploadTab] DDL 파일 자동 분류:', ddlFileNames)
-        
-        // 파일 경로를 ddl/ 폴더로 변경
-        pendingFiles.value = pendingFiles.value.map(file => {
-          const filePath = file.webkitRelativePath || file.name
-          
-          // 이미 ddl 폴더에 있으면 스킵
-          if (filePath.toLowerCase().startsWith('ddl/') || filePath.toLowerCase().includes('/ddl/')) {
-            return file
-          }
-          
-          // DDL로 감지된 파일이면 ddl/ 폴더로 이동
-          if (ddlFileNames.has(filePath)) {
-            const fileName = filePath.split('/').pop() || file.name
-            const newPath = `ddl/${fileName}`
-            
-            // webkitRelativePath를 변경한 새 File 객체 생성
-            Object.defineProperty(file, 'webkitRelativePath', {
-              value: newPath,
-              writable: false,
-              configurable: true
-            })
-            
-            console.log(`[UploadTab] DDL 파일 이동: ${filePath} -> ${newPath}`)
-          }
-          
-          return file
-        })
-      }
-    }
+    // [주석] 타입 감지 API 비활성화 — 업로드는 그대로 동작, 소스 타입은 사용자가 직접 선택
+    // const analyzableFiles = files.filter(f => {
+    //   const ext = f.name.toLowerCase().match(/\.[^.]+$/)?.[0] || ''
+    //   return ANALYZABLE_EXTENSIONS.includes(ext)
+    // })
+    // if (analyzableFiles.length > 0) {
+    //   const filesToAnalyze = analyzableFiles.slice(0, 100)
+    //   const fileContents = await Promise.all(
+    //     filesToAnalyze.map(async (file) => {
+    //       try {
+    //         const content = await readFileContent(file)
+    //         return {
+    //           fileName: file.webkitRelativePath || file.name,
+    //           content: content.slice(0, 50000)
+    //         }
+    //       } catch {
+    //         return { fileName: file.name, content: '' }
+    //       }
+    //     })
+    //   )
+    //   const result = await roboApi.detectTypes(fileContents)
+    //   detectedTypes.value = result
+    //   const ddlFileNames = new Set(
+    //     result.files
+    //       .filter(f => f.fileType === 'oracle_ddl' || f.fileType === 'postgresql_ddl')
+    //       .map(f => f.fileName)
+    //   )
+    //   if (ddlFileNames.size > 0) {
+    //     pendingFiles.value = pendingFiles.value.map(file => {
+    //       const filePath = file.webkitRelativePath || file.name
+    //       if (filePath.toLowerCase().startsWith('ddl/') || filePath.toLowerCase().includes('/ddl/')) return file
+    //       if (ddlFileNames.has(filePath)) {
+    //         const fileName = filePath.split('/').pop() || file.name
+    //         Object.defineProperty(file, 'webkitRelativePath', { value: `ddl/${fileName}`, writable: false, configurable: true })
+    //       }
+    //       return file
+    //     })
+    //   }
+    // }
   } catch (error) {
     console.error('[UploadTab] 파일 타입 감지 실패:', error)
   } finally {
