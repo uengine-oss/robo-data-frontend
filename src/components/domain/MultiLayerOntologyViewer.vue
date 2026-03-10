@@ -1899,12 +1899,21 @@ let cy: cytoscape.Core | null = null
 let themeObserver: MutationObserver | null = null
 let edgehandlesInstance: any = null
 let tempEdgeFromEdgehandles: any = null  // edgehandles가 자동 생성한 임시 엣지 참조
+let edgehandlesBoundCy: cytoscape.Core | null = null
+let edgehandlesStartHandler: (() => void) | null = null
+let edgehandlesStopHandler: (() => void) | null = null
+let edgehandlesShowHandler: ((evt: any, targetNode: any) => void) | null = null
+let edgehandlesHideHandler: ((evt: any, targetNode: any) => void) | null = null
+let edgehandlesMousemoveHandler: ((evt: any) => void) | null = null
+let edgehandlesMouseoutHandler: ((evt: any) => void) | null = null
+let edgehandlesHoverSuspendUntil = 0
 
 // 드래그 앤 드롭 연결 상태
 const isDraggingHandle = ref(false)
 const hoveredNodeId = ref<string | null>(null)
 const showNewRelationDialog = ref(false)
 const newRelation = ref({
+  relationId: '',
   sourceId: '',
   targetId: '',
   type: 'CAUSES',
@@ -1926,6 +1935,101 @@ const activeFilters = ref<Record<string, any>>({})
 const hasActiveFilters = computed(() => {
   return Object.values(activeFilters.value).some(v => v !== '' && v !== null && v !== undefined)
 })
+
+function removeTransientCanvasEdges() {
+  if (!cy) return
+
+  const relationshipIds = new Set(relationships.value.map(rel => rel.id))
+  cy.edges().forEach((edge) => {
+    if (edge.hasClass('model-overlay')) return
+    if (!relationshipIds.has(edge.id())) {
+      edge.remove()
+    }
+  })
+}
+
+function resetEdgehandlesInteractionState(options?: { removeTransientEdges?: boolean }) {
+  hoveredNodeId.value = null
+  isDraggingHandle.value = false
+  tempEdgeFromEdgehandles = null
+
+  if (!cy) return
+
+  cy.nodes().removeClass('eh-presumptive-target eh-hover eh-source eh-target')
+  cy.nodes().grabify()
+  edgehandlesInstance?.disableDrawMode()
+
+  if (options?.removeTransientEdges) {
+    removeTransientCanvasEdges()
+  }
+}
+
+function detachEdgehandleCyEvents() {
+  if (!edgehandlesBoundCy) return
+
+  if (edgehandlesStartHandler) {
+    edgehandlesBoundCy.off('ehstart', edgehandlesStartHandler)
+  }
+  if (edgehandlesStopHandler) {
+    edgehandlesBoundCy.off('ehstop', edgehandlesStopHandler)
+    edgehandlesBoundCy.off('ehcomplete', edgehandlesStopHandler)
+    edgehandlesBoundCy.off('ehcancel', edgehandlesStopHandler)
+  }
+  if (edgehandlesShowHandler) {
+    edgehandlesBoundCy.off('ehshow', edgehandlesShowHandler)
+  }
+  if (edgehandlesHideHandler) {
+    edgehandlesBoundCy.off('ehhide', edgehandlesHideHandler)
+  }
+  if (edgehandlesMousemoveHandler) {
+    edgehandlesBoundCy.off('mousemove', 'node', edgehandlesMousemoveHandler)
+  }
+  if (edgehandlesMouseoutHandler) {
+    edgehandlesBoundCy.off('mouseout', 'node', edgehandlesMouseoutHandler)
+  }
+
+  edgehandlesBoundCy = null
+  edgehandlesStartHandler = null
+  edgehandlesStopHandler = null
+  edgehandlesShowHandler = null
+  edgehandlesHideHandler = null
+  edgehandlesMousemoveHandler = null
+  edgehandlesMouseoutHandler = null
+}
+
+function suspendEdgehandlesHover(ms: number) {
+  edgehandlesHoverSuspendUntil = Date.now() + ms
+}
+
+function upsertRelationEdgeInCy(rel: OntologyRelationship) {
+  if (!cy) return
+
+  const existingEdge = cy.getElementById(rel.id)
+  if (existingEdge.length > 0) {
+    existingEdge.data({
+      source: rel.source,
+      target: rel.target,
+      type: rel.type,
+      label: rel.type
+    })
+    return
+  }
+
+  cy.add({
+    data: {
+      id: rel.id,
+      source: rel.source,
+      target: rel.target,
+      type: rel.type,
+      label: rel.type
+    }
+  })
+}
+
+function removeRelationEdgeFromCy(relationId: string) {
+  if (!cy) return
+  cy.$(`#${relationId}`).remove()
+}
 
 function onFilterChange() {
   // 필터 변경 시 데이터 새로고침
@@ -4264,6 +4368,10 @@ function handleKeyDown(event: KeyboardEvent) {
   }
 }
 
+function handleWindowBlur() {
+  resetEdgehandlesInteractionState({ removeTransientEdges: true })
+}
+
 function isKPIOrMeasure(node: { layer?: string; label?: string } | null): boolean {
   if (!node) return false
   const layer = node.layer || node.label || ''
@@ -5028,9 +5136,16 @@ function initCytoscape(shouldRestoreSelection: boolean = false) {
   console.log('Initializing Cytoscape with', nodes.value.length, 'nodes and', relationships.value.length, 'relationships')
   
   if (cy) {
+    detachEdgehandleCyEvents()
+    edgehandlesInstance?.destroy()
+    edgehandlesInstance = null
     cy.destroy()
     cy = null
   }
+
+  // 스키마를 새로 로드한 직후에는 마우스 위치가 우연히 노드 테두리 위에 있어도
+  // 연결 모드로 즉시 진입하지 않도록 잠시 보호 시간을 둔다.
+  suspendEdgehandlesHover(shouldRestoreSelection ? 1200 : 250)
   
   const elements: cytoscape.ElementDefinition[] = []
   
@@ -5385,10 +5500,12 @@ function restoreSelectedNode() {
   }
 }
 
-// Edgehandles 초기화 - 테두리 영역 호버 시 연결 모드 활성화
+// Edgehandles 초기화 - Shift + 노드 가장자리 드래그로 관계 생성
 function initEdgehandles() {
   if (!cy) return
   
+  detachEdgehandleCyEvents()
+
   // 기존 인스턴스 정리
   if (edgehandlesInstance) {
     edgehandlesInstance.destroy()
@@ -5420,6 +5537,10 @@ function initEdgehandles() {
     complete: (sourceNode: any, targetNode: any, addedEles: any) => {
       // edgehandles가 자동 생성한 임시 엣지 참조 저장 (나중에 제거하기 위해)
       tempEdgeFromEdgehandles = addedEles
+      if (tempEdgeFromEdgehandles) {
+        tempEdgeFromEdgehandles.remove()
+        tempEdgeFromEdgehandles = null
+      }
       
       // 새 관계 생성 완료 시
       const sourceId = sourceNode.id()
@@ -5431,8 +5552,24 @@ function initEdgehandles() {
       )
       
       if (!exists && sourceId !== targetId) {
+        saveState()
+
+        const draftRelation: OntologyRelationship = {
+          id: `rel_${Date.now()}`,
+          source: sourceId,
+          target: targetId,
+          type: 'CAUSES',
+          description: undefined,
+          fromField: undefined,
+          toField: undefined
+        }
+
+        relationships.value.push(draftRelation)
+        upsertRelationEdgeInCy(draftRelation)
+
         // 관계 생성 다이얼로그 표시
         newRelation.value = {
+          relationId: draftRelation.id,
           sourceId,
           targetId,
           type: 'CAUSES',
@@ -5448,36 +5585,40 @@ function initEdgehandles() {
       }
     }
   })
-  
+
+  edgehandlesBoundCy = cy
+
   // 드래그 시작 시 - zoom 미세 조절로 렌더링 문제 회피
-  cy.on('ehstart', () => {
+  edgehandlesStartHandler = () => {
     isDraggingHandle.value = true
     const currentZoom = cy?.zoom() || 1
     cy?.zoom(currentZoom * 1.001)
     setTimeout(() => {
       cy?.zoom(currentZoom)
     }, 50)
-  })
+  }
+  cy.on('ehstart', edgehandlesStartHandler)
   
   // 드래그 종료 시 - 모든 상태 초기화
-  cy.on('ehstop ehcomplete ehcancel', () => {
-    isDraggingHandle.value = false
-    hoveredNodeId.value = null
-    cy?.nodes().removeClass('eh-presumptive-target eh-hover eh-source eh-target')
-    cy?.nodes().grabify()
-    edgehandlesInstance?.disableDrawMode()
-  })
+  edgehandlesStopHandler = () => {
+    resetEdgehandlesInteractionState({ removeTransientEdges: true })
+  }
+  cy.on('ehstop', edgehandlesStopHandler)
+  cy.on('ehcomplete', edgehandlesStopHandler)
+  cy.on('ehcancel', edgehandlesStopHandler)
   
   // 다른 노드 위에 올라갔을 때 (스냅 대상)
-  cy.on('ehshow', (evt: any, targetNode: any) => {
+  edgehandlesShowHandler = (_evt: any, targetNode: any) => {
     cy?.nodes().removeClass('eh-presumptive-target')
     targetNode.addClass('eh-presumptive-target')
-  })
+  }
+  cy.on('ehshow', edgehandlesShowHandler)
   
   // 노드에서 벗어났을 때 (스냅 해제)
-  cy.on('ehhide', (evt: any, targetNode: any) => {
+  edgehandlesHideHandler = (_evt: any, targetNode: any) => {
     targetNode.removeClass('eh-presumptive-target')
-  })
+  }
+  cy.on('ehhide', edgehandlesHideHandler)
   
   // 테두리 영역 판별 함수 (노드 반지름의 65% 이상이면 테두리 영역)
   const isOnBorder = (node: any, mousePos: { x: number, y: number }) => {
@@ -5489,13 +5630,22 @@ function initEdgehandles() {
     return distance >= borderThreshold
   }
   
-  // 노드 위에서 마우스 이동 - 테두리 영역 체크
-  cy.on('mousemove', 'node', (evt: any) => {
+  // 노드 위에서 마우스 이동 - 기본 UX는 유지하되, 로딩 직후에는 잠시 연결 모드 진입을 막는다.
+  edgehandlesMousemoveHandler = (evt: any) => {
     if (isDraggingHandle.value) return
     
     const node = evt.target
     const nodeId = node.id()
     const mousePos = evt.position
+    const hoverSuspended = Date.now() < edgehandlesHoverSuspendUntil
+    const wantsConnectionMode = !hoverSuspended && !showNewRelationDialog.value && !loading.value && !isLoadingSchema.value
+
+    if (!wantsConnectionMode) {
+      if (hoveredNodeId.value) {
+        resetEdgehandlesInteractionState()
+      }
+      return
+    }
     
     if (isOnBorder(node, mousePos)) {
       // 테두리 영역 - 연결 모드 활성화
@@ -5515,31 +5665,27 @@ function initEdgehandles() {
     } else {
       // 중앙 영역 - 이동 모드
       if (hoveredNodeId.value === nodeId) {
-        hoveredNodeId.value = null
-        node.removeClass('eh-hover')
-        node.grabify()
-        edgehandlesInstance?.disableDrawMode()
+        resetEdgehandlesInteractionState()
       }
     }
-  })
+  }
+  cy.on('mousemove', 'node', edgehandlesMousemoveHandler)
   
   // 노드 마우스 아웃 - 상태 정리
-  cy.on('mouseout', 'node', (evt: any) => {
+  edgehandlesMouseoutHandler = (evt: any) => {
     if (isDraggingHandle.value) return
     
     const node = evt.target
     const nodeId = node.id()
     
     if (hoveredNodeId.value === nodeId) {
-      hoveredNodeId.value = null
-      node.removeClass('eh-hover')
-      node.grabify()
-      edgehandlesInstance?.disableDrawMode()
+      resetEdgehandlesInteractionState()
     }
-  })
+  }
+  cy.on('mouseout', 'node', edgehandlesMouseoutHandler)
   
   // 초기 상태: drawMode 비활성화 (노드 이동 가능)
-  edgehandlesInstance.disableDrawMode()
+  resetEdgehandlesInteractionState({ removeTransientEdges: true })
 }
 
 /**
@@ -6839,49 +6985,48 @@ const relationTypeOptions = [
 ]
 
 async function createRelation() {
-  if (!newRelation.value.sourceId || !newRelation.value.targetId) return
-  
-  // 상태 저장 (undo 가능하도록)
-  saveState()
-  
-  const rel: OntologyRelationship = {
-    id: `rel_${Date.now()}`,
-    source: newRelation.value.sourceId,
-    target: newRelation.value.targetId,
+  if (!newRelation.value.sourceId || !newRelation.value.targetId || !newRelation.value.relationId) return
+
+  const relIndex = relationships.value.findIndex(r => r.id === newRelation.value.relationId)
+  if (relIndex === -1) {
+    showNewRelationDialog.value = false
+    return
+  }
+
+  relationships.value[relIndex] = {
+    ...relationships.value[relIndex],
     type: newRelation.value.type,
-    description: newRelation.value.description || undefined,
-    fromField: undefined,
-    toField: undefined
+    description: newRelation.value.description || undefined
   }
-  
-  // 로컬 상태에 추가
-  relationships.value.push(rel)
-  
-  // edgehandles가 자동 생성한 임시 엣지 제거 (ID가 맞지 않아 더블클릭 시 문제 발생)
-  if (tempEdgeFromEdgehandles) {
-    tempEdgeFromEdgehandles.remove()
-    tempEdgeFromEdgehandles = null
-  }
-  
-  // Cytoscape에 올바른 ID로 엣지 추가
-  if (cy) {
-    cy.add({
-      data: {
-        id: rel.id,
-        source: rel.source,
-        target: rel.target,
-        type: rel.type,
-        label: rel.type
-      }
-    })
-  }
+  resetEdgehandlesInteractionState({ removeTransientEdges: true })
+  upsertRelationEdgeInCy(relationships.value[relIndex])
   
   // 다이얼로그 닫기
   showNewRelationDialog.value = false
+  newRelation.value = {
+    relationId: '',
+    sourceId: '',
+    targetId: '',
+    type: 'CAUSES',
+    description: ''
+  }
 }
 
 function cancelRelation() {
+  if (newRelation.value.relationId) {
+    relationships.value = relationships.value.filter(r => r.id !== newRelation.value.relationId)
+    removeRelationEdgeFromCy(newRelation.value.relationId)
+  }
+
   showNewRelationDialog.value = false
+  resetEdgehandlesInteractionState({ removeTransientEdges: true })
+  newRelation.value = {
+    relationId: '',
+    sourceId: '',
+    targetId: '',
+    type: 'CAUSES',
+    description: ''
+  }
   
   // edgehandles가 자동 생성한 임시 엣지 제거
   if (tempEdgeFromEdgehandles) {
@@ -7603,6 +7748,13 @@ async function saveToNeo4j() {
     alert('저장할 온톨로지가 없습니다.')
     return
   }
+
+  if (showNewRelationDialog.value) {
+    alert('열려 있는 관계 생성 다이얼로그를 먼저 완료하거나 취소해주세요.')
+    return
+  }
+
+  resetEdgehandlesInteractionState({ removeTransientEdges: true })
   
   loading.value = true
   loadingMessage.value = 'Neo4j에 온톨로지 저장 중...'
@@ -7904,6 +8056,7 @@ function updateCytoscapeTheme() {
 onMounted(async () => {
   // 키보드 단축키 등록 (Ctrl+Z, Ctrl+Y)
   window.addEventListener('keydown', handleKeyDown)
+  window.addEventListener('blur', handleWindowBlur)
   
   // 테마 변경 감지
   themeObserver = new MutationObserver((mutations) => {
@@ -7937,6 +8090,7 @@ onMounted(async () => {
 onUnmounted(() => {
   // 키보드 단축키 해제
   window.removeEventListener('keydown', handleKeyDown)
+  window.removeEventListener('blur', handleWindowBlur)
   
   // 클릭 이벤트 해제
   document.removeEventListener('click', onDocumentClick)
@@ -7946,6 +8100,9 @@ onUnmounted(() => {
     themeObserver = null
   }
   if (cy) {
+    detachEdgehandleCyEvents()
+    edgehandlesInstance?.destroy()
+    edgehandlesInstance = null
     cy.destroy()
     cy = null
   }
