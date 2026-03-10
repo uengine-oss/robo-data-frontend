@@ -474,6 +474,10 @@ export const useProjectStore = defineStore('project', () => {
           const details = event.details || {}
           
           if (event.status === 'started') {
+            // totalPhases가 전달되면 totalSteps 동적 조정
+            if (details.totalPhases && typeof details.totalPhases === 'number') {
+              totalSteps.value = details.totalPhases
+            }
             // 시작 상태 - 현재 단계 표시
             currentStep.value = `[${phaseNum + 1}단계] ${phaseName} 시작...`
             completedSteps.value = phaseNum
@@ -608,6 +612,14 @@ export const useProjectStore = defineStore('project', () => {
     
     addMessage('message', '✅ 분석 완료')
     completedSteps.value = totalSteps.value  // 전체 단계 완료
+
+    // 스트리밍 중 누적된 데이터 대신 Neo4j 최종 상태로 교체
+    try {
+      clearGraphData()
+      await loadExistingGraphData()
+    } catch (e) {
+      console.warn('분석 후 Neo4j 데이터 재로드 실패:', e)
+    }
   }
   
   // ==========================================================================

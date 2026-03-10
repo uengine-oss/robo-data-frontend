@@ -2,8 +2,11 @@ import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 
 const STORAGE_KEY_THEME = 'robo-analyzer-theme'
+const STORAGE_KEY_API_KEY = 'robo-analyzer-api-key'
+const STORAGE_KEY_API_PROVIDER = 'robo-analyzer-api-provider'
 
 export type Theme = 'dark' | 'light'
+export type ApiProvider = 'openai' | 'anthropic'
 
 // 로컬스토리지에서 값 로드
 const loadFromStorage = (key: string, defaultValue: string): string => {
@@ -20,6 +23,12 @@ export const useSessionStore = defineStore('session', () => {
   // 테마 (dark/light) - 로컬스토리지에서 로드, 기본값 dark
   const theme = ref<Theme>(
     (loadFromStorage(STORAGE_KEY_THEME, 'dark') as Theme)
+  )
+
+  // LLM API Key - 로컬스토리지에서 로드
+  const apiKey = ref<string>(loadFromStorage(STORAGE_KEY_API_KEY, ''))
+  const apiProvider = ref<ApiProvider>(
+    (loadFromStorage(STORAGE_KEY_API_PROVIDER, 'openai') as ApiProvider)
   )
   
   // 현재 활성 탭 - 새로고침 시 항상 업로드 탭으로 시작
@@ -195,18 +204,40 @@ export const useSessionStore = defineStore('session', () => {
     theme.value = theme.value === 'dark' ? 'light' : 'dark'
   }
   
-  // 헤더 생성 (API 키는 서버 환경변수에서 처리)
+  // API Key 설정
+  const setApiKey = (key: string) => {
+    apiKey.value = key
+    saveToStorage(STORAGE_KEY_API_KEY, key)
+  }
+
+  // API Provider 설정
+  const setApiProvider = (provider: ApiProvider) => {
+    apiProvider.value = provider
+    saveToStorage(STORAGE_KEY_API_PROVIDER, provider)
+  }
+
+  // 헤더 생성 (API Key 포함)
   const getHeaders = (): Record<string, string> => {
     const headers: Record<string, string> = {
       'Accept-Language': 'ko'
     }
-    
+
+    if (apiKey.value) {
+      if (apiProvider.value === 'anthropic') {
+        headers['Anthropic-Api-Key'] = apiKey.value
+      } else {
+        headers['OpenAI-Api-Key'] = apiKey.value
+      }
+    }
+
     return headers
   }
   
   return {
     activeTab,
     theme,
+    apiKey,
+    apiProvider,
     olapTransferData,
     watchAgentTransferData,
     pendingSchemaSearch,
@@ -217,6 +248,8 @@ export const useSessionStore = defineStore('session', () => {
     clearSession,
     setTheme,
     toggleTheme,
+    setApiKey,
+    setApiProvider,
     setActiveTab,
     goHome,
     getHeaders,
