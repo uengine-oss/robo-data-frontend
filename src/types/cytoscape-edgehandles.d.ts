@@ -20,6 +20,7 @@ declare module 'cytoscape-edgehandles' {
     handleOutlineWidth?: number
     handleSize?: number
     handleHitThreshold?: number
+    edgeParams?: (sourceNode: cytoscape.NodeSingular, targetNode: cytoscape.NodeSingular) => object
     ghostEdgeParams?: () => object
     complete?: (sourceNode: cytoscape.NodeSingular, targetNode: cytoscape.NodeSingular, addedEdge: cytoscape.EdgeSingular) => void
   }

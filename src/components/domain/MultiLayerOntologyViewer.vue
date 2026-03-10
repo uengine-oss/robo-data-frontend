@@ -1900,8 +1900,9 @@ let themeObserver: MutationObserver | null = null
 let edgehandlesInstance: any = null
 let tempEdgeFromEdgehandles: any = null  // edgehandles가 자동 생성한 임시 엣지 참조
 let edgehandlesBoundCy: cytoscape.Core | null = null
-let edgehandlesStartHandler: (() => void) | null = null
-let edgehandlesStopHandler: (() => void) | null = null
+let edgehandlesStartHandler: ((evt?: any) => void) | null = null
+let edgehandlesCompleteHandler: ((evt: any, sourceNode: any, targetNode: any, addedEles: any) => void) | null = null
+let edgehandlesStopHandler: ((evt?: any) => void) | null = null
 let edgehandlesShowHandler: ((evt: any, targetNode: any) => void) | null = null
 let edgehandlesHideHandler: ((evt: any, targetNode: any) => void) | null = null
 let edgehandlesMousemoveHandler: ((evt: any) => void) | null = null
@@ -1970,9 +1971,11 @@ function detachEdgehandleCyEvents() {
   if (edgehandlesStartHandler) {
     edgehandlesBoundCy.off('ehstart', edgehandlesStartHandler)
   }
+  if (edgehandlesCompleteHandler) {
+    edgehandlesBoundCy.off('ehcomplete', edgehandlesCompleteHandler)
+  }
   if (edgehandlesStopHandler) {
     edgehandlesBoundCy.off('ehstop', edgehandlesStopHandler)
-    edgehandlesBoundCy.off('ehcomplete', edgehandlesStopHandler)
     edgehandlesBoundCy.off('ehcancel', edgehandlesStopHandler)
   }
   if (edgehandlesShowHandler) {
@@ -1990,6 +1993,7 @@ function detachEdgehandleCyEvents() {
 
   edgehandlesBoundCy = null
   edgehandlesStartHandler = null
+  edgehandlesCompleteHandler = null
   edgehandlesStopHandler = null
   edgehandlesShowHandler = null
   edgehandlesHideHandler = null
@@ -1999,6 +2003,59 @@ function detachEdgehandleCyEvents() {
 
 function suspendEdgehandlesHover(ms: number) {
   edgehandlesHoverSuspendUntil = Date.now() + ms
+}
+
+function handleEdgehandlesComplete(_evt: any, sourceNode: any, targetNode: any, addedEles: any) {
+  const sourceId = sourceNode?.id?.() ?? null
+  const targetId = targetNode?.id?.() ?? null
+
+  tempEdgeFromEdgehandles = addedEles ?? null
+
+  const removeAddedEles = () => {
+    if (tempEdgeFromEdgehandles && typeof tempEdgeFromEdgehandles.remove === 'function') {
+      tempEdgeFromEdgehandles.remove()
+    }
+    tempEdgeFromEdgehandles = null
+  }
+
+  if (!sourceId || !targetId) {
+    removeAddedEles()
+    return
+  }
+
+  const exists = relationships.value.some(
+    r => r.source === sourceId && r.target === targetId
+  )
+
+  if (exists || sourceId === targetId) {
+    removeAddedEles()
+    return
+  }
+
+  saveState()
+  removeAddedEles()
+
+  const draftRelation: OntologyRelationship = {
+    id: `rel_${Date.now()}`,
+    source: sourceId,
+    target: targetId,
+    type: 'CAUSES',
+    description: undefined,
+    fromField: undefined,
+    toField: undefined
+  }
+
+  relationships.value.push(draftRelation)
+  upsertRelationEdgeInCy(draftRelation)
+
+  newRelation.value = {
+    relationId: draftRelation.id,
+    sourceId,
+    targetId,
+    type: 'CAUSES',
+    description: ''
+  }
+  showNewRelationDialog.value = true
 }
 
 function upsertRelationEdgeInCy(rel: OntologyRelationship) {
@@ -5533,57 +5590,7 @@ function initEdgehandles() {
     handleHitThreshold: 50,
     edgeParams: () => ({
       data: { type: 'CAUSES' }
-    }),
-    complete: (sourceNode: any, targetNode: any, addedEles: any) => {
-      // edgehandles가 자동 생성한 임시 엣지 참조 저장 (나중에 제거하기 위해)
-      tempEdgeFromEdgehandles = addedEles
-      if (tempEdgeFromEdgehandles) {
-        tempEdgeFromEdgehandles.remove()
-        tempEdgeFromEdgehandles = null
-      }
-      
-      // 새 관계 생성 완료 시
-      const sourceId = sourceNode.id()
-      const targetId = targetNode.id()
-      
-      // 중복 체크
-      const exists = relationships.value.some(
-        r => r.source === sourceId && r.target === targetId
-      )
-      
-      if (!exists && sourceId !== targetId) {
-        saveState()
-
-        const draftRelation: OntologyRelationship = {
-          id: `rel_${Date.now()}`,
-          source: sourceId,
-          target: targetId,
-          type: 'CAUSES',
-          description: undefined,
-          fromField: undefined,
-          toField: undefined
-        }
-
-        relationships.value.push(draftRelation)
-        upsertRelationEdgeInCy(draftRelation)
-
-        // 관계 생성 다이얼로그 표시
-        newRelation.value = {
-          relationId: draftRelation.id,
-          sourceId,
-          targetId,
-          type: 'CAUSES',
-          description: ''
-        }
-        showNewRelationDialog.value = true
-      } else {
-        // 중복이거나 자기 자신에게 연결 → 임시 엣지 즉시 제거
-        if (tempEdgeFromEdgehandles) {
-          tempEdgeFromEdgehandles.remove()
-          tempEdgeFromEdgehandles = null
-        }
-      }
-    }
+    })
   })
 
   edgehandlesBoundCy = cy
@@ -5598,13 +5605,19 @@ function initEdgehandles() {
     }, 50)
   }
   cy.on('ehstart', edgehandlesStartHandler)
+
+  edgehandlesCompleteHandler = (evt: any, sourceNode: any, targetNode: any, addedEles: any) => {
+    handleEdgehandlesComplete(evt, sourceNode, targetNode, addedEles)
+  }
+  cy.on('ehcomplete', edgehandlesCompleteHandler)
   
   // 드래그 종료 시 - 모든 상태 초기화
   edgehandlesStopHandler = () => {
-    resetEdgehandlesInteractionState({ removeTransientEdges: true })
+    resetEdgehandlesInteractionState({
+      removeTransientEdges: true
+    })
   }
   cy.on('ehstop', edgehandlesStopHandler)
-  cy.on('ehcomplete', edgehandlesStopHandler)
   cy.on('ehcancel', edgehandlesStopHandler)
   
   // 다른 노드 위에 올라갔을 때 (스냅 대상)
