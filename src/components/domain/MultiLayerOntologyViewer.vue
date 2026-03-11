@@ -479,20 +479,34 @@
               
               <div class="detail-row">
                 <label>From 필드 <span class="field-node-hint">({{ getNodeName(editingRelation.source) }})</span></label>
-                <select v-if="sourceNodeColumns.length > 0" v-model="editingRelationForm.fromField" class="form-select" @change="saveRelationEditor">
+                <span v-if="sourceColumnStatus === 'loading'" class="field-status loading">컬럼 정보 로딩 중...</span>
+                <div v-else-if="sourceColumnStatus === 'no_datasource'" class="field-status no-datasource">
+                  <span>데이터 소스가 연결되지 않았습니다.</span>
+                  <button type="button" class="link-datasource-btn-sm" @click="openNodeDataSourceDialog(editingRelation.source)">연결</button>
+                </div>
+                <div v-else-if="sourceColumnStatus === 'error'" class="field-status error">
+                  {{ sourceColumnError || 'From 노드의 컬럼 정보를 조회할 수 없습니다.' }}
+                </div>
+                <select v-else v-model="editingRelationForm.fromField" class="form-select" @change="saveRelationEditor">
                   <option value="">(미설정)</option>
                   <option v-for="col in sourceNodeColumns" :key="col" :value="col">{{ col }}</option>
                 </select>
-                <input v-else v-model="editingRelationForm.fromField" type="text" class="form-input" placeholder="필드명 입력" @blur="saveRelationEditor" />
               </div>
               
               <div class="detail-row">
                 <label>To 필드 <span class="field-node-hint">({{ getNodeName(editingRelation.target) }})</span></label>
-                <select v-if="targetNodeColumns.length > 0" v-model="editingRelationForm.toField" class="form-select" @change="saveRelationEditor">
+                <span v-if="targetColumnStatus === 'loading'" class="field-status loading">컬럼 정보 로딩 중...</span>
+                <div v-else-if="targetColumnStatus === 'no_datasource'" class="field-status no-datasource">
+                  <span>데이터 소스가 연결되지 않았습니다.</span>
+                  <button type="button" class="link-datasource-btn-sm" @click="openNodeDataSourceDialog(editingRelation.target)">연결</button>
+                </div>
+                <div v-else-if="targetColumnStatus === 'error'" class="field-status error">
+                  {{ targetColumnError || 'To 노드의 컬럼 정보를 조회할 수 없습니다.' }}
+                </div>
+                <select v-else v-model="editingRelationForm.toField" class="form-select" @change="saveRelationEditor">
                   <option value="">(미설정)</option>
                   <option v-for="col in targetNodeColumns" :key="col" :value="col">{{ col }}</option>
                 </select>
-                <input v-else v-model="editingRelationForm.toField" type="text" class="form-input" placeholder="필드명 입력" @blur="saveRelationEditor" />
               </div>
             </div>
             
@@ -1863,6 +1877,14 @@ interface OntologyRelationship {
   toField?: string    // target 노드의 연결 필드 (FK/join key)
 }
 
+type FieldMappingStatus = 'no_datasource' | 'loading' | 'ready' | 'error'
+
+interface FetchColumnsResult {
+  status: FieldMappingStatus
+  columns: string[]
+  error?: string
+}
+
 interface LayerInfo {
   id: string
   name: string
@@ -2163,6 +2185,10 @@ const editingRelationForm = ref({
 })
 const sourceNodeColumns = ref<string[]>([])
 const targetNodeColumns = ref<string[]>([])
+const sourceColumnStatus = ref<FieldMappingStatus>('no_datasource')
+const targetColumnStatus = ref<FieldMappingStatus>('no_datasource')
+const sourceColumnError = ref('')
+const targetColumnError = ref('')
 
 // 노드별 필터 상태 (cascading filter용) - { nodeId: { field: value } }
 const nodeFilters = ref<Record<string, Record<string, any>>>({})
@@ -4021,34 +4047,75 @@ function getNodeLayer(nodeId: string): string {
   return node?.layer || node?.label || 'Resource'
 }
 
-async function fetchNodeColumns(nodeId: string): Promise<string[]> {
+function normalizeColumnNames(columns: any): string[] {
+  if (!Array.isArray(columns)) return []
+  return Array.from(
+    new Set(
+      columns
+        .map((c: any) => typeof c === 'string' ? c : c?.name || c)
+        .filter((c: any): c is string => typeof c === 'string' && c.trim().length > 0)
+    )
+  )
+}
+
+async function fetchNodeColumns(nodeId: string): Promise<FetchColumnsResult> {
   const node = nodes.value.find(n => n.id === nodeId)
-  if (!node) return []
-  
-  // 이미 dataSourceSchema에 컬럼 정보가 있으면 사용
-  if (node.dataSourceSchema?.columns) {
-    return node.dataSourceSchema.columns.map((c: any) => typeof c === 'string' ? c : c.name || c)
-  }
-  
-  // filterFields에서 컬럼 추출
-  if (node.filterFields && node.filterFields.length > 0) {
-    return node.filterFields.map(f => f.column)
-  }
-  
-  // dataSource가 있으면 API로 컬럼 정보 조회 시도
-  if (node.dataSource) {
-    try {
-      const response = await fetch(`/api/gateway/ontology/ontology-nodes/${nodeId}/data?limit=1`)
-      if (response.ok) {
-        const result = await response.json()
-        if (result.columns) return result.columns
-      }
-    } catch (e) {
-      console.warn('컬럼 정보 조회 실패:', e)
+  if (!node) {
+    return {
+      status: 'error',
+      columns: [],
+      error: '노드 정보를 찾을 수 없습니다.'
     }
   }
-  
-  return []
+
+  if (!node.dataSource) {
+    return {
+      status: 'no_datasource',
+      columns: []
+    }
+  }
+
+  // 이미 dataSourceSchema에 컬럼 정보가 있으면 사용
+  const schemaColumns = normalizeColumnNames(node.dataSourceSchema?.columns)
+  if (schemaColumns.length > 0) {
+    return {
+      status: 'ready',
+      columns: schemaColumns
+    }
+  }
+
+  try {
+    const response = await fetch(`/api/gateway/ontology/ontology-nodes/${nodeId}/data?limit=1`)
+    if (!response.ok) {
+      return {
+        status: 'error',
+        columns: [],
+        error: `데이터 소스 '${node.dataSource}'의 컬럼 정보를 조회하지 못했습니다.`
+      }
+    }
+
+    const result = await response.json()
+    const columns = normalizeColumnNames(result.columns)
+    if (columns.length > 0) {
+      return {
+        status: 'ready',
+        columns
+      }
+    }
+
+    return {
+      status: 'error',
+      columns: [],
+      error: `데이터 소스 '${node.dataSource}'에 사용할 수 있는 컬럼 정보가 없습니다.`
+    }
+  } catch (e) {
+    console.warn('컬럼 정보 조회 실패:', e)
+    return {
+      status: 'error',
+      columns: [],
+      error: `데이터 소스 '${node.dataSource}'의 컬럼 메타데이터 조회에 실패했습니다.`
+    }
+  }
 }
 
 async function openRelationEditor(edgeId: string) {
@@ -4076,16 +4143,33 @@ async function openRelationEditor(edgeId: string) {
     fromField: editingRelation.value!.fromField || '',
     toField: editingRelation.value!.toField || ''
   }
-  
+
+  showRelationEditor.value = true
+  sourceColumnStatus.value = 'loading'
+  targetColumnStatus.value = 'loading'
+  sourceColumnError.value = ''
+  targetColumnError.value = ''
+  sourceNodeColumns.value = []
+  targetNodeColumns.value = []
+
   // 소스/타겟 노드의 컬럼 정보 로드
-  const [srcCols, tgtCols] = await Promise.all([
+  const [srcResult, tgtResult] = await Promise.all([
     fetchNodeColumns(editingRelation.value!.source),
     fetchNodeColumns(editingRelation.value!.target)
   ])
-  sourceNodeColumns.value = srcCols
-  targetNodeColumns.value = tgtCols
-  
-  showRelationEditor.value = true
+  sourceNodeColumns.value = srcResult.columns
+  targetNodeColumns.value = tgtResult.columns
+  sourceColumnStatus.value = srcResult.status
+  targetColumnStatus.value = tgtResult.status
+  sourceColumnError.value = srcResult.error || ''
+  targetColumnError.value = tgtResult.error || ''
+
+  if (!srcResult.columns.includes(editingRelationForm.value.fromField)) {
+    editingRelationForm.value.fromField = ''
+  }
+  if (!tgtResult.columns.includes(editingRelationForm.value.toField)) {
+    editingRelationForm.value.toField = ''
+  }
 }
 
 function closeRelationEditor() {
@@ -4093,6 +4177,10 @@ function closeRelationEditor() {
   editingRelation.value = null
   sourceNodeColumns.value = []
   targetNodeColumns.value = []
+  sourceColumnStatus.value = 'no_datasource'
+  targetColumnStatus.value = 'no_datasource'
+  sourceColumnError.value = ''
+  targetColumnError.value = ''
 }
 
 function saveRelationEditor() {
@@ -4100,12 +4188,39 @@ function saveRelationEditor() {
   
   const relIndex = relationships.value.findIndex(r => r.id === editingRelation.value!.id)
   if (relIndex !== -1) {
+    const normalizedFromField = editingRelationForm.value.fromField.trim()
+    const normalizedToField = editingRelationForm.value.toField.trim()
+
+    if (normalizedFromField) {
+      if (sourceColumnStatus.value !== 'ready') {
+        alert(sourceColumnError.value || 'From 노드의 컬럼 정보를 확인할 수 없어 필드 매핑을 저장할 수 없습니다.')
+        return
+      }
+      if (!sourceNodeColumns.value.includes(normalizedFromField)) {
+        alert(`From 필드 '${normalizedFromField}'은(는) 현재 데이터 소스 컬럼에 없습니다.`)
+        editingRelationForm.value.fromField = ''
+        return
+      }
+    }
+
+    if (normalizedToField) {
+      if (targetColumnStatus.value !== 'ready') {
+        alert(targetColumnError.value || 'To 노드의 컬럼 정보를 확인할 수 없어 필드 매핑을 저장할 수 없습니다.')
+        return
+      }
+      if (!targetNodeColumns.value.includes(normalizedToField)) {
+        alert(`To 필드 '${normalizedToField}'은(는) 현재 데이터 소스 컬럼에 없습니다.`)
+        editingRelationForm.value.toField = ''
+        return
+      }
+    }
+
     const nextRelation = {
       ...relationships.value[relIndex],
       type: editingRelationForm.value.type,
       description: editingRelationForm.value.description || undefined,
-      fromField: editingRelationForm.value.fromField || undefined,
-      toField: editingRelationForm.value.toField || undefined
+      fromField: normalizedFromField || undefined,
+      toField: normalizedToField || undefined
     }
 
     const currentRelation = relationships.value[relIndex]
@@ -6291,6 +6406,77 @@ async function confirmDataSourceMapping(nodeId: string, candidate: any) {
           ...nodes.value.slice(nodeIndex + 1)
         ]
       }
+
+      const candidateColumns = normalizeColumnNames(candidate.columns)
+      const candidateColumnSet = new Set(candidateColumns)
+      const clearedMappings: string[] = []
+      let hasClearedMappings = false
+
+      if (showRelationEditor.value && editingRelation.value) {
+        const relationEditorError =
+          candidateColumns.length > 0
+            ? ''
+            : `데이터 소스 '${candidate.table_name}'의 컬럼 정보를 조회하지 못했습니다.`
+
+        if (editingRelation.value.source === nodeId) {
+          sourceNodeColumns.value = candidateColumns
+          sourceColumnStatus.value = candidateColumns.length > 0 ? 'ready' : 'error'
+          sourceColumnError.value = relationEditorError
+          if (!candidateColumnSet.has(editingRelationForm.value.fromField)) {
+            editingRelationForm.value.fromField = ''
+          }
+        }
+
+        if (editingRelation.value.target === nodeId) {
+          targetNodeColumns.value = candidateColumns
+          targetColumnStatus.value = candidateColumns.length > 0 ? 'ready' : 'error'
+          targetColumnError.value = relationEditorError
+          if (!candidateColumnSet.has(editingRelationForm.value.toField)) {
+            editingRelationForm.value.toField = ''
+          }
+        }
+      }
+
+      relationships.value = relationships.value.map(rel => {
+        if (rel.source !== nodeId && rel.target !== nodeId) {
+          return rel
+        }
+
+        let nextRel = rel
+        let relationChanged = false
+
+        if (rel.source === nodeId && rel.fromField && !candidateColumnSet.has(rel.fromField)) {
+          clearedMappings.push(`${getNodeName(rel.source)} → ${getNodeName(rel.target)}: From 필드 '${rel.fromField}' 삭제`)
+          nextRel = { ...nextRel, fromField: undefined }
+          relationChanged = true
+        }
+
+        if (rel.target === nodeId && rel.toField && !candidateColumnSet.has(rel.toField)) {
+          clearedMappings.push(`${getNodeName(rel.source)} → ${getNodeName(rel.target)}: To 필드 '${rel.toField}' 삭제`)
+          nextRel = { ...nextRel, toField: undefined }
+          relationChanged = true
+        }
+
+        if (relationChanged && ((nextRel.fromField && !nextRel.toField) || (!nextRel.fromField && nextRel.toField))) {
+          if (nextRel.fromField) {
+            clearedMappings.push(`${getNodeName(nextRel.source)} → ${getNodeName(nextRel.target)}: 짝이 없는 From 필드 '${nextRel.fromField}' 삭제`)
+          }
+          if (nextRel.toField) {
+            clearedMappings.push(`${getNodeName(nextRel.source)} → ${getNodeName(nextRel.target)}: 짝이 없는 To 필드 '${nextRel.toField}' 삭제`)
+          }
+          nextRel = {
+            ...nextRel,
+            fromField: undefined,
+            toField: undefined
+          }
+        }
+
+        if (relationChanged) {
+          hasClearedMappings = true
+        }
+
+        return nextRel
+      })
       
       // Cytoscape 노드 스타일 업데이트
       if (cy) {
@@ -6309,6 +6495,12 @@ async function confirmDataSourceMapping(nodeId: string, candidate: any) {
         if (detailPanelTab.value === 'data') {
           await fetchNodeData(nodeId)
         }
+      }
+
+      if (hasClearedMappings) {
+        alert(
+          `데이터 소스 재설정으로 기존 필드 매핑 일부가 자동 삭제되었습니다.\n\n${clearedMappings.join('\n')}\n\n필요하면 릴레이션 속성 패널에서 다시 설정해주세요.`
+        )
       }
       
       // 성공 메시지 (간단하게)
@@ -9410,6 +9602,53 @@ watch(detailPanelTab, (newTab, oldTab) => {
   font-size: 1.2rem;
   font-weight: bold;
   flex-shrink: 0;
+}
+
+.field-status {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.field-status.loading {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.field-status.no-datasource {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.field-status.error {
+  padding: 10px 12px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
+.link-datasource-btn-sm {
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  background: rgba(59, 130, 246, 0.14);
+  color: #93c5fd;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  flex-shrink: 0;
+}
+
+.link-datasource-btn-sm:hover {
+  background: rgba(59, 130, 246, 0.22);
+  border-color: rgba(96, 165, 250, 0.5);
 }
 
 /* ========== Cascading 필터 정보 ========== */
@@ -13122,6 +13361,33 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 .light-mode .field-node-hint {
   color: #94a3b8 !important;
+}
+
+.light-mode .field-status.loading {
+  color: #64748b !important;
+}
+
+.light-mode .field-status.no-datasource {
+  background: rgba(15, 23, 42, 0.02) !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+  color: #475569 !important;
+}
+
+.light-mode .field-status.error {
+  background: rgba(239, 68, 68, 0.06) !important;
+  border-color: rgba(239, 68, 68, 0.18) !important;
+  color: #dc2626 !important;
+}
+
+.light-mode .link-datasource-btn-sm {
+  background: rgba(59, 130, 246, 0.08) !important;
+  border-color: rgba(59, 130, 246, 0.22) !important;
+  color: #2563eb !important;
+}
+
+.light-mode .link-datasource-btn-sm:hover {
+  background: rgba(59, 130, 246, 0.14) !important;
+  border-color: rgba(59, 130, 246, 0.3) !important;
 }
 
 .light-mode .field-mapping-arrow {
