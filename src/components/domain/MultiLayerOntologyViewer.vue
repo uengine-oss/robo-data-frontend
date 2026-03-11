@@ -722,56 +722,15 @@
           />
         </div>
         
-        <!-- Behavior 탭 (연결된 모델 정보) -->
+        <!-- Behavior 탭 (Agents.md 에디터 + 연결된 모델 정보) -->
         <div class="detail-content behavior-tab" v-if="detailPanelTab === 'behavior'">
-          <div v-if="behaviorLoading" class="data-loading">
-            <div class="loading-spinner small"></div>
-            <span>모델 정보 조회 중...</span>
-          </div>
-          <div v-else-if="nodeBehaviors.length === 0" class="behavior-empty">
-            <p>이 노드와 연결된 모델이 없습니다.</p>
-            <p class="behavior-hint">What-if 분석에서 모델을 학습/등록하면 여기에 표시됩니다.</p>
-          </div>
-          <div v-else class="behavior-list">
-            <div v-for="bm in nodeBehaviors" :key="bm.modelId" class="behavior-card" :class="bm.role">
-              <!-- 역할 배지 -->
-              <div class="behavior-header">
-                <span class="role-badge" :class="bm.role">
-                  {{ bm.role === 'output' ? '📤 출력 모델' : '📥 입력 모델' }}
-                </span>
-                <span class="behavior-status" :class="bm.status">{{ bm.status }}</span>
-              </div>
-              <!-- 모델 이름 -->
-              <div class="behavior-name">{{ bm.name }}</div>
-              <!-- 설명 -->
-              <div v-if="bm.description" class="behavior-desc">{{ bm.description }}</div>
-              <!-- 입력/출력 필드 -->
-              <div class="behavior-io">
-                <div v-if="bm.inputs.length > 0" class="io-group">
-                  <span class="io-label">입력:</span>
-                  <span v-for="inp in bm.inputs" :key="inp.field" class="io-tag input-tag" :title="inp.field">
-                    {{ inp.field }}
-                  </span>
-                </div>
-                <div v-if="bm.outputs.length > 0" class="io-group">
-                  <span class="io-label">출력:</span>
-                  <span v-for="out in bm.outputs" :key="out.field" class="io-tag output-tag" :title="out.field">
-                    {{ out.field }}
-                  </span>
-                </div>
-              </div>
-              <!-- 메트릭 -->
-              <div v-if="bm.metrics" class="behavior-metrics">
-                <span v-for="(val, key) in JSON.parse(bm.metrics || '{}')" :key="key" class="metric-tag">
-                  {{ key }}: {{ typeof val === 'number' ? val.toFixed(3) : val }}
-                </span>
-              </div>
-              <!-- 삭제 버튼 -->
-              <button class="behavior-delete-btn" @click="deleteBehaviorModel(bm.modelId)" title="모델 삭제">
-                🗑️
-              </button>
-            </div>
-          </div>
+          <AgentsMdEditor 
+            v-if="selectedNode"
+            :node-type-name="selectedNode.name"
+            :behavior-models="nodeBehaviors"
+            @agent-created="loadNodeBehaviors(selectedNode.id)"
+            @agent-deleted="loadNodeBehaviors(selectedNode.id)"
+          />
         </div>
         
         <!-- BPMN 탭 -->
@@ -1832,6 +1791,7 @@ import WhatIfPanel from '@/components/ontology/whatif/WhatIfPanel.vue'
 import LineChart from '@/components/charts/LineChart.vue'
 import CausalAnalysisPanel from '@/components/domain/CausalAnalysisPanel.vue'
 import BpmnViewer from '@/components/domain/BpmnViewer.vue'
+import AgentsMdEditor from '@/components/domain/AgentsMdEditor.vue'
 import SchemaBasedGenerator from '@/components/ontology/SchemaBasedGenerator.vue'
 import { text2sqlApi } from '@/services/api'
 import type { ReactRequest, ReactStreamEvent } from '@/types'
@@ -5085,6 +5045,50 @@ function getCytoscapeStyles(): cytoscape.Stylesheet[] {
         'line-style': 'dashed'
       }
     },
+    // Visual effects: alert (pulsing red glow)
+    {
+      selector: 'node.fx-alert',
+      style: {
+        'border-width': 5,
+        'border-color': '#ef4444',
+        'border-opacity': 1,
+        'overlay-color': '#ef4444',
+        'overlay-padding': 10,
+        'overlay-opacity': 0.15,
+      } as any
+    },
+    // Visual effects: badge (shows label above node)
+    {
+      selector: 'node.fx-badge',
+      style: {
+        'border-width': 3,
+        'border-color': '#facc15',
+        'border-opacity': 0.9,
+      } as any
+    },
+    // Agent activity indicator - pulsing border for nodes with active agents
+    {
+      selector: 'node.agent-active',
+      style: {
+        'border-width': 4,
+        'border-color': '#22d3ee',
+        'border-opacity': 0.9,
+        'overlay-color': '#22d3ee',
+        'overlay-padding': 6,
+        'overlay-opacity': 0.08,
+      } as any
+    },
+    {
+      selector: 'node.agent-running',
+      style: {
+        'border-width': 5,
+        'border-color': '#6366f1',
+        'border-opacity': 1,
+        'overlay-color': '#6366f1',
+        'overlay-padding': 8,
+        'overlay-opacity': 0.12,
+      } as any
+    },
     // Edgehandles 스타일 - 테두리 호버 시 밝은 외곽 링
     {
       selector: '.eh-hover',
@@ -8274,6 +8278,158 @@ function updateCytoscapeTheme() {
   }
 }
 
+// ============================================================================
+// Agent Activity Monitoring + Visual Effects
+// ============================================================================
+import { nodeAgentSchedulerApi, nodeVisualEffectsApi } from '@/services/api'
+import type { NodeAgentState, NodeAgentLog, NodeVisualEffects } from '@/services/api'
+
+const agentStates = ref<Map<string, NodeAgentState>>(new Map())
+let agentPollInterval: ReturnType<typeof setInterval> | null = null
+
+// Agent log streaming state
+const agentLogStream = ref<NodeAgentLog[]>([])
+const agentLogEventSource = ref<EventSource | null>(null)
+const showAgentMonitor = ref(false)
+const agentFeedbackText = ref('')
+
+async function pollAgentStates() {
+  try {
+    const states = await nodeAgentSchedulerApi.listAgents()
+    const newMap = new Map<string, NodeAgentState>()
+    for (const s of states) {
+      newMap.set(s.node_type_name, s)
+    }
+    agentStates.value = newMap
+
+    // Update Cytoscape node classes
+    if (cy) {
+      cy.nodes().forEach((node: any) => {
+        const label = node.data('label')
+        const agentState = newMap.get(label)
+        node.removeClass('agent-active agent-running')
+        if (agentState) {
+          if (agentState.status === 'running') {
+            node.addClass('agent-running')
+          } else if (agentState.status === 'idle' || agentState.status === 'paused') {
+            node.addClass('agent-active')
+          }
+        }
+      })
+    }
+  } catch {
+    // Scheduler might not be running; silently ignore
+  }
+}
+
+function startAgentLogStream(nodeType: string) {
+  stopAgentLogStream()
+  agentLogStream.value = []
+  try {
+    const es = nodeAgentSchedulerApi.createLogStream(nodeType)
+    es.onmessage = (event) => {
+      try {
+        const log = JSON.parse(event.data)
+        agentLogStream.value.push(log)
+        if (agentLogStream.value.length > 100) {
+          agentLogStream.value = agentLogStream.value.slice(-100)
+        }
+      } catch { /* ignore parse errors */ }
+    }
+    es.onerror = () => {
+      // Connection lost, will auto-retry
+    }
+    agentLogEventSource.value = es
+  } catch { /* scheduler not available */ }
+}
+
+function stopAgentLogStream() {
+  if (agentLogEventSource.value) {
+    agentLogEventSource.value.close()
+    agentLogEventSource.value = null
+  }
+}
+
+async function controlAgent(nodeType: string, action: 'stop' | 'pause' | 'resume') {
+  try {
+    await nodeAgentSchedulerApi.control(nodeType, action)
+    await pollAgentStates()
+  } catch (e: any) {
+    console.error('Agent control error:', e)
+  }
+}
+
+async function submitAgentFeedback(nodeType: string) {
+  if (!agentFeedbackText.value.trim()) return
+  try {
+    await nodeAgentSchedulerApi.submitFeedback(nodeType, agentFeedbackText.value.trim())
+    agentFeedbackText.value = ''
+  } catch (e: any) {
+    console.error('Feedback submit error:', e)
+  }
+}
+
+function getAgentStateForNode(nodeName: string): NodeAgentState | undefined {
+  return agentStates.value.get(nodeName)
+}
+
+// ------- Visual Effects -------
+const nodeVisualFx = ref<Record<string, NodeVisualEffects>>({})
+
+async function pollVisualEffects() {
+  try {
+    const result = await nodeVisualEffectsApi.getAll()
+    nodeVisualFx.value = result.effects || {}
+    applyVisualEffectsToCytoscape()
+  } catch {
+    // Silently ignore
+  }
+}
+
+function applyVisualEffectsToCytoscape() {
+  if (!cy) return
+
+  cy.nodes().forEach((node: any) => {
+    const label = node.data('label')
+    const fx = nodeVisualFx.value[label]
+
+    // Clear previous agent effects
+    node.removeClass('fx-alert fx-badge')
+    node.removeData('badgeText')
+    node.removeData('badgeColor')
+
+    if (!fx) return
+
+    // Color override
+    if (fx.color) {
+      node.style('background-color', fx.color)
+    }
+
+    // Alert effect (pulsing border)
+    if (fx.alert) {
+      node.addClass('fx-alert')
+    }
+
+    // Badge — prepend to label
+    if (fx.badge) {
+      node.addClass('fx-badge')
+      const originalLabel = node.data('originalLabel') || node.data('label')
+      if (!node.data('originalLabel')) {
+        node.data('originalLabel', originalLabel)
+      }
+      node.data('label', `${fx.badge} ${originalLabel}`)
+    } else if (node.data('originalLabel')) {
+      node.data('label', node.data('originalLabel'))
+      node.removeData('originalLabel')
+    }
+
+    // Opacity
+    if (fx.opacity !== undefined && fx.opacity !== null) {
+      node.style('opacity', fx.opacity)
+    }
+  })
+}
+
 // Lifecycle
 onMounted(async () => {
   // 키보드 단축키 등록 (Ctrl+Z, Ctrl+Y)
@@ -8307,6 +8463,14 @@ onMounted(async () => {
   if (nodes.value.length > 0) {
     initCytoscape()
   }
+
+  // Start agent activity + visual effects polling (every 10s / 5s)
+  pollAgentStates()
+  pollVisualEffects()
+  agentPollInterval = setInterval(() => {
+    pollAgentStates()
+    pollVisualEffects()
+  }, 5000)
 })
 
 onUnmounted(() => {
@@ -8332,6 +8496,12 @@ onUnmounted(() => {
     chartInstance.dispose()
     chartInstance = null
   }
+  // Stop agent polling
+  if (agentPollInterval) {
+    clearInterval(agentPollInterval)
+    agentPollInterval = null
+  }
+  stopAgentLogStream()
 })
 
 // nodeDataResult 변경 시 차트 렌더링
@@ -9770,9 +9940,10 @@ watch(detailPanelTab, (newTab, oldTab) => {
   max-width: 800px;
   flex-shrink: 0;
   height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
   /* Glassmorphism 효과 - 투명도 낮춰서 뒤가 비치도록 */
   background: rgba(20, 20, 30, 0.6);
   backdrop-filter: blur(20px);
@@ -9829,8 +10000,7 @@ watch(detailPanelTab, (newTab, oldTab) => {
   background: rgba(255, 255, 255, 0.01);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  position: sticky;
-  top: 48px;
+  flex-shrink: 0;
   z-index: 1;
 }
 
@@ -9877,6 +10047,9 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 .detail-content {
   padding: 16px 20px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* BPMN 탭 - 다이어그램 영역을 최대한 활용 */
@@ -10293,6 +10466,7 @@ watch(detailPanelTab, (newTab, oldTab) => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 4px;
+  flex-shrink: 0;
 }
 
 .detail-header h3 {
@@ -14414,7 +14588,49 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 /* What-if 분석 버튼 */
 /* Behavior 탭 스타일 */
-.behavior-tab { padding: 12px !important; }
+.behavior-tab { padding: 0 !important; overflow: hidden; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.behavior-section-header {
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-bright, #e2e8f0);
+  background: var(--color-bg-tertiary, rgba(0,0,0,0.15));
+  border-bottom: 1px solid var(--color-border, rgba(255,255,255,0.08));
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.behavior-section-divider {
+  height: 1px;
+  background: var(--color-border, rgba(255,255,255,0.08));
+  margin: 8px 0;
+}
+
+/* Agent Monitor styles */
+.agent-monitor-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.agent-status-badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  &.status-idle { background: rgba(99, 102, 241, 0.15); color: #6366f1; }
+  &.status-running { background: rgba(34, 197, 94, 0.15); color: #22c55e; animation: agent-pulse 1.5s infinite; }
+  &.status-paused { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+  &.status-stopped { background: rgba(107, 114, 128, 0.15); color: #6b7280; }
+  &.status-failed { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+  &.status-completed { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+}
+@keyframes agent-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
 .behavior-empty {
   text-align: center; padding: 24px 0; color: rgba(255,255,255,0.4);
   p { margin: 4px 0; font-size: 0.85rem; }
