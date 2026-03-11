@@ -2829,6 +2829,10 @@ function toggleLayer(layerId: string) {
 }
 
 function selectNode(nodeId: string) {
+  if (showRelationEditor.value || editingRelation.value) {
+    closeRelationEditor()
+  }
+
   selectedNodeId.value = nodeId
   detailPanelTab.value = 'info'  // 탭 초기화
   nodeDataResult.value = null    // 데이터 초기화
@@ -4062,8 +4066,8 @@ async function openRelationEditor(edgeId: string) {
     editingRelation.value = rel
   }
   
-  // 노드 선택 해제 (릴레이션 패널 표시를 위해)
-  selectedNodeId.value = null
+  // 노드 상세 패널과 선택 상태를 먼저 정리한 뒤 릴레이션 패널을 연다.
+  deselectNode()
   
   // 폼 초기화
   editingRelationForm.value = {
@@ -5390,6 +5394,9 @@ function initCytoscape(shouldRestoreSelection: boolean = false) {
   
   cy.on('tap', (evt) => {
     if (evt.target === cy) {
+      if (showRelationEditor.value || editingRelation.value) {
+        closeRelationEditor()
+      }
       deselectNode()
     }
   })
