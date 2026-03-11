@@ -9283,6 +9283,59 @@ watch(detailPanelTab, (newTab, oldTab) => {
   gap: 8px;
 }
 
+/* ========== 상세 패널 내 폼 요소 공통 스타일 ========== */
+.detail-panel .form-select,
+.detail-panel .form-input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.875rem;
+  font-family: inherit;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  box-sizing: border-box;
+}
+
+.detail-panel .form-select {
+  cursor: pointer;
+  color-scheme: dark;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.5)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+}
+
+.detail-panel .form-select option {
+  background: #1e1e2e;
+  color: #e2e8f0;
+  padding: 8px 12px;
+}
+
+.detail-panel .form-select option:checked {
+  background: #334155;
+  color: #f8fafc;
+}
+
+.detail-panel .form-select:focus,
+.detail-panel .form-input:focus {
+  outline: none;
+  border-color: rgba(99, 102, 241, 0.6);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+.detail-panel .form-select:hover,
+.detail-panel .form-input:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.detail-panel .form-input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
 .dialog-footer-right {
   display: flex;
   gap: 10px;
@@ -13088,6 +13141,45 @@ watch(detailPanelTab, (newTab, oldTab) => {
   background: rgba(255, 255, 255, 0.95) !important;
   border-left: 1px solid rgba(0, 0, 0, 0.08) !important;
   box-shadow: -4px 0 16px rgba(0, 0, 0, 0.1) !important;
+}
+
+.light-mode .detail-panel .form-select,
+.light-mode .detail-panel .form-input {
+  border-color: rgba(0, 0, 0, 0.15) !important;
+  background: rgba(0, 0, 0, 0.02) !important;
+  color: #1e293b !important;
+}
+
+.light-mode .detail-panel .form-select {
+  color-scheme: light !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(0,0,0,0.4)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 12px center !important;
+}
+
+.light-mode .detail-panel .form-select option {
+  background: #ffffff !important;
+  color: #1e293b !important;
+}
+
+.light-mode .detail-panel .form-select option:checked {
+  background: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+.light-mode .detail-panel .form-select:focus,
+.light-mode .detail-panel .form-input:focus {
+  border-color: #4f46e5 !important;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12) !important;
+}
+
+.light-mode .detail-panel .form-select:hover,
+.light-mode .detail-panel .form-input:hover {
+  border-color: rgba(0, 0, 0, 0.25) !important;
+}
+
+.light-mode .detail-panel .form-input::placeholder {
+  color: #94a3b8 !important;
 }
 
 .light-mode .detail-panel h3 {
