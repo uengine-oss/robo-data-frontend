@@ -12278,37 +12278,68 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 /* New Relation Dialog */
 .new-relation-dialog {
-  width: 450px;
+  width: 460px;
   max-width: 95vw;
+  background: var(--color-bg-elevated, #1e1e2e);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.new-relation-dialog .dialog-header {
+  padding: 18px 24px;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.new-relation-dialog .dialog-header h3 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.new-relation-dialog .dialog-body {
+  padding: 24px;
+}
+
+.new-relation-dialog .dialog-footer {
+  padding: 16px 24px;
+  background: rgba(0, 0, 0, 0.15);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .relation-preview {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 20px;
-  padding: 24px;
-  background: var(--color-bg-tertiary);
+  gap: 16px;
+  padding: 20px 24px;
+  background: rgba(255, 255, 255, 0.03);
   border-radius: var(--radius-md);
-  margin-bottom: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 24px;
 }
 
 .node-preview {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
+  gap: 10px;
+  padding: 10px 16px;
   background: var(--color-bg-secondary);
   border-radius: var(--radius-md);
   border: 2px solid var(--color-border);
+  transition: border-color 0.2s ease;
 }
 
 .node-preview.source {
   border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.06);
 }
 
 .node-preview.target {
   border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.06);
 }
 
 .node-icon {
@@ -12325,56 +12356,83 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 .node-preview .node-name {
   font-weight: 500;
+  font-size: 0.9rem;
   color: var(--color-text-bright);
 }
 
 .relation-arrow {
   font-size: 1.5rem;
-  color: var(--color-text-light);
+  color: var(--color-text-muted, var(--color-text-light));
+  opacity: 0.6;
 }
 
-.form-group {
-  margin-bottom: 16px;
+.new-relation-dialog .form-group {
+  margin-bottom: 18px;
 }
 
-.form-group label {
+.new-relation-dialog .form-group label {
   display: block;
-  margin-bottom: 6px;
-  font-size: 0.875rem;
-  font-weight: 500;
+  margin-bottom: 8px;
+  font-size: 0.8125rem;
+  font-weight: 600;
   color: var(--color-text-bright);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
-.form-select,
-.form-input {
+.new-relation-dialog .form-select,
+.new-relation-dialog .form-input {
   width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--color-border);
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--color-text);
   font-size: 0.875rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.form-select:focus,
-.form-input:focus {
+.new-relation-dialog .form-select {
+  color-scheme: dark;
+}
+
+.new-relation-dialog .form-select option {
+  background: #1e1e2e;
+  color: #e2e8f0;
+  padding: 8px 12px;
+}
+
+.new-relation-dialog .form-select option:checked {
+  background: #334155;
+  color: #f8fafc;
+}
+
+.new-relation-dialog .form-select:focus,
+.new-relation-dialog .form-input:focus {
   outline: none;
-  border-color: var(--color-primary);
+  border-color: var(--color-accent, var(--color-primary));
+  box-shadow: 0 0 0 3px rgba(34, 139, 230, 0.15);
 }
 
-.confirm-btn {
-  padding: 10px 20px;
+.new-relation-dialog .form-input::placeholder {
+  color: var(--color-text-muted, rgba(255, 255, 255, 0.3));
+}
+
+.new-relation-dialog .confirm-btn {
+  padding: 10px 22px;
   background: #22c55e;
   color: white;
   border: none;
   border-radius: var(--radius-md);
   font-size: 0.875rem;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
-.confirm-btn:hover {
+.new-relation-dialog .confirm-btn:hover {
   background: #16a34a;
+  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
 }
 
 /* 엣지 삭제 다이얼로그 */
@@ -13351,9 +13409,62 @@ watch(detailPanelTab, (newTab, oldTab) => {
 .light-mode .node-datasource-dialog,
 .light-mode .schema-list-dialog,
 .light-mode .edge-delete-dialog,
-.light-mode .edit-relation-dialog {
+.light-mode .edit-relation-dialog,
+.light-mode .new-relation-dialog {
   background: rgba(255, 255, 255, 0.98) !important;
   border: 1px solid rgba(0, 0, 0, 0.1) !important;
+}
+
+.light-mode .new-relation-dialog {
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05) !important;
+}
+
+.light-mode .new-relation-dialog .dialog-header {
+  background: rgba(0, 0, 0, 0.03) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+.light-mode .new-relation-dialog .dialog-footer {
+  background: rgba(0, 0, 0, 0.03) !important;
+  border-top-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+.light-mode .relation-preview {
+  background: rgba(0, 0, 0, 0.02) !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+.light-mode .node-preview.source {
+  background: rgba(34, 197, 94, 0.05) !important;
+}
+
+.light-mode .node-preview.target {
+  background: rgba(59, 130, 246, 0.05) !important;
+}
+
+.light-mode .new-relation-dialog .form-select,
+.light-mode .new-relation-dialog .form-input {
+  border-color: rgba(0, 0, 0, 0.15) !important;
+  background: rgba(0, 0, 0, 0.02) !important;
+}
+
+.light-mode .new-relation-dialog .form-select {
+  color-scheme: light !important;
+}
+
+.light-mode .new-relation-dialog .form-select option {
+  background: #ffffff !important;
+  color: #1e293b !important;
+}
+
+.light-mode .new-relation-dialog .form-select option:checked {
+  background: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+.light-mode .new-relation-dialog .form-select:focus,
+.light-mode .new-relation-dialog .form-input:focus {
+  border-color: var(--color-accent) !important;
 }
 
 .light-mode .node-info-section {
