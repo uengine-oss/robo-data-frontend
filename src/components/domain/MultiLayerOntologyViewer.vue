@@ -4094,18 +4094,30 @@ function closeRelationEditor() {
 function saveRelationEditor() {
   if (!editingRelation.value) return
   
-  // 상태 저장 (undo 가능)
-  saveState()
-  
   const relIndex = relationships.value.findIndex(r => r.id === editingRelation.value!.id)
   if (relIndex !== -1) {
-    relationships.value[relIndex] = {
+    const nextRelation = {
       ...relationships.value[relIndex],
       type: editingRelationForm.value.type,
       description: editingRelationForm.value.description || undefined,
       fromField: editingRelationForm.value.fromField || undefined,
       toField: editingRelationForm.value.toField || undefined
     }
+
+    const currentRelation = relationships.value[relIndex]
+    const isUnchanged =
+      currentRelation.type === nextRelation.type &&
+      currentRelation.description === nextRelation.description &&
+      currentRelation.fromField === nextRelation.fromField &&
+      currentRelation.toField === nextRelation.toField
+
+    if (isUnchanged) return
+
+    // 실제 변경이 있을 때만 상태 저장 (undo 가능)
+    saveState()
+
+    relationships.value[relIndex] = nextRelation
+    editingRelation.value = nextRelation
     
     // Cytoscape 엣지 라벨 업데이트
     if (cy) {
@@ -4116,8 +4128,6 @@ function saveRelationEditor() {
       }
     }
   }
-  
-  closeRelationEditor()
 }
 
 function deleteRelationFromEditor() {
