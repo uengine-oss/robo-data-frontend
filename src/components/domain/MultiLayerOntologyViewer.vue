@@ -479,20 +479,34 @@
               
               <div class="detail-row">
                 <label>From 필드 <span class="field-node-hint">({{ getNodeName(editingRelation.source) }})</span></label>
-                <select v-if="sourceNodeColumns.length > 0" v-model="editingRelationForm.fromField" class="form-select" @change="saveRelationEditor">
+                <span v-if="sourceColumnStatus === 'loading'" class="field-status loading">컬럼 정보 로딩 중...</span>
+                <div v-else-if="sourceColumnStatus === 'no_datasource'" class="field-status no-datasource">
+                  <span>데이터 소스가 연결되지 않았습니다.</span>
+                  <button type="button" class="link-datasource-btn-sm" @click="openNodeDataSourceDialog(editingRelation.source)">연결</button>
+                </div>
+                <div v-else-if="sourceColumnStatus === 'error'" class="field-status error">
+                  {{ sourceColumnError || 'From 노드의 컬럼 정보를 조회할 수 없습니다.' }}
+                </div>
+                <select v-else v-model="editingRelationForm.fromField" class="form-select" @change="saveRelationEditor">
                   <option value="">(미설정)</option>
                   <option v-for="col in sourceNodeColumns" :key="col" :value="col">{{ col }}</option>
                 </select>
-                <input v-else v-model="editingRelationForm.fromField" type="text" class="form-input" placeholder="필드명 입력" @blur="saveRelationEditor" />
               </div>
               
               <div class="detail-row">
                 <label>To 필드 <span class="field-node-hint">({{ getNodeName(editingRelation.target) }})</span></label>
-                <select v-if="targetNodeColumns.length > 0" v-model="editingRelationForm.toField" class="form-select" @change="saveRelationEditor">
+                <span v-if="targetColumnStatus === 'loading'" class="field-status loading">컬럼 정보 로딩 중...</span>
+                <div v-else-if="targetColumnStatus === 'no_datasource'" class="field-status no-datasource">
+                  <span>데이터 소스가 연결되지 않았습니다.</span>
+                  <button type="button" class="link-datasource-btn-sm" @click="openNodeDataSourceDialog(editingRelation.target)">연결</button>
+                </div>
+                <div v-else-if="targetColumnStatus === 'error'" class="field-status error">
+                  {{ targetColumnError || 'To 노드의 컬럼 정보를 조회할 수 없습니다.' }}
+                </div>
+                <select v-else v-model="editingRelationForm.toField" class="form-select" @change="saveRelationEditor">
                   <option value="">(미설정)</option>
                   <option v-for="col in targetNodeColumns" :key="col" :value="col">{{ col }}</option>
                 </select>
-                <input v-else v-model="editingRelationForm.toField" type="text" class="form-input" placeholder="필드명 입력" @blur="saveRelationEditor" />
               </div>
             </div>
             
@@ -708,56 +722,15 @@
           />
         </div>
         
-        <!-- Behavior 탭 (연결된 모델 정보) -->
+        <!-- Behavior 탭 (Agents.md 에디터 + 연결된 모델 정보) -->
         <div class="detail-content behavior-tab" v-if="detailPanelTab === 'behavior'">
-          <div v-if="behaviorLoading" class="data-loading">
-            <div class="loading-spinner small"></div>
-            <span>모델 정보 조회 중...</span>
-          </div>
-          <div v-else-if="nodeBehaviors.length === 0" class="behavior-empty">
-            <p>이 노드와 연결된 모델이 없습니다.</p>
-            <p class="behavior-hint">What-if 분석에서 모델을 학습/등록하면 여기에 표시됩니다.</p>
-          </div>
-          <div v-else class="behavior-list">
-            <div v-for="bm in nodeBehaviors" :key="bm.modelId" class="behavior-card" :class="bm.role">
-              <!-- 역할 배지 -->
-              <div class="behavior-header">
-                <span class="role-badge" :class="bm.role">
-                  {{ bm.role === 'output' ? '📤 출력 모델' : '📥 입력 모델' }}
-                </span>
-                <span class="behavior-status" :class="bm.status">{{ bm.status }}</span>
-              </div>
-              <!-- 모델 이름 -->
-              <div class="behavior-name">{{ bm.name }}</div>
-              <!-- 설명 -->
-              <div v-if="bm.description" class="behavior-desc">{{ bm.description }}</div>
-              <!-- 입력/출력 필드 -->
-              <div class="behavior-io">
-                <div v-if="bm.inputs.length > 0" class="io-group">
-                  <span class="io-label">입력:</span>
-                  <span v-for="inp in bm.inputs" :key="inp.field" class="io-tag input-tag" :title="inp.field">
-                    {{ inp.field }}
-                  </span>
-                </div>
-                <div v-if="bm.outputs.length > 0" class="io-group">
-                  <span class="io-label">출력:</span>
-                  <span v-for="out in bm.outputs" :key="out.field" class="io-tag output-tag" :title="out.field">
-                    {{ out.field }}
-                  </span>
-                </div>
-              </div>
-              <!-- 메트릭 -->
-              <div v-if="bm.metrics" class="behavior-metrics">
-                <span v-for="(val, key) in JSON.parse(bm.metrics || '{}')" :key="key" class="metric-tag">
-                  {{ key }}: {{ typeof val === 'number' ? val.toFixed(3) : val }}
-                </span>
-              </div>
-              <!-- 삭제 버튼 -->
-              <button class="behavior-delete-btn" @click="deleteBehaviorModel(bm.modelId)" title="모델 삭제">
-                🗑️
-              </button>
-            </div>
-          </div>
+          <AgentsMdEditor 
+            v-if="selectedNode"
+            :node-type-name="selectedNode.name"
+            :behavior-models="nodeBehaviors"
+            @agent-created="loadNodeBehaviors(selectedNode.id)"
+            @agent-deleted="loadNodeBehaviors(selectedNode.id)"
+          />
         </div>
         
         <!-- BPMN 탭 -->
@@ -1818,6 +1791,7 @@ import WhatIfPanel from '@/components/ontology/whatif/WhatIfPanel.vue'
 import LineChart from '@/components/charts/LineChart.vue'
 import CausalAnalysisPanel from '@/components/domain/CausalAnalysisPanel.vue'
 import BpmnViewer from '@/components/domain/BpmnViewer.vue'
+import AgentsMdEditor from '@/components/domain/AgentsMdEditor.vue'
 import SchemaBasedGenerator from '@/components/ontology/SchemaBasedGenerator.vue'
 import { text2sqlApi } from '@/services/api'
 import type { ReactRequest, ReactStreamEvent } from '@/types'
@@ -1863,6 +1837,14 @@ interface OntologyRelationship {
   toField?: string    // target 노드의 연결 필드 (FK/join key)
 }
 
+type FieldMappingStatus = 'no_datasource' | 'loading' | 'ready' | 'error'
+
+interface FetchColumnsResult {
+  status: FieldMappingStatus
+  columns: string[]
+  error?: string
+}
+
 interface LayerInfo {
   id: string
   name: string
@@ -1899,12 +1881,22 @@ let cy: cytoscape.Core | null = null
 let themeObserver: MutationObserver | null = null
 let edgehandlesInstance: any = null
 let tempEdgeFromEdgehandles: any = null  // edgehandles가 자동 생성한 임시 엣지 참조
+let edgehandlesBoundCy: cytoscape.Core | null = null
+let edgehandlesStartHandler: ((evt?: any) => void) | null = null
+let edgehandlesCompleteHandler: ((evt: any, sourceNode: any, targetNode: any, addedEles: any) => void) | null = null
+let edgehandlesStopHandler: ((evt?: any) => void) | null = null
+let edgehandlesShowHandler: ((evt: any, targetNode: any) => void) | null = null
+let edgehandlesHideHandler: ((evt: any, targetNode: any) => void) | null = null
+let edgehandlesMousemoveHandler: ((evt: any) => void) | null = null
+let edgehandlesMouseoutHandler: ((evt: any) => void) | null = null
+let edgehandlesHoverSuspendUntil = 0
 
 // 드래그 앤 드롭 연결 상태
 const isDraggingHandle = ref(false)
 const hoveredNodeId = ref<string | null>(null)
 const showNewRelationDialog = ref(false)
 const newRelation = ref({
+  relationId: '',
   sourceId: '',
   targetId: '',
   type: 'CAUSES',
@@ -1926,6 +1918,157 @@ const activeFilters = ref<Record<string, any>>({})
 const hasActiveFilters = computed(() => {
   return Object.values(activeFilters.value).some(v => v !== '' && v !== null && v !== undefined)
 })
+
+function removeTransientCanvasEdges() {
+  if (!cy) return
+
+  const relationshipIds = new Set(relationships.value.map(rel => rel.id))
+  cy.edges().forEach((edge) => {
+    if (edge.hasClass('model-overlay')) return
+    if (!relationshipIds.has(edge.id())) {
+      edge.remove()
+    }
+  })
+}
+
+function resetEdgehandlesInteractionState(options?: { removeTransientEdges?: boolean }) {
+  hoveredNodeId.value = null
+  isDraggingHandle.value = false
+  tempEdgeFromEdgehandles = null
+
+  if (!cy) return
+
+  cy.nodes().removeClass('eh-presumptive-target eh-hover eh-source eh-target')
+  cy.nodes().grabify()
+  edgehandlesInstance?.disableDrawMode()
+
+  if (options?.removeTransientEdges) {
+    removeTransientCanvasEdges()
+  }
+}
+
+function detachEdgehandleCyEvents() {
+  if (!edgehandlesBoundCy) return
+
+  if (edgehandlesStartHandler) {
+    edgehandlesBoundCy.off('ehstart', edgehandlesStartHandler)
+  }
+  if (edgehandlesCompleteHandler) {
+    edgehandlesBoundCy.off('ehcomplete', edgehandlesCompleteHandler)
+  }
+  if (edgehandlesStopHandler) {
+    edgehandlesBoundCy.off('ehstop', edgehandlesStopHandler)
+    edgehandlesBoundCy.off('ehcancel', edgehandlesStopHandler)
+  }
+  if (edgehandlesShowHandler) {
+    edgehandlesBoundCy.off('ehshow', edgehandlesShowHandler)
+  }
+  if (edgehandlesHideHandler) {
+    edgehandlesBoundCy.off('ehhide', edgehandlesHideHandler)
+  }
+  if (edgehandlesMousemoveHandler) {
+    edgehandlesBoundCy.off('mousemove', 'node', edgehandlesMousemoveHandler)
+  }
+  if (edgehandlesMouseoutHandler) {
+    edgehandlesBoundCy.off('mouseout', 'node', edgehandlesMouseoutHandler)
+  }
+
+  edgehandlesBoundCy = null
+  edgehandlesStartHandler = null
+  edgehandlesCompleteHandler = null
+  edgehandlesStopHandler = null
+  edgehandlesShowHandler = null
+  edgehandlesHideHandler = null
+  edgehandlesMousemoveHandler = null
+  edgehandlesMouseoutHandler = null
+}
+
+function suspendEdgehandlesHover(ms: number) {
+  edgehandlesHoverSuspendUntil = Date.now() + ms
+}
+
+function handleEdgehandlesComplete(_evt: any, sourceNode: any, targetNode: any, addedEles: any) {
+  const sourceId = sourceNode?.id?.() ?? null
+  const targetId = targetNode?.id?.() ?? null
+
+  tempEdgeFromEdgehandles = addedEles ?? null
+
+  const removeAddedEles = () => {
+    if (tempEdgeFromEdgehandles && typeof tempEdgeFromEdgehandles.remove === 'function') {
+      tempEdgeFromEdgehandles.remove()
+    }
+    tempEdgeFromEdgehandles = null
+  }
+
+  if (!sourceId || !targetId) {
+    removeAddedEles()
+    return
+  }
+
+  const exists = relationships.value.some(
+    r => r.source === sourceId && r.target === targetId
+  )
+
+  if (exists || sourceId === targetId) {
+    removeAddedEles()
+    return
+  }
+
+  saveState()
+  removeAddedEles()
+
+  const draftRelation: OntologyRelationship = {
+    id: `rel_${Date.now()}`,
+    source: sourceId,
+    target: targetId,
+    type: 'CAUSES',
+    description: undefined,
+    fromField: undefined,
+    toField: undefined
+  }
+
+  relationships.value.push(draftRelation)
+  upsertRelationEdgeInCy(draftRelation)
+
+  newRelation.value = {
+    relationId: draftRelation.id,
+    sourceId,
+    targetId,
+    type: 'CAUSES',
+    description: ''
+  }
+  showNewRelationDialog.value = true
+}
+
+function upsertRelationEdgeInCy(rel: OntologyRelationship) {
+  if (!cy) return
+
+  const existingEdge = cy.getElementById(rel.id)
+  if (existingEdge.length > 0) {
+    existingEdge.data({
+      source: rel.source,
+      target: rel.target,
+      type: rel.type,
+      label: rel.type
+    })
+    return
+  }
+
+  cy.add({
+    data: {
+      id: rel.id,
+      source: rel.source,
+      target: rel.target,
+      type: rel.type,
+      label: rel.type
+    }
+  })
+}
+
+function removeRelationEdgeFromCy(relationId: string) {
+  if (!cy) return
+  cy.$(`#${relationId}`).remove()
+}
 
 function onFilterChange() {
   // 필터 변경 시 데이터 새로고침
@@ -2002,6 +2145,10 @@ const editingRelationForm = ref({
 })
 const sourceNodeColumns = ref<string[]>([])
 const targetNodeColumns = ref<string[]>([])
+const sourceColumnStatus = ref<FieldMappingStatus>('no_datasource')
+const targetColumnStatus = ref<FieldMappingStatus>('no_datasource')
+const sourceColumnError = ref('')
+const targetColumnError = ref('')
 
 // 노드별 필터 상태 (cascading filter용) - { nodeId: { field: value } }
 const nodeFilters = ref<Record<string, Record<string, any>>>({})
@@ -2668,6 +2815,10 @@ function toggleLayer(layerId: string) {
 }
 
 function selectNode(nodeId: string) {
+  if (showRelationEditor.value || editingRelation.value) {
+    closeRelationEditor()
+  }
+
   selectedNodeId.value = nodeId
   detailPanelTab.value = 'info'  // 탭 초기화
   nodeDataResult.value = null    // 데이터 초기화
@@ -3856,34 +4007,75 @@ function getNodeLayer(nodeId: string): string {
   return node?.layer || node?.label || 'Resource'
 }
 
-async function fetchNodeColumns(nodeId: string): Promise<string[]> {
+function normalizeColumnNames(columns: any): string[] {
+  if (!Array.isArray(columns)) return []
+  return Array.from(
+    new Set(
+      columns
+        .map((c: any) => typeof c === 'string' ? c : c?.name || c)
+        .filter((c: any): c is string => typeof c === 'string' && c.trim().length > 0)
+    )
+  )
+}
+
+async function fetchNodeColumns(nodeId: string): Promise<FetchColumnsResult> {
   const node = nodes.value.find(n => n.id === nodeId)
-  if (!node) return []
-  
-  // 이미 dataSourceSchema에 컬럼 정보가 있으면 사용
-  if (node.dataSourceSchema?.columns) {
-    return node.dataSourceSchema.columns.map((c: any) => typeof c === 'string' ? c : c.name || c)
-  }
-  
-  // filterFields에서 컬럼 추출
-  if (node.filterFields && node.filterFields.length > 0) {
-    return node.filterFields.map(f => f.column)
-  }
-  
-  // dataSource가 있으면 API로 컬럼 정보 조회 시도
-  if (node.dataSource) {
-    try {
-      const response = await fetch(`/api/gateway/ontology/ontology-nodes/${nodeId}/data?limit=1`)
-      if (response.ok) {
-        const result = await response.json()
-        if (result.columns) return result.columns
-      }
-    } catch (e) {
-      console.warn('컬럼 정보 조회 실패:', e)
+  if (!node) {
+    return {
+      status: 'error',
+      columns: [],
+      error: '노드 정보를 찾을 수 없습니다.'
     }
   }
-  
-  return []
+
+  if (!node.dataSource) {
+    return {
+      status: 'no_datasource',
+      columns: []
+    }
+  }
+
+  // 이미 dataSourceSchema에 컬럼 정보가 있으면 사용
+  const schemaColumns = normalizeColumnNames(node.dataSourceSchema?.columns)
+  if (schemaColumns.length > 0) {
+    return {
+      status: 'ready',
+      columns: schemaColumns
+    }
+  }
+
+  try {
+    const response = await fetch(`/api/gateway/ontology/ontology-nodes/${nodeId}/data?limit=1`)
+    if (!response.ok) {
+      return {
+        status: 'error',
+        columns: [],
+        error: `데이터 소스 '${node.dataSource}'의 컬럼 정보를 조회하지 못했습니다.`
+      }
+    }
+
+    const result = await response.json()
+    const columns = normalizeColumnNames(result.columns)
+    if (columns.length > 0) {
+      return {
+        status: 'ready',
+        columns
+      }
+    }
+
+    return {
+      status: 'error',
+      columns: [],
+      error: `데이터 소스 '${node.dataSource}'에 사용할 수 있는 컬럼 정보가 없습니다.`
+    }
+  } catch (e) {
+    console.warn('컬럼 정보 조회 실패:', e)
+    return {
+      status: 'error',
+      columns: [],
+      error: `데이터 소스 '${node.dataSource}'의 컬럼 메타데이터 조회에 실패했습니다.`
+    }
+  }
 }
 
 async function openRelationEditor(edgeId: string) {
@@ -3901,8 +4093,8 @@ async function openRelationEditor(edgeId: string) {
     editingRelation.value = rel
   }
   
-  // 노드 선택 해제 (릴레이션 패널 표시를 위해)
-  selectedNodeId.value = null
+  // 노드 상세 패널과 선택 상태를 먼저 정리한 뒤 릴레이션 패널을 연다.
+  deselectNode()
   
   // 폼 초기화
   editingRelationForm.value = {
@@ -3911,16 +4103,33 @@ async function openRelationEditor(edgeId: string) {
     fromField: editingRelation.value!.fromField || '',
     toField: editingRelation.value!.toField || ''
   }
-  
+
+  showRelationEditor.value = true
+  sourceColumnStatus.value = 'loading'
+  targetColumnStatus.value = 'loading'
+  sourceColumnError.value = ''
+  targetColumnError.value = ''
+  sourceNodeColumns.value = []
+  targetNodeColumns.value = []
+
   // 소스/타겟 노드의 컬럼 정보 로드
-  const [srcCols, tgtCols] = await Promise.all([
+  const [srcResult, tgtResult] = await Promise.all([
     fetchNodeColumns(editingRelation.value!.source),
     fetchNodeColumns(editingRelation.value!.target)
   ])
-  sourceNodeColumns.value = srcCols
-  targetNodeColumns.value = tgtCols
-  
-  showRelationEditor.value = true
+  sourceNodeColumns.value = srcResult.columns
+  targetNodeColumns.value = tgtResult.columns
+  sourceColumnStatus.value = srcResult.status
+  targetColumnStatus.value = tgtResult.status
+  sourceColumnError.value = srcResult.error || ''
+  targetColumnError.value = tgtResult.error || ''
+
+  if (!srcResult.columns.includes(editingRelationForm.value.fromField)) {
+    editingRelationForm.value.fromField = ''
+  }
+  if (!tgtResult.columns.includes(editingRelationForm.value.toField)) {
+    editingRelationForm.value.toField = ''
+  }
 }
 
 function closeRelationEditor() {
@@ -3928,23 +4137,66 @@ function closeRelationEditor() {
   editingRelation.value = null
   sourceNodeColumns.value = []
   targetNodeColumns.value = []
+  sourceColumnStatus.value = 'no_datasource'
+  targetColumnStatus.value = 'no_datasource'
+  sourceColumnError.value = ''
+  targetColumnError.value = ''
 }
 
 function saveRelationEditor() {
   if (!editingRelation.value) return
   
-  // 상태 저장 (undo 가능)
-  saveState()
-  
   const relIndex = relationships.value.findIndex(r => r.id === editingRelation.value!.id)
   if (relIndex !== -1) {
-    relationships.value[relIndex] = {
+    const normalizedFromField = editingRelationForm.value.fromField.trim()
+    const normalizedToField = editingRelationForm.value.toField.trim()
+
+    if (normalizedFromField) {
+      if (sourceColumnStatus.value !== 'ready') {
+        alert(sourceColumnError.value || 'From 노드의 컬럼 정보를 확인할 수 없어 필드 매핑을 저장할 수 없습니다.')
+        return
+      }
+      if (!sourceNodeColumns.value.includes(normalizedFromField)) {
+        alert(`From 필드 '${normalizedFromField}'은(는) 현재 데이터 소스 컬럼에 없습니다.`)
+        editingRelationForm.value.fromField = ''
+        return
+      }
+    }
+
+    if (normalizedToField) {
+      if (targetColumnStatus.value !== 'ready') {
+        alert(targetColumnError.value || 'To 노드의 컬럼 정보를 확인할 수 없어 필드 매핑을 저장할 수 없습니다.')
+        return
+      }
+      if (!targetNodeColumns.value.includes(normalizedToField)) {
+        alert(`To 필드 '${normalizedToField}'은(는) 현재 데이터 소스 컬럼에 없습니다.`)
+        editingRelationForm.value.toField = ''
+        return
+      }
+    }
+
+    const nextRelation = {
       ...relationships.value[relIndex],
       type: editingRelationForm.value.type,
       description: editingRelationForm.value.description || undefined,
-      fromField: editingRelationForm.value.fromField || undefined,
-      toField: editingRelationForm.value.toField || undefined
+      fromField: normalizedFromField || undefined,
+      toField: normalizedToField || undefined
     }
+
+    const currentRelation = relationships.value[relIndex]
+    const isUnchanged =
+      currentRelation.type === nextRelation.type &&
+      currentRelation.description === nextRelation.description &&
+      currentRelation.fromField === nextRelation.fromField &&
+      currentRelation.toField === nextRelation.toField
+
+    if (isUnchanged) return
+
+    // 실제 변경이 있을 때만 상태 저장 (undo 가능)
+    saveState()
+
+    relationships.value[relIndex] = nextRelation
+    editingRelation.value = nextRelation
     
     // Cytoscape 엣지 라벨 업데이트
     if (cy) {
@@ -3955,8 +4207,6 @@ function saveRelationEditor() {
       }
     }
   }
-  
-  closeRelationEditor()
 }
 
 function deleteRelationFromEditor() {
@@ -4262,6 +4512,10 @@ function handleKeyDown(event: KeyboardEvent) {
     event.preventDefault()
     redo()
   }
+}
+
+function handleWindowBlur() {
+  resetEdgehandlesInteractionState({ removeTransientEdges: true })
 }
 
 function isKPIOrMeasure(node: { layer?: string; label?: string } | null): boolean {
@@ -4791,6 +5045,50 @@ function getCytoscapeStyles(): cytoscape.Stylesheet[] {
         'line-style': 'dashed'
       }
     },
+    // Visual effects: alert (pulsing red glow)
+    {
+      selector: 'node.fx-alert',
+      style: {
+        'border-width': 5,
+        'border-color': '#ef4444',
+        'border-opacity': 1,
+        'overlay-color': '#ef4444',
+        'overlay-padding': 10,
+        'overlay-opacity': 0.15,
+      } as any
+    },
+    // Visual effects: badge (shows label above node)
+    {
+      selector: 'node.fx-badge',
+      style: {
+        'border-width': 3,
+        'border-color': '#facc15',
+        'border-opacity': 0.9,
+      } as any
+    },
+    // Agent activity indicator - pulsing border for nodes with active agents
+    {
+      selector: 'node.agent-active',
+      style: {
+        'border-width': 4,
+        'border-color': '#22d3ee',
+        'border-opacity': 0.9,
+        'overlay-color': '#22d3ee',
+        'overlay-padding': 6,
+        'overlay-opacity': 0.08,
+      } as any
+    },
+    {
+      selector: 'node.agent-running',
+      style: {
+        'border-width': 5,
+        'border-color': '#6366f1',
+        'border-opacity': 1,
+        'overlay-color': '#6366f1',
+        'overlay-padding': 8,
+        'overlay-opacity': 0.12,
+      } as any
+    },
     // Edgehandles 스타일 - 테두리 호버 시 밝은 외곽 링
     {
       selector: '.eh-hover',
@@ -5028,9 +5326,16 @@ function initCytoscape(shouldRestoreSelection: boolean = false) {
   console.log('Initializing Cytoscape with', nodes.value.length, 'nodes and', relationships.value.length, 'relationships')
   
   if (cy) {
+    detachEdgehandleCyEvents()
+    edgehandlesInstance?.destroy()
+    edgehandlesInstance = null
     cy.destroy()
     cy = null
   }
+
+  // 스키마를 새로 로드한 직후에는 마우스 위치가 우연히 노드 테두리 위에 있어도
+  // 연결 모드로 즉시 진입하지 않도록 잠시 보호 시간을 둔다.
+  suspendEdgehandlesHover(shouldRestoreSelection ? 1200 : 250)
   
   const elements: cytoscape.ElementDefinition[] = []
   
@@ -5208,6 +5513,9 @@ function initCytoscape(shouldRestoreSelection: boolean = false) {
   
   cy.on('tap', (evt) => {
     if (evt.target === cy) {
+      if (showRelationEditor.value || editingRelation.value) {
+        closeRelationEditor()
+      }
       deselectNode()
     }
   })
@@ -5385,10 +5693,12 @@ function restoreSelectedNode() {
   }
 }
 
-// Edgehandles 초기화 - 테두리 영역 호버 시 연결 모드 활성화
+// Edgehandles 초기화 - Shift + 노드 가장자리 드래그로 관계 생성
 function initEdgehandles() {
   if (!cy) return
   
+  detachEdgehandleCyEvents()
+
   // 기존 인스턴스 정리
   if (edgehandlesInstance) {
     edgehandlesInstance.destroy()
@@ -5416,68 +5726,48 @@ function initEdgehandles() {
     handleHitThreshold: 50,
     edgeParams: () => ({
       data: { type: 'CAUSES' }
-    }),
-    complete: (sourceNode: any, targetNode: any, addedEles: any) => {
-      // edgehandles가 자동 생성한 임시 엣지 참조 저장 (나중에 제거하기 위해)
-      tempEdgeFromEdgehandles = addedEles
-      
-      // 새 관계 생성 완료 시
-      const sourceId = sourceNode.id()
-      const targetId = targetNode.id()
-      
-      // 중복 체크
-      const exists = relationships.value.some(
-        r => r.source === sourceId && r.target === targetId
-      )
-      
-      if (!exists && sourceId !== targetId) {
-        // 관계 생성 다이얼로그 표시
-        newRelation.value = {
-          sourceId,
-          targetId,
-          type: 'CAUSES',
-          description: ''
-        }
-        showNewRelationDialog.value = true
-      } else {
-        // 중복이거나 자기 자신에게 연결 → 임시 엣지 즉시 제거
-        if (tempEdgeFromEdgehandles) {
-          tempEdgeFromEdgehandles.remove()
-          tempEdgeFromEdgehandles = null
-        }
-      }
-    }
+    })
   })
-  
+
+  edgehandlesBoundCy = cy
+
   // 드래그 시작 시 - zoom 미세 조절로 렌더링 문제 회피
-  cy.on('ehstart', () => {
+  edgehandlesStartHandler = () => {
     isDraggingHandle.value = true
     const currentZoom = cy?.zoom() || 1
     cy?.zoom(currentZoom * 1.001)
     setTimeout(() => {
       cy?.zoom(currentZoom)
     }, 50)
-  })
+  }
+  cy.on('ehstart', edgehandlesStartHandler)
+
+  edgehandlesCompleteHandler = (evt: any, sourceNode: any, targetNode: any, addedEles: any) => {
+    handleEdgehandlesComplete(evt, sourceNode, targetNode, addedEles)
+  }
+  cy.on('ehcomplete', edgehandlesCompleteHandler)
   
   // 드래그 종료 시 - 모든 상태 초기화
-  cy.on('ehstop ehcomplete ehcancel', () => {
-    isDraggingHandle.value = false
-    hoveredNodeId.value = null
-    cy?.nodes().removeClass('eh-presumptive-target eh-hover eh-source eh-target')
-    cy?.nodes().grabify()
-    edgehandlesInstance?.disableDrawMode()
-  })
+  edgehandlesStopHandler = () => {
+    resetEdgehandlesInteractionState({
+      removeTransientEdges: true
+    })
+  }
+  cy.on('ehstop', edgehandlesStopHandler)
+  cy.on('ehcancel', edgehandlesStopHandler)
   
   // 다른 노드 위에 올라갔을 때 (스냅 대상)
-  cy.on('ehshow', (evt: any, targetNode: any) => {
+  edgehandlesShowHandler = (_evt: any, targetNode: any) => {
     cy?.nodes().removeClass('eh-presumptive-target')
     targetNode.addClass('eh-presumptive-target')
-  })
+  }
+  cy.on('ehshow', edgehandlesShowHandler)
   
   // 노드에서 벗어났을 때 (스냅 해제)
-  cy.on('ehhide', (evt: any, targetNode: any) => {
+  edgehandlesHideHandler = (_evt: any, targetNode: any) => {
     targetNode.removeClass('eh-presumptive-target')
-  })
+  }
+  cy.on('ehhide', edgehandlesHideHandler)
   
   // 테두리 영역 판별 함수 (노드 반지름의 65% 이상이면 테두리 영역)
   const isOnBorder = (node: any, mousePos: { x: number, y: number }) => {
@@ -5489,13 +5779,22 @@ function initEdgehandles() {
     return distance >= borderThreshold
   }
   
-  // 노드 위에서 마우스 이동 - 테두리 영역 체크
-  cy.on('mousemove', 'node', (evt: any) => {
+  // 노드 위에서 마우스 이동 - 기본 UX는 유지하되, 로딩 직후에는 잠시 연결 모드 진입을 막는다.
+  edgehandlesMousemoveHandler = (evt: any) => {
     if (isDraggingHandle.value) return
     
     const node = evt.target
     const nodeId = node.id()
     const mousePos = evt.position
+    const hoverSuspended = Date.now() < edgehandlesHoverSuspendUntil
+    const wantsConnectionMode = !hoverSuspended && !showNewRelationDialog.value && !loading.value && !isLoadingSchema.value
+
+    if (!wantsConnectionMode) {
+      if (hoveredNodeId.value) {
+        resetEdgehandlesInteractionState()
+      }
+      return
+    }
     
     if (isOnBorder(node, mousePos)) {
       // 테두리 영역 - 연결 모드 활성화
@@ -5515,31 +5814,27 @@ function initEdgehandles() {
     } else {
       // 중앙 영역 - 이동 모드
       if (hoveredNodeId.value === nodeId) {
-        hoveredNodeId.value = null
-        node.removeClass('eh-hover')
-        node.grabify()
-        edgehandlesInstance?.disableDrawMode()
+        resetEdgehandlesInteractionState()
       }
     }
-  })
+  }
+  cy.on('mousemove', 'node', edgehandlesMousemoveHandler)
   
   // 노드 마우스 아웃 - 상태 정리
-  cy.on('mouseout', 'node', (evt: any) => {
+  edgehandlesMouseoutHandler = (evt: any) => {
     if (isDraggingHandle.value) return
     
     const node = evt.target
     const nodeId = node.id()
     
     if (hoveredNodeId.value === nodeId) {
-      hoveredNodeId.value = null
-      node.removeClass('eh-hover')
-      node.grabify()
-      edgehandlesInstance?.disableDrawMode()
+      resetEdgehandlesInteractionState()
     }
-  })
+  }
+  cy.on('mouseout', 'node', edgehandlesMouseoutHandler)
   
   // 초기 상태: drawMode 비활성화 (노드 이동 가능)
-  edgehandlesInstance.disableDrawMode()
+  resetEdgehandlesInteractionState({ removeTransientEdges: true })
 }
 
 /**
@@ -6115,6 +6410,77 @@ async function confirmDataSourceMapping(nodeId: string, candidate: any) {
           ...nodes.value.slice(nodeIndex + 1)
         ]
       }
+
+      const candidateColumns = normalizeColumnNames(candidate.columns)
+      const candidateColumnSet = new Set(candidateColumns)
+      const clearedMappings: string[] = []
+      let hasClearedMappings = false
+
+      if (showRelationEditor.value && editingRelation.value) {
+        const relationEditorError =
+          candidateColumns.length > 0
+            ? ''
+            : `데이터 소스 '${candidate.table_name}'의 컬럼 정보를 조회하지 못했습니다.`
+
+        if (editingRelation.value.source === nodeId) {
+          sourceNodeColumns.value = candidateColumns
+          sourceColumnStatus.value = candidateColumns.length > 0 ? 'ready' : 'error'
+          sourceColumnError.value = relationEditorError
+          if (!candidateColumnSet.has(editingRelationForm.value.fromField)) {
+            editingRelationForm.value.fromField = ''
+          }
+        }
+
+        if (editingRelation.value.target === nodeId) {
+          targetNodeColumns.value = candidateColumns
+          targetColumnStatus.value = candidateColumns.length > 0 ? 'ready' : 'error'
+          targetColumnError.value = relationEditorError
+          if (!candidateColumnSet.has(editingRelationForm.value.toField)) {
+            editingRelationForm.value.toField = ''
+          }
+        }
+      }
+
+      relationships.value = relationships.value.map(rel => {
+        if (rel.source !== nodeId && rel.target !== nodeId) {
+          return rel
+        }
+
+        let nextRel = rel
+        let relationChanged = false
+
+        if (rel.source === nodeId && rel.fromField && !candidateColumnSet.has(rel.fromField)) {
+          clearedMappings.push(`${getNodeName(rel.source)} → ${getNodeName(rel.target)}: From 필드 '${rel.fromField}' 삭제`)
+          nextRel = { ...nextRel, fromField: undefined }
+          relationChanged = true
+        }
+
+        if (rel.target === nodeId && rel.toField && !candidateColumnSet.has(rel.toField)) {
+          clearedMappings.push(`${getNodeName(rel.source)} → ${getNodeName(rel.target)}: To 필드 '${rel.toField}' 삭제`)
+          nextRel = { ...nextRel, toField: undefined }
+          relationChanged = true
+        }
+
+        if (relationChanged && ((nextRel.fromField && !nextRel.toField) || (!nextRel.fromField && nextRel.toField))) {
+          if (nextRel.fromField) {
+            clearedMappings.push(`${getNodeName(nextRel.source)} → ${getNodeName(nextRel.target)}: 짝이 없는 From 필드 '${nextRel.fromField}' 삭제`)
+          }
+          if (nextRel.toField) {
+            clearedMappings.push(`${getNodeName(nextRel.source)} → ${getNodeName(nextRel.target)}: 짝이 없는 To 필드 '${nextRel.toField}' 삭제`)
+          }
+          nextRel = {
+            ...nextRel,
+            fromField: undefined,
+            toField: undefined
+          }
+        }
+
+        if (relationChanged) {
+          hasClearedMappings = true
+        }
+
+        return nextRel
+      })
       
       // Cytoscape 노드 스타일 업데이트
       if (cy) {
@@ -6133,6 +6499,12 @@ async function confirmDataSourceMapping(nodeId: string, candidate: any) {
         if (detailPanelTab.value === 'data') {
           await fetchNodeData(nodeId)
         }
+      }
+
+      if (hasClearedMappings) {
+        alert(
+          `데이터 소스 재설정으로 기존 필드 매핑 일부가 자동 삭제되었습니다.\n\n${clearedMappings.join('\n')}\n\n필요하면 릴레이션 속성 패널에서 다시 설정해주세요.`
+        )
       }
       
       // 성공 메시지 (간단하게)
@@ -6839,49 +7211,48 @@ const relationTypeOptions = [
 ]
 
 async function createRelation() {
-  if (!newRelation.value.sourceId || !newRelation.value.targetId) return
-  
-  // 상태 저장 (undo 가능하도록)
-  saveState()
-  
-  const rel: OntologyRelationship = {
-    id: `rel_${Date.now()}`,
-    source: newRelation.value.sourceId,
-    target: newRelation.value.targetId,
+  if (!newRelation.value.sourceId || !newRelation.value.targetId || !newRelation.value.relationId) return
+
+  const relIndex = relationships.value.findIndex(r => r.id === newRelation.value.relationId)
+  if (relIndex === -1) {
+    showNewRelationDialog.value = false
+    return
+  }
+
+  relationships.value[relIndex] = {
+    ...relationships.value[relIndex],
     type: newRelation.value.type,
-    description: newRelation.value.description || undefined,
-    fromField: undefined,
-    toField: undefined
+    description: newRelation.value.description || undefined
   }
-  
-  // 로컬 상태에 추가
-  relationships.value.push(rel)
-  
-  // edgehandles가 자동 생성한 임시 엣지 제거 (ID가 맞지 않아 더블클릭 시 문제 발생)
-  if (tempEdgeFromEdgehandles) {
-    tempEdgeFromEdgehandles.remove()
-    tempEdgeFromEdgehandles = null
-  }
-  
-  // Cytoscape에 올바른 ID로 엣지 추가
-  if (cy) {
-    cy.add({
-      data: {
-        id: rel.id,
-        source: rel.source,
-        target: rel.target,
-        type: rel.type,
-        label: rel.type
-      }
-    })
-  }
+  resetEdgehandlesInteractionState({ removeTransientEdges: true })
+  upsertRelationEdgeInCy(relationships.value[relIndex])
   
   // 다이얼로그 닫기
   showNewRelationDialog.value = false
+  newRelation.value = {
+    relationId: '',
+    sourceId: '',
+    targetId: '',
+    type: 'CAUSES',
+    description: ''
+  }
 }
 
 function cancelRelation() {
+  if (newRelation.value.relationId) {
+    relationships.value = relationships.value.filter(r => r.id !== newRelation.value.relationId)
+    removeRelationEdgeFromCy(newRelation.value.relationId)
+  }
+
   showNewRelationDialog.value = false
+  resetEdgehandlesInteractionState({ removeTransientEdges: true })
+  newRelation.value = {
+    relationId: '',
+    sourceId: '',
+    targetId: '',
+    type: 'CAUSES',
+    description: ''
+  }
   
   // edgehandles가 자동 생성한 임시 엣지 제거
   if (tempEdgeFromEdgehandles) {
@@ -7603,6 +7974,13 @@ async function saveToNeo4j() {
     alert('저장할 온톨로지가 없습니다.')
     return
   }
+
+  if (showNewRelationDialog.value) {
+    alert('열려 있는 관계 생성 다이얼로그를 먼저 완료하거나 취소해주세요.')
+    return
+  }
+
+  resetEdgehandlesInteractionState({ removeTransientEdges: true })
   
   loading.value = true
   loadingMessage.value = 'Neo4j에 온톨로지 저장 중...'
@@ -7900,10 +8278,163 @@ function updateCytoscapeTheme() {
   }
 }
 
+// ============================================================================
+// Agent Activity Monitoring + Visual Effects
+// ============================================================================
+import { nodeAgentSchedulerApi, nodeVisualEffectsApi } from '@/services/api'
+import type { NodeAgentState, NodeAgentLog, NodeVisualEffects } from '@/services/api'
+
+const agentStates = ref<Map<string, NodeAgentState>>(new Map())
+let agentPollInterval: ReturnType<typeof setInterval> | null = null
+
+// Agent log streaming state
+const agentLogStream = ref<NodeAgentLog[]>([])
+const agentLogEventSource = ref<EventSource | null>(null)
+const showAgentMonitor = ref(false)
+const agentFeedbackText = ref('')
+
+async function pollAgentStates() {
+  try {
+    const states = await nodeAgentSchedulerApi.listAgents()
+    const newMap = new Map<string, NodeAgentState>()
+    for (const s of states) {
+      newMap.set(s.node_type_name, s)
+    }
+    agentStates.value = newMap
+
+    // Update Cytoscape node classes
+    if (cy) {
+      cy.nodes().forEach((node: any) => {
+        const label = node.data('label')
+        const agentState = newMap.get(label)
+        node.removeClass('agent-active agent-running')
+        if (agentState) {
+          if (agentState.status === 'running') {
+            node.addClass('agent-running')
+          } else if (agentState.status === 'idle' || agentState.status === 'paused') {
+            node.addClass('agent-active')
+          }
+        }
+      })
+    }
+  } catch {
+    // Scheduler might not be running; silently ignore
+  }
+}
+
+function startAgentLogStream(nodeType: string) {
+  stopAgentLogStream()
+  agentLogStream.value = []
+  try {
+    const es = nodeAgentSchedulerApi.createLogStream(nodeType)
+    es.onmessage = (event) => {
+      try {
+        const log = JSON.parse(event.data)
+        agentLogStream.value.push(log)
+        if (agentLogStream.value.length > 100) {
+          agentLogStream.value = agentLogStream.value.slice(-100)
+        }
+      } catch { /* ignore parse errors */ }
+    }
+    es.onerror = () => {
+      // Connection lost, will auto-retry
+    }
+    agentLogEventSource.value = es
+  } catch { /* scheduler not available */ }
+}
+
+function stopAgentLogStream() {
+  if (agentLogEventSource.value) {
+    agentLogEventSource.value.close()
+    agentLogEventSource.value = null
+  }
+}
+
+async function controlAgent(nodeType: string, action: 'stop' | 'pause' | 'resume') {
+  try {
+    await nodeAgentSchedulerApi.control(nodeType, action)
+    await pollAgentStates()
+  } catch (e: any) {
+    console.error('Agent control error:', e)
+  }
+}
+
+async function submitAgentFeedback(nodeType: string) {
+  if (!agentFeedbackText.value.trim()) return
+  try {
+    await nodeAgentSchedulerApi.submitFeedback(nodeType, agentFeedbackText.value.trim())
+    agentFeedbackText.value = ''
+  } catch (e: any) {
+    console.error('Feedback submit error:', e)
+  }
+}
+
+function getAgentStateForNode(nodeName: string): NodeAgentState | undefined {
+  return agentStates.value.get(nodeName)
+}
+
+// ------- Visual Effects -------
+const nodeVisualFx = ref<Record<string, NodeVisualEffects>>({})
+
+async function pollVisualEffects() {
+  try {
+    const result = await nodeVisualEffectsApi.getAll()
+    nodeVisualFx.value = result.effects || {}
+    applyVisualEffectsToCytoscape()
+  } catch {
+    // Silently ignore
+  }
+}
+
+function applyVisualEffectsToCytoscape() {
+  if (!cy) return
+
+  cy.nodes().forEach((node: any) => {
+    const label = node.data('label')
+    const fx = nodeVisualFx.value[label]
+
+    // Clear previous agent effects
+    node.removeClass('fx-alert fx-badge')
+    node.removeData('badgeText')
+    node.removeData('badgeColor')
+
+    if (!fx) return
+
+    // Color override
+    if (fx.color) {
+      node.style('background-color', fx.color)
+    }
+
+    // Alert effect (pulsing border)
+    if (fx.alert) {
+      node.addClass('fx-alert')
+    }
+
+    // Badge — prepend to label
+    if (fx.badge) {
+      node.addClass('fx-badge')
+      const originalLabel = node.data('originalLabel') || node.data('label')
+      if (!node.data('originalLabel')) {
+        node.data('originalLabel', originalLabel)
+      }
+      node.data('label', `${fx.badge} ${originalLabel}`)
+    } else if (node.data('originalLabel')) {
+      node.data('label', node.data('originalLabel'))
+      node.removeData('originalLabel')
+    }
+
+    // Opacity
+    if (fx.opacity !== undefined && fx.opacity !== null) {
+      node.style('opacity', fx.opacity)
+    }
+  })
+}
+
 // Lifecycle
 onMounted(async () => {
   // 키보드 단축키 등록 (Ctrl+Z, Ctrl+Y)
   window.addEventListener('keydown', handleKeyDown)
+  window.addEventListener('blur', handleWindowBlur)
   
   // 테마 변경 감지
   themeObserver = new MutationObserver((mutations) => {
@@ -7932,11 +8463,20 @@ onMounted(async () => {
   if (nodes.value.length > 0) {
     initCytoscape()
   }
+
+  // Start agent activity + visual effects polling (every 10s / 5s)
+  pollAgentStates()
+  pollVisualEffects()
+  agentPollInterval = setInterval(() => {
+    pollAgentStates()
+    pollVisualEffects()
+  }, 5000)
 })
 
 onUnmounted(() => {
   // 키보드 단축키 해제
   window.removeEventListener('keydown', handleKeyDown)
+  window.removeEventListener('blur', handleWindowBlur)
   
   // 클릭 이벤트 해제
   document.removeEventListener('click', onDocumentClick)
@@ -7946,6 +8486,9 @@ onUnmounted(() => {
     themeObserver = null
   }
   if (cy) {
+    detachEdgehandleCyEvents()
+    edgehandlesInstance?.destroy()
+    edgehandlesInstance = null
     cy.destroy()
     cy = null
   }
@@ -7953,6 +8496,12 @@ onUnmounted(() => {
     chartInstance.dispose()
     chartInstance = null
   }
+  // Stop agent polling
+  if (agentPollInterval) {
+    clearInterval(agentPollInterval)
+    agentPollInterval = null
+  }
+  stopAgentLogStream()
 })
 
 // nodeDataResult 변경 시 차트 렌더링
@@ -9113,6 +9662,59 @@ watch(detailPanelTab, (newTab, oldTab) => {
   gap: 8px;
 }
 
+/* ========== 상세 패널 내 폼 요소 공통 스타일 ========== */
+.detail-panel .form-select,
+.detail-panel .form-input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.875rem;
+  font-family: inherit;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  box-sizing: border-box;
+}
+
+.detail-panel .form-select {
+  cursor: pointer;
+  color-scheme: dark;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.5)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+}
+
+.detail-panel .form-select option {
+  background: #1e1e2e;
+  color: #e2e8f0;
+  padding: 8px 12px;
+}
+
+.detail-panel .form-select option:checked {
+  background: #334155;
+  color: #f8fafc;
+}
+
+.detail-panel .form-select:focus,
+.detail-panel .form-input:focus {
+  outline: none;
+  border-color: rgba(99, 102, 241, 0.6);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+.detail-panel .form-select:hover,
+.detail-panel .form-input:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.detail-panel .form-input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
 .dialog-footer-right {
   display: flex;
   gap: 10px;
@@ -9170,6 +9772,53 @@ watch(detailPanelTab, (newTab, oldTab) => {
   font-size: 1.2rem;
   font-weight: bold;
   flex-shrink: 0;
+}
+
+.field-status {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.field-status.loading {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.field-status.no-datasource {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.field-status.error {
+  padding: 10px 12px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
+.link-datasource-btn-sm {
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  background: rgba(59, 130, 246, 0.14);
+  color: #93c5fd;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  flex-shrink: 0;
+}
+
+.link-datasource-btn-sm:hover {
+  background: rgba(59, 130, 246, 0.22);
+  border-color: rgba(96, 165, 250, 0.5);
 }
 
 /* ========== Cascading 필터 정보 ========== */
@@ -9291,9 +9940,10 @@ watch(detailPanelTab, (newTab, oldTab) => {
   max-width: 800px;
   flex-shrink: 0;
   height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
   /* Glassmorphism 효과 - 투명도 낮춰서 뒤가 비치도록 */
   background: rgba(20, 20, 30, 0.6);
   backdrop-filter: blur(20px);
@@ -9350,8 +10000,7 @@ watch(detailPanelTab, (newTab, oldTab) => {
   background: rgba(255, 255, 255, 0.01);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  position: sticky;
-  top: 48px;
+  flex-shrink: 0;
   z-index: 1;
 }
 
@@ -9398,6 +10047,9 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 .detail-content {
   padding: 16px 20px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* BPMN 탭 - 다이어그램 영역을 최대한 활용 */
@@ -9814,6 +10466,7 @@ watch(detailPanelTab, (newTab, oldTab) => {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 4px;
+  flex-shrink: 0;
 }
 
 .detail-header h3 {
@@ -12108,37 +12761,68 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 /* New Relation Dialog */
 .new-relation-dialog {
-  width: 450px;
+  width: 460px;
   max-width: 95vw;
+  background: var(--color-bg-elevated, #1e1e2e);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.new-relation-dialog .dialog-header {
+  padding: 18px 24px;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.new-relation-dialog .dialog-header h3 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.new-relation-dialog .dialog-body {
+  padding: 24px;
+}
+
+.new-relation-dialog .dialog-footer {
+  padding: 16px 24px;
+  background: rgba(0, 0, 0, 0.15);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .relation-preview {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 20px;
-  padding: 24px;
-  background: var(--color-bg-tertiary);
+  gap: 16px;
+  padding: 20px 24px;
+  background: rgba(255, 255, 255, 0.03);
   border-radius: var(--radius-md);
-  margin-bottom: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 24px;
 }
 
 .node-preview {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
+  gap: 10px;
+  padding: 10px 16px;
   background: var(--color-bg-secondary);
   border-radius: var(--radius-md);
   border: 2px solid var(--color-border);
+  transition: border-color 0.2s ease;
 }
 
 .node-preview.source {
   border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.06);
 }
 
 .node-preview.target {
   border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.06);
 }
 
 .node-icon {
@@ -12155,56 +12839,83 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 .node-preview .node-name {
   font-weight: 500;
+  font-size: 0.9rem;
   color: var(--color-text-bright);
 }
 
 .relation-arrow {
   font-size: 1.5rem;
-  color: var(--color-text-light);
+  color: var(--color-text-muted, var(--color-text-light));
+  opacity: 0.6;
 }
 
-.form-group {
-  margin-bottom: 16px;
+.new-relation-dialog .form-group {
+  margin-bottom: 18px;
 }
 
-.form-group label {
+.new-relation-dialog .form-group label {
   display: block;
-  margin-bottom: 6px;
-  font-size: 0.875rem;
-  font-weight: 500;
+  margin-bottom: 8px;
+  font-size: 0.8125rem;
+  font-weight: 600;
   color: var(--color-text-bright);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
-.form-select,
-.form-input {
+.new-relation-dialog .form-select,
+.new-relation-dialog .form-input {
   width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--color-border);
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--color-text);
   font-size: 0.875rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.form-select:focus,
-.form-input:focus {
+.new-relation-dialog .form-select {
+  color-scheme: dark;
+}
+
+.new-relation-dialog .form-select option {
+  background: #1e1e2e;
+  color: #e2e8f0;
+  padding: 8px 12px;
+}
+
+.new-relation-dialog .form-select option:checked {
+  background: #334155;
+  color: #f8fafc;
+}
+
+.new-relation-dialog .form-select:focus,
+.new-relation-dialog .form-input:focus {
   outline: none;
-  border-color: var(--color-primary);
+  border-color: var(--color-accent, var(--color-primary));
+  box-shadow: 0 0 0 3px rgba(34, 139, 230, 0.15);
 }
 
-.confirm-btn {
-  padding: 10px 20px;
+.new-relation-dialog .form-input::placeholder {
+  color: var(--color-text-muted, rgba(255, 255, 255, 0.3));
+}
+
+.new-relation-dialog .confirm-btn {
+  padding: 10px 22px;
   background: #22c55e;
   color: white;
   border: none;
   border-radius: var(--radius-md);
   font-size: 0.875rem;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
-.confirm-btn:hover {
+.new-relation-dialog .confirm-btn:hover {
   background: #16a34a;
+  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
 }
 
 /* 엣지 삭제 다이얼로그 */
@@ -12826,6 +13537,33 @@ watch(detailPanelTab, (newTab, oldTab) => {
   color: #94a3b8 !important;
 }
 
+.light-mode .field-status.loading {
+  color: #64748b !important;
+}
+
+.light-mode .field-status.no-datasource {
+  background: rgba(15, 23, 42, 0.02) !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+  color: #475569 !important;
+}
+
+.light-mode .field-status.error {
+  background: rgba(239, 68, 68, 0.06) !important;
+  border-color: rgba(239, 68, 68, 0.18) !important;
+  color: #dc2626 !important;
+}
+
+.light-mode .link-datasource-btn-sm {
+  background: rgba(59, 130, 246, 0.08) !important;
+  border-color: rgba(59, 130, 246, 0.22) !important;
+  color: #2563eb !important;
+}
+
+.light-mode .link-datasource-btn-sm:hover {
+  background: rgba(59, 130, 246, 0.14) !important;
+  border-color: rgba(59, 130, 246, 0.3) !important;
+}
+
 .light-mode .field-mapping-arrow {
   color: #cbd5e1 !important;
 }
@@ -12860,6 +13598,45 @@ watch(detailPanelTab, (newTab, oldTab) => {
   background: rgba(255, 255, 255, 0.95) !important;
   border-left: 1px solid rgba(0, 0, 0, 0.08) !important;
   box-shadow: -4px 0 16px rgba(0, 0, 0, 0.1) !important;
+}
+
+.light-mode .detail-panel .form-select,
+.light-mode .detail-panel .form-input {
+  border-color: rgba(0, 0, 0, 0.15) !important;
+  background: rgba(0, 0, 0, 0.02) !important;
+  color: #1e293b !important;
+}
+
+.light-mode .detail-panel .form-select {
+  color-scheme: light !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(0,0,0,0.4)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 12px center !important;
+}
+
+.light-mode .detail-panel .form-select option {
+  background: #ffffff !important;
+  color: #1e293b !important;
+}
+
+.light-mode .detail-panel .form-select option:checked {
+  background: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+.light-mode .detail-panel .form-select:focus,
+.light-mode .detail-panel .form-input:focus {
+  border-color: #4f46e5 !important;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12) !important;
+}
+
+.light-mode .detail-panel .form-select:hover,
+.light-mode .detail-panel .form-input:hover {
+  border-color: rgba(0, 0, 0, 0.25) !important;
+}
+
+.light-mode .detail-panel .form-input::placeholder {
+  color: #94a3b8 !important;
 }
 
 .light-mode .detail-panel h3 {
@@ -13181,9 +13958,62 @@ watch(detailPanelTab, (newTab, oldTab) => {
 .light-mode .node-datasource-dialog,
 .light-mode .schema-list-dialog,
 .light-mode .edge-delete-dialog,
-.light-mode .edit-relation-dialog {
+.light-mode .edit-relation-dialog,
+.light-mode .new-relation-dialog {
   background: rgba(255, 255, 255, 0.98) !important;
   border: 1px solid rgba(0, 0, 0, 0.1) !important;
+}
+
+.light-mode .new-relation-dialog {
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05) !important;
+}
+
+.light-mode .new-relation-dialog .dialog-header {
+  background: rgba(0, 0, 0, 0.03) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+.light-mode .new-relation-dialog .dialog-footer {
+  background: rgba(0, 0, 0, 0.03) !important;
+  border-top-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+.light-mode .relation-preview {
+  background: rgba(0, 0, 0, 0.02) !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+.light-mode .node-preview.source {
+  background: rgba(34, 197, 94, 0.05) !important;
+}
+
+.light-mode .node-preview.target {
+  background: rgba(59, 130, 246, 0.05) !important;
+}
+
+.light-mode .new-relation-dialog .form-select,
+.light-mode .new-relation-dialog .form-input {
+  border-color: rgba(0, 0, 0, 0.15) !important;
+  background: rgba(0, 0, 0, 0.02) !important;
+}
+
+.light-mode .new-relation-dialog .form-select {
+  color-scheme: light !important;
+}
+
+.light-mode .new-relation-dialog .form-select option {
+  background: #ffffff !important;
+  color: #1e293b !important;
+}
+
+.light-mode .new-relation-dialog .form-select option:checked {
+  background: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+.light-mode .new-relation-dialog .form-select:focus,
+.light-mode .new-relation-dialog .form-input:focus {
+  border-color: var(--color-accent) !important;
 }
 
 .light-mode .node-info-section {
@@ -13758,7 +14588,49 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 /* What-if 분석 버튼 */
 /* Behavior 탭 스타일 */
-.behavior-tab { padding: 12px !important; }
+.behavior-tab { padding: 0 !important; overflow: hidden; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.behavior-section-header {
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-bright, #e2e8f0);
+  background: var(--color-bg-tertiary, rgba(0,0,0,0.15));
+  border-bottom: 1px solid var(--color-border, rgba(255,255,255,0.08));
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.behavior-section-divider {
+  height: 1px;
+  background: var(--color-border, rgba(255,255,255,0.08));
+  margin: 8px 0;
+}
+
+/* Agent Monitor styles */
+.agent-monitor-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.agent-status-badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  &.status-idle { background: rgba(99, 102, 241, 0.15); color: #6366f1; }
+  &.status-running { background: rgba(34, 197, 94, 0.15); color: #22c55e; animation: agent-pulse 1.5s infinite; }
+  &.status-paused { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+  &.status-stopped { background: rgba(107, 114, 128, 0.15); color: #6b7280; }
+  &.status-failed { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+  &.status-completed { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+}
+@keyframes agent-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
 .behavior-empty {
   text-align: center; padding: 24px 0; color: rgba(255,255,255,0.4);
   p { margin: 4px 0; font-size: 0.85rem; }
