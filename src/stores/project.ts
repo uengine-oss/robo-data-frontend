@@ -165,8 +165,10 @@ export const useProjectStore = defineStore('project', () => {
   
   const isProcessing = ref(false)
   const currentStep = ref('')
-  const totalSteps = ref(5) // DDL 처리, AST 생성, AI 분석, 테이블 설명 보강, 벡터라이징
-  const completedSteps = ref(0)
+  const totalPhases = ref(6) // 첫 phase_event의 totalPhases로 동적 조정됨
+  const currentPhase = ref(0) // 현재 phase 번호 (0-indexed)
+  const currentPhaseProgress = ref(0) // 현재 phase 내 진행률 (0-100)
+  const currentPhaseName = ref('') // 현재 phase 이름
   
   // ==========================================================================
   // 상태 - 데이터 확인 모달
@@ -327,25 +329,37 @@ export const useProjectStore = defineStore('project', () => {
     graphEventIdCounter = 0
   }
   
+  // 노드 ID → 읽기 쉬운 이름 캐시 (배치 간 유지)
+  const nodeNameCache = new Map<string, string>()
+
+  /**
+   * 노드에서 읽기 쉬운 이름 추출
+   */
+  function _resolveNodeName(properties: Record<string, unknown>, labels: string[], nodeId: string): string {
+    return String(
+      properties['name'] ||
+      properties['procedure_name'] ||
+      properties['class_name'] ||
+      (typeof properties['method_id'] === 'string' ? (properties['method_id'] as string).split('.').pop() : '') ||
+      properties['fileName'] ||
+      (labels.length > 0 ? `[${labels.join(':')}] ${nodeId}` : nodeId)
+    )
+  }
+
   /**
    * Neo4j 그래프에서 이벤트 추출 및 추가
    */
   function extractAndAddGraphEvents(nodes: Neo4jNode[], relationships: Neo4jRelationship[]): void {
-    // 노드 이벤트 추가
+    // 노드 이벤트 추가 + 캐시 저장
     for (const node of nodes) {
       const labels = node['Labels'] || []
       const properties = node['Properties'] || {}
       const nodeType = labels[0] || 'Unknown'
-      
-      // 노드 이름 결정 (우선순위: name, procedure_name, class_name, fileName)
-      const nodeName = String(
-        properties['name'] || 
-        properties['procedure_name'] || 
-        properties['class_name'] ||
-        properties['fileName'] ||
-        node['Node ID']
-      )
-      
+      const nodeId = String(node['Node ID'])
+
+      const nodeName = _resolveNodeName(properties, labels, nodeId)
+      nodeNameCache.set(nodeId, nodeName)
+
       addGraphEvent({
         type: 'node',
         action: 'created',
@@ -353,22 +367,25 @@ export const useProjectStore = defineStore('project', () => {
         nodeName
       })
     }
-    
-    // 관계 이벤트 추가
+
+    // 관계 이벤트 추가 (캐시에서 이름 조회)
     for (const rel of relationships) {
       const relType = rel['Type'] || 'Unknown'
-      
-      // 소스/타겟 노드 이름 찾기
-      const sourceNode = nodes.find(n => n['Node ID'] === rel['Start Node ID'])
-      const targetNode = nodes.find(n => n['Node ID'] === rel['End Node ID'])
-      
-      const sourceName = sourceNode 
-        ? String(sourceNode['Properties']?.['name'] || sourceNode['Properties']?.['procedure_name'] || rel['Start Node ID'])
-        : rel['Start Node ID']
-      const targetName = targetNode
-        ? String(targetNode['Properties']?.['name'] || targetNode['Properties']?.['procedure_name'] || rel['End Node ID'])
-        : rel['End Node ID']
-      
+      const startId = String(rel['Start Node ID'])
+      const endId = String(rel['End Node ID'])
+
+      // 캐시 → 같은 배치 노드 → ID fallback
+      const sourceName = nodeNameCache.get(startId)
+        || (() => {
+          const n = nodes.find(n => String(n['Node ID']) === startId)
+          return n ? _resolveNodeName(n['Properties'] || {}, n['Labels'] || [], startId) : startId
+        })()
+      const targetName = nodeNameCache.get(endId)
+        || (() => {
+          const n = nodes.find(n => String(n['Node ID']) === endId)
+          return n ? _resolveNodeName(n['Properties'] || {}, n['Labels'] || [], endId) : endId
+        })()
+
       addGraphEvent({
         type: 'relationship',
         action: 'created',
@@ -421,7 +438,6 @@ export const useProjectStore = defineStore('project', () => {
     saveToStorage()
     
     addMessage('message', `✅ 업로드 완료: 소스 ${result.files.length}개, DDL ${result.ddlFiles.length}개`)
-    completedSteps.value = 1
     return result
   }
   
@@ -443,7 +459,6 @@ export const useProjectStore = defineStore('project', () => {
     )
     
     addMessage('message', '✅ 파싱 완료')
-    completedSteps.value = 2
   }
   
   /**
@@ -466,50 +481,48 @@ export const useProjectStore = defineStore('project', () => {
           addMessage(event.type === 'error' ? 'error' : 'message', event.content)
         }
         
-        // Phase 이벤트 처리 - 진행 상태 업데이트 (세부 진행률 포함)
+        // Phase 이벤트 처리 - Phase별 독립 0→100% 진행률
         if (event.type === 'phase_event') {
           const phaseNum = event.phase as number
           const phaseName = event.name || ''
           const phaseProgress = (event.progress as number) || 0  // 단계 내 세부 진행률 (0-100)
           const details = event.details || {}
-          
+
           if (event.status === 'started') {
-            // totalPhases가 전달되면 totalSteps 동적 조정
+            // totalPhases가 전달되면 동적 조정
             if (details.totalPhases && typeof details.totalPhases === 'number') {
-              totalSteps.value = details.totalPhases
+              totalPhases.value = details.totalPhases
             }
-            // 시작 상태 - 현재 단계 표시
-            currentStep.value = `[${phaseNum + 1}단계] ${phaseName} 시작...`
-            completedSteps.value = phaseNum
+            currentPhase.value = phaseNum
+            currentPhaseName.value = phaseName
+            currentPhaseProgress.value = 0
+            currentStep.value = `[${phaseNum + 1}/${totalPhases.value}] ${phaseName} 시작...`
           } else if (event.status === 'in_progress') {
-            // 진행 중 상태 - 세부 진행률 표시
-            // 각 단계는 totalSteps로 나눠진 범위를 가짐
-            // phaseNum이 0이면 0~20%, 1이면 20~40%, 2이면 40~60%, 3이면 60~80%, 4이면 80~100%
-            const phaseWeight = 100 / totalSteps.value  // 각 단계가 차지하는 비율 (예: 20%)
-            const phaseStart = phaseNum * phaseWeight
-            const phaseContribution = (phaseProgress / 100) * phaseWeight
-            completedSteps.value = (phaseStart + phaseContribution) / (100 / totalSteps.value)
-            
+            // 단조 증가 보장 (같은 phase 내에서만)
+            if (phaseNum === currentPhase.value) {
+              currentPhaseProgress.value = Math.max(currentPhaseProgress.value, phaseProgress)
+            } else {
+              currentPhase.value = phaseNum
+              currentPhaseName.value = phaseName
+              currentPhaseProgress.value = phaseProgress
+            }
+
             // 상세 정보가 있으면 표시
             if (details.step) {
-              const stepName = details.step === 'saving_to_neo4j' ? 'Neo4j 저장 중' :
-                              details.step === 'batch_saving' ? `배치 저장 중 (${details.batch}/${details.total_batches})` :
-                              details.step === 'table_embedding' ? `테이블 임베딩 (${details.batch}/${details.total_batches})` :
-                              details.step === 'column_embedding' ? `컬럼 임베딩 (${details.batch}/${details.total_batches})` :
-                              details.step
-              currentStep.value = `[${phaseNum + 1}단계] ${phaseName} - ${stepName} (${phaseProgress}%)`
+              const stepDetail = details.done && details.total
+                ? `${details.step} (${details.done}/${details.total})`
+                : details.step
+              currentStep.value = `[${phaseNum + 1}/${totalPhases.value}] ${phaseName} - ${stepDetail} (${phaseProgress}%)`
             } else if (details.completed && details.total) {
-              currentStep.value = `[${phaseNum + 1}단계] ${phaseName} (${details.completed}/${details.total}) ${phaseProgress}%`
+              currentStep.value = `[${phaseNum + 1}/${totalPhases.value}] ${phaseName} (${details.completed}/${details.total}) ${phaseProgress}%`
             } else {
-              currentStep.value = `[${phaseNum + 1}단계] ${phaseName} 진행 중... (${phaseProgress}%)`
+              currentStep.value = `[${phaseNum + 1}/${totalPhases.value}] ${phaseName} 진행 중... (${phaseProgress}%)`
             }
           } else if (event.status === 'completed') {
-            // 완료 상태
-            completedSteps.value = phaseNum + 1
-            currentStep.value = `[${phaseNum + 1}단계] ${phaseName} 완료 ✓`
+            currentPhaseProgress.value = 100
+            currentStep.value = `[${phaseNum + 1}/${totalPhases.value}] ${phaseName} 완료 ✓`
           } else if (event.status === 'skipped') {
-            // 건너뜀 상태
-            currentStep.value = `[${phaseNum + 1}단계] ${phaseName} 건너뜀`
+            currentStep.value = `[${phaseNum + 1}/${totalPhases.value}] ${phaseName} 건너뜀`
           }
         }
         
@@ -611,7 +624,7 @@ export const useProjectStore = defineStore('project', () => {
     )
     
     addMessage('message', '✅ 분석 완료')
-    completedSteps.value = totalSteps.value  // 전체 단계 완료
+    currentPhaseProgress.value = 100  // 마지막 단계 완료
 
     // 스트리밍 중 누적된 데이터 대신 Neo4j 최종 상태로 교체
     try {
@@ -781,7 +794,8 @@ export const useProjectStore = defineStore('project', () => {
    */
   async function executeUploadPipeline(files: File[], meta: BackendRequestMetadata) {
     isProcessing.value = true
-    completedSteps.value = 0
+    currentPhase.value = 0
+    currentPhaseProgress.value = 0
     clearMessages()
     
     try {
@@ -849,7 +863,8 @@ export const useProjectStore = defineStore('project', () => {
    */
   async function executeRestartPipeline(): Promise<void> {
     isProcessing.value = true
-    completedSteps.value = 0
+    currentPhase.value = 0
+    currentPhaseProgress.value = 0
     clearMessages()
     
     try {
@@ -1053,8 +1068,10 @@ export const useProjectStore = defineStore('project', () => {
     graphData,
     isProcessing,
     currentStep,
-    totalSteps,
-    completedSteps,
+    totalPhases,
+    currentPhase,
+    currentPhaseProgress,
+    currentPhaseName,
     consoleMessages,
     graphEvents,
     

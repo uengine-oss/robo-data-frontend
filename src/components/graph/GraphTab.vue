@@ -29,8 +29,9 @@ const {
   sourceType,
   consoleMessages,
   graphEvents,
-  totalSteps,
-  completedSteps,
+  totalPhases,
+  currentPhase,
+  currentPhaseProgress,
   isPipelinePaused
 } = storeToRefs(projectStore)
 
@@ -225,15 +226,12 @@ const statusType = computed(() => {
   return 'idle'
 })
 
-// 진행률 계산
-const progress = computed(() => {
-  if (totalSteps.value === 0) return 0
-  return Math.round((completedSteps.value / totalSteps.value) * 100)
-})
+// 진행률 계산 — Phase별 독립 0-100%
+const progress = computed(() => currentPhaseProgress.value)
 
 // 완료 여부
-const isCompleted = computed(() => 
-  completedSteps.value >= totalSteps.value && !isProcessing.value
+const isCompleted = computed(() =>
+  currentPhase.value >= totalPhases.value - 1 && currentPhaseProgress.value >= 100 && !isProcessing.value
 )
 
 // 그래프 통계

@@ -1041,10 +1041,10 @@ function resetQueues(): void {
 function resetGraph(): void {
   clearBatchTimer()
   resetQueues()
-  
+
   nodeMap.clear()
   relationshipMap.clear()
-  expandedNodeId.value = null
+  // expandedNodeId는 호출자가 관리 (showAll, expandNode 등)
   hiddenNodeIds.clear()
   
   loadingProgress.value = 0
@@ -1091,41 +1091,50 @@ onUnmounted(() => {
 // 워처
 // ============================================================================
 
-// 그래프 데이터 변경 감시
-watch(() => props.graphData, (newData) => {
-  if (newData.nodes.length === 0 && nodeMap.size > 0) {
-    resetGraph()
-    return
+// 그래프 데이터 변경 감시 (배열 길이 기반 shallow watch — 인제스천 중 append-only)
+watch(
+  [() => props.graphData.nodes.length, () => props.graphData.links.length],
+  ([newNodeLen], [oldNodeLen]) => {
+    if (newNodeLen === 0 && nodeMap.size > 0) {
+      resetGraph()
+      return
+    }
+    if (newNodeLen > 0) {
+      updateExpandableNodes()
+      updateGraph()
+    }
   }
-  
-  if (newData.nodes.length > 0) {
-    // 확장 가능한 노드 업데이트
-    updateExpandableNodes()
-    updateGraph()
-  }
-}, { deep: true })
+)
 
-// limit/필터 변경 → 재렌더링 (debounce로 이중 트리거 방지)
+// ============================================================================
+// 통합 뷰 상태 watcher — maxNodes/labelFilters 변경을 단일 진입점에서 처리
+// 이중 트리거(scheduleRerender 2번 호출) 원천 차단
+// ============================================================================
 let _rerenderTimer: ReturnType<typeof setTimeout> | null = null
+let _suppressWatcher = false  // showAll 등 내부 전환 시 watcher 재트리거 방지
 function scheduleRerender() {
   if (_rerenderTimer) clearTimeout(_rerenderTimer)
-  _rerenderTimer = setTimeout(() => {
+  _rerenderTimer = setTimeout(async () => {
     _rerenderTimer = null
     if (props.graphData.nodes.length > 0) {
       resetGraph()
-      initNvl()
+      await initNvl()
     }
   }, 0)
 }
 
-watch(() => props.maxNodes, () => {
-  showAllMode.value = false
-  scheduleRerender()
-})
-
-watch(() => props.labelFilters, () => {
-  scheduleRerender()
-}, { deep: true })
+watch(
+  [() => props.maxNodes, () => props.labelFilters],
+  ([_newMax, _newFilters], [oldMax]) => {
+    if (_suppressWatcher) return  // showAll 등 내부 전환 시 재트리거 방지
+    // maxNodes가 변경되면 showAll 해제
+    if (_newMax !== oldMax) {
+      showAllMode.value = false
+    }
+    scheduleRerender()
+  },
+  { deep: true }
+)
 
 watch([() => props.selectedNodeId, () => props.selectedRelationshipId], ([newNodeId, newRelId], [oldNodeId, oldRelId]) => {
   if (!nvlInstance.value || (newNodeId === oldNodeId && newRelId === oldRelId)) return
@@ -1339,10 +1348,15 @@ function filterToNode(nodeId: string, depth: number = 1): void {
 
 /**
  * 전체 보기 모드 — limit 무시하고 전체 노드 표시
+ * _suppressWatcher로 expandedNodeId 변경에 의한 watcher 재트리거 방지
  */
 function showAll(): void {
+  _suppressWatcher = true
+  expandedNodeId.value = null  // 확장 모드 해제 후 전체 보기
   showAllMode.value = true
   scheduleRerender()
+  // nextTick 후 가드 해제 (watcher 실행 완료 후)
+  nextTick(() => { _suppressWatcher = false })
 }
 
 defineExpose({

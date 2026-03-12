@@ -28,6 +28,7 @@ export const RELATION_STRENGTH: Record<string, number> = {
   EXTENDS: 4,
   IMPLEMENTS: 4,
   COMPOSITION: 3,
+  AGGREGATION: 3,
   ASSOCIATION: 2,
   DEPENDENCY: 1
 }
@@ -45,6 +46,7 @@ export const ARROW_STYLES: Record<string, { markerEnd: string; style: string; la
   EXTENDS: { markerEnd: 'arrowclosed', style: 'stroke: #333333; stroke-width: 2px;' },
   IMPLEMENTS: { markerEnd: 'arrowclosed', style: 'stroke: #333333; stroke-width: 2px; stroke-dasharray: 6 4;' },
   ASSOCIATION: { markerEnd: 'arrow', style: 'stroke: #333333; stroke-width: 1.5px;' },
+  AGGREGATION: { markerEnd: 'arrow', style: 'stroke: #333333; stroke-width: 1.5px;' },
   COMPOSITION: { markerEnd: 'arrow', style: 'stroke: #333333; stroke-width: 2px;' },
   DEPENDENCY: { markerEnd: 'arrow', style: 'stroke: #666666; stroke-width: 1.5px; stroke-dasharray: 4 3;' }
 }

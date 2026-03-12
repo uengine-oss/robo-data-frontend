@@ -470,7 +470,10 @@ async function buildDiagram(): Promise<void> {
     const typeLabels: Record<string, string> = {
       'EXTENDS': 'extends',
       'IMPLEMENTS': 'implements',
-      'DEPENDENCY': 'uses'
+      'ASSOCIATION': 'association',
+      'AGGREGATION': 'aggregation',
+      'COMPOSITION': 'composition',
+      'DEPENDENCY': 'dependency'
     }
     const label = rel.label || typeLabels[rel.type] || rel.type.toLowerCase()
     

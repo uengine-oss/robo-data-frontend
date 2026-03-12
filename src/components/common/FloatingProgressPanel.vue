@@ -11,11 +11,13 @@ import { useDrag } from '@/composables/useDrag'
 import { IconX, IconChevronDown } from '@/components/icons'
 
 const projectStore = useProjectStore()
-const { 
-  isProcessing, 
-  currentStep, 
-  totalSteps, 
-  completedSteps, 
+const {
+  isProcessing,
+  currentStep,
+  totalPhases,
+  currentPhase,
+  currentPhaseProgress,
+  currentPhaseName,
   isPipelinePaused,
   graphEvents,
   consoleMessages
@@ -35,13 +37,12 @@ const isCollapsed = ref(false)
 const isMinimized = ref(false)
 const activeTab = ref<'progress' | 'console'>('progress')
 
-// 진행률 계산
-const progress = computed(() => {
-  if (totalSteps.value === 0) return 0
-  return Math.round((completedSteps.value / totalSteps.value) * 100)
-})
+// 진행률 계산 — Phase별 독립 0-100%
+const progress = computed(() => currentPhaseProgress.value)
 
-const isCompleted = computed(() => progress.value >= 100)
+const isCompleted = computed(() =>
+  currentPhase.value >= totalPhases.value - 1 && currentPhaseProgress.value >= 100
+)
 
 // 최근 오류 메시지 확인 (오류가 있으면 패널 유지)
 const hasRecentError = computed(() => {

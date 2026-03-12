@@ -8,8 +8,9 @@ interface Props {
   messages: StreamMessage[]
   currentStep: string
   isProcessing: boolean
-  totalSteps: number
-  completedSteps: number
+  totalPhases: number
+  currentPhase: number
+  currentPhaseProgress: number
   /** 그래프 이벤트 (노드/관계 생성 정보) */
   graphEvents?: GraphEvent[]
 }
@@ -43,8 +44,7 @@ const shouldAutoScrollGraph = ref(true)
 
 // 진행률 계산
 const progress = computed(() => {
-  if (props.totalSteps === 0) return 0
-  return Math.round((props.completedSteps / props.totalSteps) * 100)
+  return props.currentPhaseProgress
 })
 
 // 탭 상태
@@ -67,17 +67,17 @@ const steps = computed(() => [
 ])
 
 function getStepStatus(stepId: number): 'pending' | 'active' | 'completed' | 'error' {
-  if (props.completedSteps >= stepId) return 'completed'
-  if (props.completedSteps === stepId - 1 && props.isProcessing) return 'active'
+  if (props.currentPhase >= stepId) return 'completed'
+  if (props.currentPhase === stepId - 1 && props.isProcessing) return 'active'
   if (props.currentStep.includes('실패') || props.currentStep.includes('에러')) {
-    if (props.completedSteps === stepId - 1) return 'error'
+    if (props.currentPhase === stepId - 1) return 'error'
   }
   return 'pending'
 }
 
 // 완료 여부
 const isCompleted = computed(() => 
-  props.completedSteps >= props.totalSteps && !props.isProcessing
+  props.currentPhase >= props.totalPhases && !props.isProcessing
 )
 
 // 에러 여부
