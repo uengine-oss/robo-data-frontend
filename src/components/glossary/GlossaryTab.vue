@@ -9,6 +9,7 @@ import { glossaryApi, type Glossary, type Term } from '@/services/api'
 import { IconPlus, IconSearch, IconEdit, IconTrash, IconCheck, IconChevronDown, IconBook } from '@/components/icons'
 import TermModal from './TermModal.vue'
 import GlossaryModal from './GlossaryModal.vue'
+import TermBulkUploadModal from './TermBulkUploadModal.vue'
 import { buildMetadataSections, type MetadataSectionKey } from './glossaryMetadataPanel'
 
 const sessionStore = useSessionStore()
@@ -28,6 +29,7 @@ const metadataLoading = ref(false)
 // 모달 상태
 const showTermModal = ref(false)
 const showGlossaryModal = ref(false)
+const showBulkUploadModal = ref(false)
 const editingTerm = ref<Term | null>(null)
 const editingGlossary = ref<Glossary | null>(null)
 
@@ -221,6 +223,11 @@ const handleTermSaved = async () => {
   await loadGlossaries()  // termCount 업데이트
 }
 
+const handleBulkImported = async () => {
+  await loadTerms()
+  await loadGlossaries()
+}
+
 // 용어 삭제
 const deleteTerm = async (term: Term) => {
   if (!selectedGlossary.value) return
@@ -377,6 +384,10 @@ watch(selectedGlossary, () => {
             <button class="btn-primary" @click="openTermModal()">
               <IconPlus :size="16" />
               사용자 지정
+            </button>
+
+            <button class="btn-secondary" @click="showBulkUploadModal = true">
+              일괄 업로드
             </button>
           </div>
         </div>
@@ -552,6 +563,13 @@ watch(selectedGlossary, () => {
       :glossary="editingGlossary"
       @close="showGlossaryModal = false; editingGlossary = null"
       @saved="handleGlossarySaved"
+    />
+
+    <TermBulkUploadModal
+      v-if="showBulkUploadModal && selectedGlossary"
+      :glossary-id="selectedGlossary.id"
+      @close="showBulkUploadModal = false"
+      @imported="handleBulkImported"
     />
   </div>
 </template>
@@ -1227,6 +1245,25 @@ watch(selectedGlossary, () => {
   
   &:hover {
     background: var(--color-accent-hover);
+  }
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover {
+    background: var(--color-bg-tertiary);
   }
 }
 </style>

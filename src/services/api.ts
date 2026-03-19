@@ -160,13 +160,13 @@ async function postFormData<T>(
   console.log('[API] Full URL:', window.location.origin + url)
   
   try {
+    const requestHeaders = { ...headers }
+    delete requestHeaders['Content-Type']
+
     // FormData 전송 시 브라우저가 자동으로 Content-Type을 설정하므로 명시하지 않음
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 
-        'Accept-Language': headers['Accept-Language'] || 'ko'
-        // Content-Type은 명시하지 않음 (브라우저가 multipart/form-data로 자동 설정)
-      },
+      headers: requestHeaders,
       body: formData
     })
     
@@ -183,8 +183,9 @@ async function postFormData<T>(
     console.error('[API] Network error:', error)
     
     if (error instanceof TypeError && error.message.includes('fetch')) {
+      const serviceLabel = url.includes('/robo/') ? 'ROBO Analyzer' : 'ANTLR Server'
       throw new Error(
-        `서버에 연결할 수 없습니다. ANTLR Server(http://127.0.0.1:8081)가 실행 중인지 확인해주세요.\n` +
+        `서버에 연결할 수 없습니다. ${serviceLabel} 서비스가 실행 중인지 확인해주세요.\n` +
         `원본 오류: ${error.message}`
       )
     }
@@ -197,6 +198,83 @@ async function postFormData<T>(
     }
     
     throw error
+  }
+}
+
+async function streamSseFetch(
+  url: string,
+  headers: Headers,
+  onEvent: (event: { event: string; data: any }) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await fetch(url, {
+    method: 'GET',
+    headers,
+    signal
+  })
+
+  if (!response.ok) {
+    await handleHttpError(response)
+  }
+
+  const reader = response.body?.getReader()
+  if (!reader) {
+    throw new Error('SSE 응답 바디를 읽을 수 없습니다.')
+  }
+
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  let currentEvent = 'message'
+  let currentDataLines: string[] = []
+
+  const flushEvent = () => {
+    if (currentDataLines.length === 0) return
+    const rawData = currentDataLines.join('\n')
+    onEvent({
+      event: currentEvent,
+      data: JSON.parse(rawData)
+    })
+    currentEvent = 'message'
+    currentDataLines = []
+  }
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split(/\r?\n/)
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (!line.trim()) {
+          flushEvent()
+          continue
+        }
+        if (line.startsWith('event:')) {
+          currentEvent = line.slice(6).trim() || 'message'
+          continue
+        }
+        if (line.startsWith('data:')) {
+          currentDataLines.push(line.slice(5).trim())
+        }
+      }
+    }
+
+    if (buffer.trim()) {
+      const lines = buffer.split(/\r?\n/)
+      for (const line of lines) {
+        if (line.startsWith('event:')) {
+          currentEvent = line.slice(6).trim() || 'message'
+        } else if (line.startsWith('data:')) {
+          currentDataLines.push(line.slice(5).trim())
+        }
+      }
+    }
+    flushEvent()
+  } finally {
+    reader.releaseLock()
   }
 }
 
@@ -1355,6 +1433,126 @@ export interface UpdateTermRequest {
   tags?: string[]
 }
 
+export type BulkFileRole = 'term_source' | 'word_dictionary' | 'domain_dictionary' | 'code_dictionary' | 'unknown'
+
+export interface BulkColumnReference {
+  source: 'joined'
+  file: string
+  column: string
+  join_rule_index?: number
+}
+
+export type BulkColumnSelection = string | BulkColumnReference | null
+
+export interface BulkFileAnalysis {
+  filename: string
+  headers: string[]
+  sample_rows: string[][]
+  total_rows: number
+  detected_encoding?: string | null
+  parse_status: string
+  role?: BulkFileRole
+  confidence?: number
+  column_mapping?: Record<string, string | null>
+  unmapped_columns?: string[]
+}
+
+export interface BulkJoinRule {
+  left_file: string
+  left_column: string
+  right_file: string
+  right_column: string
+  join_type: string
+  purpose?: string
+  confidence?: number
+}
+
+export interface BulkUploadResponse {
+  session_id: string
+  files: BulkFileAnalysis[]
+  join_rules: BulkJoinRule[]
+  term_source_file: string | null
+  no_term_source: boolean
+}
+
+export interface BulkConfirmedMapping {
+  term_source_file: string
+  term_name_column: BulkColumnSelection
+  term_description_column: BulkColumnSelection
+  term_status_column: BulkColumnSelection
+  term_status_fixed: 'Draft' | 'Pending' | 'Approved' | 'Deprecated' | null
+  term_synonyms_column: BulkColumnSelection
+  term_domains_column: BulkColumnSelection
+}
+
+export interface BulkExtractRequest {
+  session_id: string
+  confirmed_mapping: BulkConfirmedMapping
+  confirmed_joins: BulkJoinRule[]
+  value_transforms: Record<string, Record<string, string>>
+  use_ai_enrichment: boolean
+}
+
+export interface BulkTermCandidate {
+  row_index: number
+  name: string
+  description: string
+  status: 'Draft' | 'Pending' | 'Approved' | 'Deprecated'
+  synonyms: string[]
+  domains: string[]
+  tags: string[]
+  owners?: string[]
+  reviewers?: string[]
+}
+
+export interface BulkJoinStatistic {
+  rule: string
+  matched: number
+  unmatched: number
+  total: number
+}
+
+export interface BulkFieldStatistic {
+  filled: number
+  empty: number
+  distribution?: Record<string, number>
+}
+
+export interface BulkExtractResponse {
+  term_candidates: BulkTermCandidate[]
+  total: number
+  enriched: boolean
+  join_statistics: BulkJoinStatistic[]
+  field_statistics: Record<string, BulkFieldStatistic>
+  unmapped_columns: string[]
+}
+
+export interface BulkImportRequest {
+  terms: BulkTermCandidate[]
+  unmapped_columns_reminder?: string[]
+}
+
+export interface BulkImportResponse {
+  batch_id: string
+  created: number
+  skipped: number
+  errors: Array<{ name: string; reason: string }>
+  domains_created: number
+  domains_existing: number
+  unmapped_columns_reminder: string[]
+  next_steps: string[]
+}
+
+export interface BulkRollbackResponse {
+  deleted: number
+  batch_id: string
+}
+
+export interface BulkExtractStreamEvent {
+  event: 'progress' | 'complete'
+  data: any
+}
+
 const asRecord = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === 'object' ? value as Record<string, unknown> : {}
 
@@ -1615,6 +1813,68 @@ export const glossaryApi = {
     if (!response.ok) {
       await handleHttpError(response)
     }
+  },
+
+  async bulkUploadTerms(headers: Headers, glossaryId: string, files: File[]): Promise<BulkUploadResponse> {
+    const formData = new FormData()
+    for (const file of files) {
+      formData.append('files', file, file.name)
+    }
+    return postFormData<BulkUploadResponse>(
+      `${ROBO_BASE_URL}/glossary/${glossaryId}/terms/bulk-upload`,
+      formData,
+      headers
+    )
+  },
+
+  async bulkExtractTerms(headers: Headers, glossaryId: string, data: BulkExtractRequest): Promise<BulkExtractResponse> {
+    return postJson<BulkExtractResponse>(
+      `${ROBO_BASE_URL}/glossary/${glossaryId}/terms/bulk-extract`,
+      data,
+      headers
+    )
+  },
+
+  async bulkExtractStream(
+    headers: Headers,
+    glossaryId: string,
+    data: BulkExtractRequest,
+    onEvent: (event: BulkExtractStreamEvent) => void,
+    options: { signal?: AbortSignal } = {}
+  ): Promise<void> {
+    const params = new URLSearchParams({
+      session_id: data.session_id,
+      payload: JSON.stringify({
+        confirmed_mapping: data.confirmed_mapping,
+        confirmed_joins: data.confirmed_joins,
+        value_transforms: data.value_transforms
+      })
+    })
+    await streamSseFetch(
+      `${ROBO_BASE_URL}/glossary/${glossaryId}/terms/bulk-extract/stream?${params.toString()}`,
+      headers,
+      event => onEvent(event as BulkExtractStreamEvent),
+      options.signal
+    )
+  },
+
+  async bulkImportTerms(headers: Headers, glossaryId: string, data: BulkImportRequest): Promise<BulkImportResponse> {
+    return postJson<BulkImportResponse>(
+      `${ROBO_BASE_URL}/glossary/${glossaryId}/terms/bulk-import`,
+      data,
+      headers
+    )
+  },
+
+  async bulkRollback(headers: Headers, glossaryId: string, batchId: string): Promise<BulkRollbackResponse> {
+    const response = await fetch(`${ROBO_BASE_URL}/glossary/${glossaryId}/terms/bulk-rollback/${batchId}`, {
+      method: 'DELETE',
+      headers
+    })
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    return response.json()
   },
 
   /**
