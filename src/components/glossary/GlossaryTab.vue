@@ -9,6 +9,7 @@ import { glossaryApi, type Glossary, type Term } from '@/services/api'
 import { IconPlus, IconSearch, IconEdit, IconTrash, IconCheck, IconChevronDown, IconBook } from '@/components/icons'
 import TermModal from './TermModal.vue'
 import GlossaryModal from './GlossaryModal.vue'
+import { buildMetadataSections, type MetadataSectionKey } from './glossaryMetadataPanel'
 
 const sessionStore = useSessionStore()
 
@@ -18,15 +19,24 @@ const error = ref<string | null>(null)
 const glossaries = ref<Glossary[]>([])
 const selectedGlossary = ref<Glossary | null>(null)
 const terms = ref<Term[]>([])
+const selectedTerm = ref<Term | null>(null)
 const searchQuery = ref('')
 const statusFilter = ref<string>('')
 const showAllTerms = ref(false)
+const metadataLoading = ref(false)
 
 // 모달 상태
 const showTermModal = ref(false)
 const showGlossaryModal = ref(false)
 const editingTerm = ref<Term | null>(null)
 const editingGlossary = ref<Glossary | null>(null)
+
+const metadataSectionTitles: Record<MetadataSectionKey, string> = {
+  domains: '도메인들',
+  owners: '소유자들',
+  reviewers: '검토자들',
+  tags: '태그들'
+}
 
 // 필터된 용어 목록
 const filteredTerms = computed(() => {
@@ -46,6 +56,8 @@ const filteredTerms = computed(() => {
   
   return result
 })
+
+const metadataSections = computed(() => buildMetadataSections(selectedTerm.value))
 
 // 용어집 목록 로드
 const loadGlossaries = async () => {
@@ -72,6 +84,7 @@ const loadGlossaries = async () => {
 const loadTerms = async () => {
   if (!selectedGlossary.value) return
   const glossaryId = selectedGlossary.value.id
+  const currentSelectedTermId = selectedTerm.value?.id ?? null
   
   loading.value = true
   error.value = null
@@ -81,6 +94,9 @@ const loadTerms = async () => {
     const result = await glossaryApi.getTerms(headers, glossaryId)
     if (selectedGlossary.value?.id === glossaryId) {
       terms.value = result.terms
+      selectedTerm.value = currentSelectedTermId
+        ? result.terms.find(term => term.id === currentSelectedTermId) ?? null
+        : null
     }
   } catch (e) {
     error.value = e instanceof Error ? e.message : '용어 목록을 불러오는 데 실패했습니다.'
@@ -94,6 +110,33 @@ const loadTerms = async () => {
 // 용어집 선택
 const selectGlossary = (glossary: Glossary) => {
   selectedGlossary.value = glossary
+  selectedTerm.value = null
+  metadataLoading.value = false
+}
+
+const selectTerm = async (term: Term) => {
+  if (!selectedGlossary.value) return
+
+  const glossaryId = selectedGlossary.value.id
+  selectedTerm.value = term
+  metadataLoading.value = true
+
+  try {
+    const headers = sessionStore.getHeaders()
+    const detailedTerm = await glossaryApi.getTerm(headers, glossaryId, term.id)
+
+    if (selectedGlossary.value?.id === glossaryId && selectedTerm.value?.id === term.id) {
+      selectedTerm.value = detailedTerm
+    }
+  } catch (e) {
+    if (selectedGlossary.value?.id === glossaryId && selectedTerm.value?.id === term.id) {
+      error.value = e instanceof Error ? e.message : '용어 메타데이터를 불러오는 데 실패했습니다.'
+    }
+  } finally {
+    if (selectedGlossary.value?.id === glossaryId && selectedTerm.value?.id === term.id) {
+      metadataLoading.value = false
+    }
+  }
 }
 
 // 용어집 생성/수정 모달 열기
@@ -128,6 +171,7 @@ const deleteGlossary = async (glossary: Glossary) => {
     if (selectedGlossary.value?.id === glossary.id) {
       selectedGlossary.value = null
       terms.value = []
+      selectedTerm.value = null
     }
     
     await loadGlossaries()
@@ -158,6 +202,15 @@ const openTermModal = async (term?: Term) => {
   } finally {
     loading.value = false
   }
+}
+
+const openMetadataEditor = (sectionKey: MetadataSectionKey) => {
+  if (!selectedTerm.value) {
+    error.value = `${metadataSectionTitles[sectionKey]} 편집을 위해 먼저 용어를 선택해주세요.`
+    return
+  }
+
+  openTermModal(selectedTerm.value)
 }
 
 // 용어 저장 후 처리
@@ -346,7 +399,8 @@ watch(selectedGlossary, () => {
                 v-for="term in filteredTerms" 
                 :key="term.id"
                 class="term-row"
-                @click="openTermModal(term)"
+                :class="{ active: selectedTerm?.id === term.id }"
+                @click="selectTerm(term)"
               >
                 <td class="col-drag">
                   <span class="drag-handle">⋮⋮</span>
@@ -427,35 +481,55 @@ watch(selectedGlossary, () => {
     
     <!-- 오른쪽: 메타데이터 패널 -->
     <aside v-if="selectedGlossary" class="metadata-panel">
-      <section class="meta-section">
-        <h4>도메인들</h4>
-        <p class="meta-empty">도메인들 없음</p>
-      </section>
-      
-      <section class="meta-section">
-        <h4>
-          소유자들
-          <button class="btn-icon btn-sm">
-            <IconPlus :size="14" />
-          </button>
-        </h4>
-        <p class="meta-empty">소유자들 없음</p>
-      </section>
-      
-      <section class="meta-section">
-        <h4>검토자들</h4>
-        <p class="meta-empty">검토자들 없음</p>
-      </section>
-      
-      <section class="meta-section">
-        <h4>
-          태그들
-          <button class="btn-icon btn-sm">
-            <IconPlus :size="14" />
-          </button>
-        </h4>
-        <p class="meta-empty">태그들 없음</p>
-      </section>
+      <template v-if="selectedTerm">
+        <header class="metadata-header">
+          <p class="metadata-label">선택된 용어</p>
+          <div class="metadata-title-row">
+            <h3>{{ selectedTerm.name }}</h3>
+            <button class="btn-icon btn-sm" @click="openTermModal(selectedTerm)" title="용어 수정">
+              <IconEdit :size="14" />
+            </button>
+          </div>
+          <p class="metadata-description">
+            {{ selectedTerm.description || '도메인, 소유자, 검토자, 태그를 확인하거나 추가할 수 있습니다.' }}
+          </p>
+          <p v-if="metadataLoading" class="meta-loading">최신 메타데이터를 불러오는 중입니다.</p>
+        </header>
+
+        <section v-for="section in metadataSections" :key="section.key" class="meta-section">
+          <h4>
+            {{ section.title }}
+            <button
+              class="btn-icon btn-sm"
+              :title="`${section.title} 추가`"
+              @click="openMetadataEditor(section.key)"
+            >
+              <IconPlus :size="14" />
+            </button>
+          </h4>
+
+          <div v-if="section.items.length > 0" class="meta-items">
+            <span
+              v-for="item in section.items"
+              :key="`${section.key}-${item.id}`"
+              class="meta-pill"
+              :class="`meta-pill-${section.key}`"
+            >
+              <span
+                v-if="section.key === 'tags' && item.color"
+                class="meta-pill-color"
+                :style="{ backgroundColor: item.color }"
+              />
+              {{ item.label }}
+            </span>
+          </div>
+          <p v-else class="meta-empty">{{ section.emptyText }}</p>
+        </section>
+      </template>
+
+      <div v-else class="empty-state">
+        <p>용어를 선택하면 오른쪽 패널에서 메타데이터를 확인할 수 있습니다.</p>
+      </div>
     </aside>
     
     <!-- 에러 메시지 -->
@@ -797,6 +871,10 @@ watch(selectedGlossary, () => {
   &:hover {
     background: var(--color-bg-secondary);
   }
+
+  &.active {
+    background: var(--color-accent-bg);
+  }
 }
 
 .drag-handle {
@@ -819,6 +897,7 @@ watch(selectedGlossary, () => {
 .term-description {
   font-size: 13px;
   color: var(--color-text-light);
+  line-clamp: 2;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -921,6 +1000,48 @@ watch(selectedGlossary, () => {
   overflow-y: auto;
 }
 
+.metadata-header {
+  margin-bottom: 24px;
+}
+
+.metadata-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-light);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 8px;
+}
+
+.metadata-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+
+  h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--color-text);
+    margin: 0;
+    min-width: 0;
+  }
+}
+
+.metadata-description {
+  font-size: 13px;
+  color: var(--color-text-light);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.meta-loading {
+  font-size: 12px;
+  color: var(--color-text-light);
+  margin: 8px 0 0;
+}
+
 .meta-section {
   margin-bottom: 24px;
   
@@ -941,6 +1062,46 @@ watch(selectedGlossary, () => {
   font-size: 13px;
   color: var(--color-text-light);
   margin: 0;
+}
+
+.meta-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.meta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid transparent;
+}
+
+.meta-pill-domains {
+  background: rgba(59, 130, 246, 0.12);
+  color: #2563eb;
+}
+
+.meta-pill-owners,
+.meta-pill-reviewers {
+  background: rgba(139, 92, 246, 0.12);
+  color: #7c3aed;
+}
+
+.meta-pill-tags {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+}
+
+.meta-pill-color {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 // 빈 상태
