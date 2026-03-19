@@ -6,7 +6,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { glossaryApi, type Term, type GlossaryDomain, type GlossaryOwner, type GlossaryTag } from '@/services/api'
-import { IconX, IconPlus, IconTrash } from '@/components/icons'
+import { IconX, IconPlus } from '@/components/icons'
 
 const props = defineProps<{
   glossaryId: string
@@ -43,6 +43,7 @@ const error = ref<string | null>(null)
 const newSynonym = ref('')
 const newDomain = ref('')
 const newOwner = ref('')
+const newReviewer = ref('')
 const newTag = ref('')
 
 // 편집 모드 여부
@@ -56,6 +57,24 @@ const statusOptions = [
   { value: 'Approved', label: '승인됨' },
   { value: 'Deprecated', label: '폐기됨' }
 ]
+
+const extractNames = (items: unknown): string[] => {
+  if (!Array.isArray(items)) return []
+
+  return items.flatMap(item => {
+    if (typeof item === 'string') {
+      const value = item.trim()
+      return value ? [value] : []
+    }
+
+    if (item && typeof item === 'object' && 'name' in item && typeof item.name === 'string') {
+      const value = item.name.trim()
+      return value ? [value] : []
+    }
+
+    return []
+  })
+}
 
 // 메타데이터 로드
 const loadMetadata = async () => {
@@ -82,10 +101,10 @@ const initForm = () => {
       description: props.term.description || '',
       status: props.term.status,
       synonyms: [...(props.term.synonyms || [])],
-      domains: props.term.domains?.map(d => d.name) || [],
-      owners: props.term.owners?.map(o => o.name) || [],
-      reviewers: props.term.reviewers?.map(r => r.name) || [],
-      tags: props.term.tags?.map(t => t.name) || []
+      domains: extractNames(props.term.domains),
+      owners: extractNames(props.term.owners),
+      reviewers: extractNames(props.term.reviewers),
+      tags: extractNames(props.term.tags)
     }
   } else {
     formData.value = {
@@ -138,6 +157,19 @@ const addOwner = () => {
 // 소유자 삭제
 const removeOwner = (index: number) => {
   formData.value.owners.splice(index, 1)
+}
+
+// 검토자 추가
+const addReviewer = () => {
+  if (newReviewer.value.trim() && !formData.value.reviewers.includes(newReviewer.value.trim())) {
+    formData.value.reviewers.push(newReviewer.value.trim())
+    newReviewer.value = ''
+  }
+}
+
+// 검토자 삭제
+const removeReviewer = (index: number) => {
+  formData.value.reviewers.splice(index, 1)
 }
 
 // 태그 추가
@@ -343,6 +375,37 @@ watch(() => props.term, () => {
               </button>
             </span>
             <span v-if="formData.owners.length === 0" class="no-items">소유자 없음</span>
+          </div>
+        </section>
+        
+        <!-- 태그 -->
+        <section class="form-section">
+          <h3>검토자</h3>
+          
+          <div class="tag-input-group">
+            <input
+              v-model="newReviewer"
+              type="text"
+              placeholder="검토자 이름 입력 후 Enter"
+              list="reviewer-list"
+              @keydown.enter.prevent="addReviewer"
+            />
+            <datalist id="reviewer-list">
+              <option v-for="o in availableOwners" :key="o.id" :value="o.name" />
+            </datalist>
+            <button class="btn-add" @click="addReviewer">
+              <IconPlus :size="16" />
+            </button>
+          </div>
+          
+          <div class="tag-list">
+            <span v-for="(reviewer, idx) in formData.reviewers" :key="idx" class="tag tag-owner">
+              {{ reviewer }}
+              <button @click="removeReviewer(idx)">
+                <IconX :size="12" />
+              </button>
+            </span>
+            <span v-if="formData.reviewers.length === 0" class="no-items">검토자 없음</span>
           </div>
         </section>
         
