@@ -71,25 +71,29 @@ const loadGlossaries = async () => {
 // 용어 목록 로드
 const loadTerms = async () => {
   if (!selectedGlossary.value) return
+  const glossaryId = selectedGlossary.value.id
   
   loading.value = true
   error.value = null
   
   try {
     const headers = sessionStore.getHeaders()
-    const result = await glossaryApi.getTerms(headers, selectedGlossary.value.id)
-    terms.value = result.terms
+    const result = await glossaryApi.getTerms(headers, glossaryId)
+    if (selectedGlossary.value?.id === glossaryId) {
+      terms.value = result.terms
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : '용어 목록을 불러오는 데 실패했습니다.'
   } finally {
-    loading.value = false
+    if (selectedGlossary.value?.id === glossaryId) {
+      loading.value = false
+    }
   }
 }
 
 // 용어집 선택
 const selectGlossary = (glossary: Glossary) => {
   selectedGlossary.value = glossary
-  loadTerms()
 }
 
 // 용어집 생성/수정 모달 열기
@@ -133,9 +137,27 @@ const deleteGlossary = async (glossary: Glossary) => {
 }
 
 // 용어 생성/수정 모달 열기
-const openTermModal = (term?: Term) => {
-  editingTerm.value = term || null
-  showTermModal.value = true
+const openTermModal = async (term?: Term) => {
+  if (!selectedGlossary.value) return
+
+  if (!term) {
+    editingTerm.value = null
+    showTermModal.value = true
+    return
+  }
+
+  loading.value = true
+  error.value = null
+
+  try {
+    const headers = sessionStore.getHeaders()
+    editingTerm.value = await glossaryApi.getTerm(headers, selectedGlossary.value.id, term.id)
+    showTermModal.value = true
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '용어 상세 정보를 불러오는 데 실패했습니다.'
+  } finally {
+    loading.value = false
+  }
 }
 
 // 용어 저장 후 처리

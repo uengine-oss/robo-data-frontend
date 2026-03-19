@@ -1336,6 +1336,7 @@ export interface CreateTermRequest {
   description?: string
   status?: string
   synonyms?: string[]
+  relatedTerms?: string[]
   domains?: string[]
   owners?: string[]
   reviewers?: string[]
@@ -1347,10 +1348,122 @@ export interface UpdateTermRequest {
   description?: string
   status?: string
   synonyms?: string[]
+  relatedTerms?: string[]
   domains?: string[]
   owners?: string[]
   reviewers?: string[]
   tags?: string[]
+}
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value !== null && typeof value === 'object' ? value as Record<string, unknown> : {}
+
+const normalizeStringList = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean)
+}
+
+const normalizeDomainList = (value: unknown): Term['domains'] => {
+  if (!Array.isArray(value)) return []
+
+  return value.flatMap(item => {
+    if (typeof item === 'string') {
+      const name = item.trim()
+      return name ? [{ id: name, name }] : []
+    }
+
+    const record = asRecord(item)
+    const name = typeof record.name === 'string' ? record.name.trim() : ''
+    if (!name) return []
+
+    return [{
+      id: typeof record.id === 'string' && record.id ? record.id : name,
+      name
+    }]
+  })
+}
+
+const normalizeOwnerList = (value: unknown): GlossaryOwner[] => {
+  if (!Array.isArray(value)) return []
+
+  return value.flatMap(item => {
+    if (typeof item === 'string') {
+      const name = item.trim()
+      return name ? [{ id: name, name, email: '' }] : []
+    }
+
+    const record = asRecord(item)
+    const name = typeof record.name === 'string' ? record.name.trim() : ''
+    if (!name) return []
+
+    return [{
+      id: typeof record.id === 'string' && record.id ? record.id : name,
+      name,
+      email: typeof record.email === 'string' ? record.email : ''
+    }]
+  })
+}
+
+const normalizeTagList = (value: unknown): GlossaryTag[] => {
+  if (!Array.isArray(value)) return []
+
+  return value.flatMap(item => {
+    if (typeof item === 'string') {
+      const name = item.trim()
+      return name ? [{ id: name, name, color: '#3498db' }] : []
+    }
+
+    const record = asRecord(item)
+    const name = typeof record.name === 'string' ? record.name.trim() : ''
+    if (!name) return []
+
+    return [{
+      id: typeof record.id === 'string' && record.id ? record.id : name,
+      name,
+      color: typeof record.color === 'string' && record.color ? record.color : '#3498db'
+    }]
+  })
+}
+
+const normalizeRelatedTerms = (value: unknown): NonNullable<Term['relatedTerms']> => {
+  if (!Array.isArray(value)) return []
+
+  return value.flatMap(item => {
+    const record = asRecord(item)
+    const id = typeof record.id === 'string' ? record.id : ''
+    const name = typeof record.name === 'string' ? record.name.trim() : ''
+    return id && name ? [{ id, name }] : []
+  })
+}
+
+const normalizeTerm = (value: unknown): Term => {
+  const record = asRecord(value)
+  const rawStatus = typeof record.status === 'string' ? record.status : 'Draft'
+  const status: Term['status'] =
+    rawStatus === 'Pending' || rawStatus === 'Approved' || rawStatus === 'Deprecated'
+      ? rawStatus
+      : 'Draft'
+
+  return {
+    id: typeof record.id === 'string' ? record.id : '',
+    name: typeof record.name === 'string' ? record.name : '',
+    description: typeof record.description === 'string' ? record.description : '',
+    status,
+    synonyms: normalizeStringList(record.synonyms),
+    owners: normalizeOwnerList(record.owners),
+    reviewers: normalizeOwnerList(record.reviewers),
+    domains: normalizeDomainList(record.domains),
+    tags: normalizeTagList(record.tags),
+    relatedTerms: normalizeRelatedTerms(record.relatedTerms),
+    glossaryId: typeof record.glossaryId === 'string' ? record.glossaryId : undefined,
+    glossaryName: typeof record.glossaryName === 'string' ? record.glossaryName : undefined,
+    createdAt: typeof record.createdAt === 'string' ? record.createdAt : undefined,
+    updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : undefined
+  }
 }
 
 export const glossaryApi = {
@@ -1442,7 +1555,10 @@ export const glossaryApi = {
     if (!response.ok) {
       await handleHttpError(response)
     }
-    return response.json()
+    const data = await response.json()
+    return {
+      terms: Array.isArray(data.terms) ? data.terms.map(normalizeTerm) : []
+    }
   },
 
   /**
@@ -1471,7 +1587,7 @@ export const glossaryApi = {
     if (!response.ok) {
       await handleHttpError(response)
     }
-    return response.json()
+    return normalizeTerm(await response.json())
   },
 
   /**
