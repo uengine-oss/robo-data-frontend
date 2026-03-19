@@ -52,13 +52,38 @@ type MessageType = StreamMessage['type']
 // ============================================================================
 
 /**
+ * 멀티라벨 아키텍처에서 서브라벨(표시용 kind) 추출
+ * PRIMARY_LABELS(역할 라벨)를 제외한 첫 번째 라벨을 서브라벨로 사용
+ */
+const PRIMARY_LABELS = new Set([
+  'MODULE', 'FUNCTION', 'VARIABLE', 'CONSTANT', 'PACKAGE', 'COMMAND',
+  'READMODEL', 'INTERNAL', 'EXTERNAL',
+  'Endpoint', 'Query', 'Command', 'Getter', 'Setter', 'Lifecycle',
+  'Scheduled', 'EventHandler', 'Init', 'Transactional', 'Validation', 'BusinessLogic'
+])
+
+function extractSubLabel(labels: string[]): string {
+  for (const label of labels) {
+    if (!PRIMARY_LABELS.has(label)) {
+      return label
+    }
+  }
+  return labels[0] || 'Unknown'
+}
+
+/**
  * Neo4j 노드를 내부 형식으로 변환
  */
 function convertNeo4jNode(node: Neo4jNode): GraphNode {
+  const labels = node['Labels'] || []
+  const properties = node['Properties'] || {}
+  // 멀티라벨 아키텍처: 서브라벨을 kind로 사용, fallback으로 properties.type 또는 첫 번째 라벨
+  const kind = extractSubLabel(labels) || (properties.type as string) || 'Unknown'
   return {
   id: node['Node ID'],
-  labels: node['Labels'],
-  properties: node['Properties']
+  labels,
+  kind,
+  properties
   }
 }
 
@@ -336,13 +361,14 @@ export const useProjectStore = defineStore('project', () => {
    * 노드에서 읽기 쉬운 이름 추출
    */
   function _resolveNodeName(properties: Record<string, unknown>, labels: string[], nodeId: string): string {
+    const kind = extractSubLabel(labels) || (properties['type'] as string) || ''
     return String(
       properties['name'] ||
       properties['procedure_name'] ||
       properties['class_name'] ||
       (typeof properties['method_id'] === 'string' ? (properties['method_id'] as string).split('.').pop() : '') ||
       properties['fileName'] ||
-      (labels.length > 0 ? `[${labels.join(':')}] ${nodeId}` : nodeId)
+      (kind ? `[${kind}] ${nodeId}` : (labels.length > 0 ? `[${labels.join(':')}] ${nodeId}` : nodeId))
     )
   }
 
@@ -354,7 +380,8 @@ export const useProjectStore = defineStore('project', () => {
     for (const node of nodes) {
       const labels = node['Labels'] || []
       const properties = node['Properties'] || {}
-      const nodeType = labels[0] || 'Unknown'
+      // 멀티라벨 아키텍처: 서브라벨을 nodeType으로 사용
+      const nodeType = extractSubLabel(labels) || (properties.type as string) || 'Unknown'
       const nodeId = String(node['Node ID'])
 
       const nodeName = _resolveNodeName(properties, labels, nodeId)

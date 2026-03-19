@@ -99,7 +99,14 @@ export const NODE_COLORS: Record<string, string> = {
   Schema: '#D35A5A',      // 스키마도 핑크 계열
   
   // ========================================
-  // 클래스/인터페이스 (Java/Python)
+  // 멀티라벨 아키텍처 - Primary 라벨 (역할)
+  // ========================================
+  MODULE: '#3B82F6',       // 블루 (클래스와 동일)
+  VARIABLE: '#98A0A8',     // 회색
+  CONSTANT: '#F59E0B',     // 앰버/노란색
+
+  // ========================================
+  // 클래스/인터페이스 (Java/Python/C) — Sub 라벨
   // ========================================
   CLASS: '#3B82F6',
   Class: '#3B82F6',
@@ -107,6 +114,14 @@ export const NODE_COLORS: Record<string, string> = {
   Interface: '#8B5CF6',
   METHOD: '#10B981',
   Method: '#10B981',
+  STRUCT: '#4B8BBE',       // 구조체 (청회색)
+  UNION: '#6B7280',        // 유니온 (중회색)
+  MEMBER: '#98A0A8',       // 멤버 변수 (회색)
+  GLOBAL_VARIABLE: '#78716C', // 전역 변수 (갈회색)
+  DEFINE: '#F59E0B',       // 매크로 상수 (앰버)
+  CONSTRUCTOR: '#059669',  // 생성자 (진녹색)
+  ENUM: '#A855F7',         // 열거형 (퍼플)
+  Enum: '#A855F7',
   
   // 기타
   DBLink: '#7D4A15',
@@ -169,11 +184,15 @@ export const NODE_SIZES: Record<string, number> = {
   FILE: 35,
   PROCEDURE: 40,
   FUNCTION: 40,
+  MODULE: 40,
   Table: 38,
   CLASS: 40,
   Class: 40,
   INTERFACE: 38,
   Interface: 38,
+  STRUCT: 38,
+  ENUM: 35,
+  Enum: 35,
   DEFAULT: 30
 }
 

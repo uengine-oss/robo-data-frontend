@@ -717,7 +717,7 @@ watch(hasGraph, (has, prev) => {
             :key="node.id"
             @click="handleSearchSelect(node)"
           >
-            <span class="tag">{{ node.labels?.[0] }}</span>
+            <span class="tag">{{ node.kind || node.labels?.[0] }}</span>
             <span class="node-info">
               <span class="node-name">{{ node.properties?.name || node.properties?.class_name || node.id }}</span>
               <span class="node-dir" v-if="getDirectory(node)">{{ getDirectory(node) }}</span>

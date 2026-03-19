@@ -267,20 +267,21 @@ function updateExpandableNodes(): void {
  * GraphNode를 NVL 형식으로 변환
  */
 function toNvlNode(node: GraphNode, isSelected: boolean = false, isExpandable: boolean = false): NvlNode {
-  const labels = node.labels || []
-  const name = (node.properties?.name as string) 
-    || labels[0] 
+  const kind = node.kind || 'Unknown'
+  const name = (node.properties?.name as string)
+    || kind
     || node.id
-  
+
   return {
     id: node.id,
     caption: name,
-    color: getNodeColor(labels),
-    size: getNodeSize(labels),
+    color: getNodeColor(node.labels),
+    size: getNodeSize(node.labels),
     selected: isSelected,
-    properties: { 
-      ...node.properties, 
-      labels,
+    properties: {
+      ...node.properties,
+      labels: node.labels,
+      kind,
       isExpandable: isExpandable
     }
   }
@@ -312,23 +313,18 @@ function toNvlRelationship(link: GraphData['links'][0], isSelected: boolean = fa
 function updateNodeStats(): void {
   const stats = new Map<string, NodeStat>()
 
-  // 전체 props.graphData에서 통계 계산 (limit 적용 전)
-  // 다중 라벨 노드는 각 라벨별로 카운트 (Method+Command → Method +1, Command +1)
+  // 전체 props.graphData에서 kind 기반 통계 계산 (labels 배열로 색상 결정)
   for (const node of props.graphData.nodes) {
-    const labels = node.labels || []
-    if (labels.length === 0) continue
-
-    for (const label of labels) {
-      if (label === '_Placeholder') continue
-      const existing = stats.get(label)
-      if (existing) {
-        existing.count++
-      } else {
-        stats.set(label, {
-          count: 1,
-          color: getNodeColor([label])
-        })
-      }
+    const kind = node.kind || 'Unknown'
+    if (kind === '_Placeholder') continue
+    const existing = stats.get(kind)
+    if (existing) {
+      existing.count++
+    } else {
+      stats.set(kind, {
+        count: 1,
+        color: getNodeColor(node.labels)
+      })
     }
   }
 
@@ -459,8 +455,9 @@ function matchesLabelFilter(node: GraphNode): boolean {
   if (!props.labelFilters || props.labelFilters.length === 0) {
     return true // 필터가 없으면 모든 노드 표시
   }
-  const labels = node.labels || []
-  return labels.some(label => props.labelFilters!.includes(label))
+  // kind 기반 필터링 (label 대신 kind 사용)
+  const kind = node.kind || 'Unknown'
+  return props.labelFilters!.includes(kind)
 }
 
 /**
@@ -490,15 +487,25 @@ function syncGraphData(data: GraphData): { newNodes: NvlNode[]; newRels: NvlRela
   hiddenNodeCount.value = shouldIgnoreLimit ? 0 : Math.max(0, data.nodes.length - maxDisplayNodes)
   isLimitApplied.value = shouldIgnoreLimit ? false : (data.nodes.length > maxDisplayNodes)
   
-  // 먼저 노드를 nodeMap에 추가
+  // 현재 표시할 노드 ID set
+  const targetNodeIds = new Set(visibleNodes.map(n => n.id))
+
+  // nodeMap에서 더 이상 표시하지 않는 노드 제거 (필터 해제 시 NVL 복원을 위해)
+  for (const nodeId of nodeMap.keys()) {
+    if (!targetNodeIds.has(nodeId)) {
+      nodeMap.delete(nodeId)
+    }
+  }
+
+  // 노드를 nodeMap에 추가/갱신
   for (const node of visibleNodes) {
     const isSelected = props.selectedNodeId === node.id
     const existing = nodeMap.get(node.id)
-    
+
     if (existing && existing.selected === isSelected) {
       continue
     }
-    
+
     // 일단 isExpandable=false로 추가 (나중에 업데이트)
     const nvlNode = toNvlNode(node, isSelected, false)
     nodeMap.set(node.id, nvlNode)
@@ -967,7 +974,7 @@ function updateNodeStyles(): void {
   const nodesToUpdate: PartialNode[] = []
   
   for (const [nodeId, node] of nodeMap.entries()) {
-    const labels = (node.properties?.labels as string[]) || []
+    const labels = (node.properties?.labels as string[]) || [((node.properties?.kind as string) || 'Unknown')]
     const newColor = getNodeColor(labels)
     const newSize = getNodeSize(labels)
     

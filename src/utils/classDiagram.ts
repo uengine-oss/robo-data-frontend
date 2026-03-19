@@ -13,7 +13,7 @@ import type { GraphNode, GraphLink } from '@/types'
 // ============================================================================
 
 /** 클래스/인터페이스 라벨 */
-export const CLASS_LABELS = ['CLASS', 'Class', 'INTERFACE', 'Interface', 'ENUM', 'Enum']
+export const CLASS_LABELS = ['MODULE', 'CLASS', 'Class', 'INTERFACE', 'Interface', 'ENUM', 'Enum', 'STRUCT']
 
 /** 클래스 관계 타입 */
 export const CLASS_RELATION_TYPES = ['EXTENDS', 'IMPLEMENTS', 'ASSOCIATION', 'AGGREGATION', 'COMPOSITION', 'DEPENDENCY']
@@ -459,10 +459,10 @@ export function getNodesWithinDepth(
 // ============================================================================
 
 /** FIELD 노드 라벨 */
-const FIELD_LABELS = ['FIELD', 'Field']
+const FIELD_LABELS = ['VARIABLE', 'CONSTANT', 'FIELD', 'Field', 'MEMBER', 'GLOBAL_VARIABLE']
 
 /** METHOD/CONSTRUCTOR 노드 라벨 */
-const METHOD_LABELS = ['METHOD', 'Method', 'CONSTRUCTOR', 'Constructor']
+const METHOD_LABELS = ['FUNCTION', 'METHOD', 'Method', 'CONSTRUCTOR', 'Constructor']
 
 /** Parameter 노드 라벨 */
 const PARAMETER_LABELS = ['Parameter', 'PARAMETER']

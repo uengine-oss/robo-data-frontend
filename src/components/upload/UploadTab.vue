@@ -103,7 +103,7 @@ const readFileContent = (file: File): Promise<string> => {
 }
 
 // 분석 대상 확장자 목록 (DDL은 .txt 등 다양한 확장자 가능)
-const ANALYZABLE_EXTENSIONS = ['.java', '.sql', '.pls', '.pck', '.pkb', '.pks', '.trg', '.fnc', '.prc', '.py', '.xml', '.txt', '.ddl']
+const ANALYZABLE_EXTENSIONS = ['.java', '.c', '.h', '.sql', '.pls', '.pck', '.pkb', '.pks', '.trg', '.fnc', '.prc', '.py', '.xml', '.txt', '.ddl']
 
 // 파일 드롭 시 - 파일 분석 후 모달 열기 (자동 타입 감지 포함)
 const handleFilesDrop = async (files: File[]) => {

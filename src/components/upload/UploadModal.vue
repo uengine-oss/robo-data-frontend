@@ -206,6 +206,7 @@ const totalFileCount = computed(() => files.value.length)
 // 소스 타입 옵션 (antlr-code-parser에서 지원하는 타입만)
 const sourceTypeOptions: { value: SourceType; label: string }[] = [
   { value: 'java', label: 'Java' },
+  { value: 'c', label: 'C' },
   { value: 'postgresql', label: 'PostgreSQL' },
   { value: 'oracle', label: 'Oracle' }
 ]
@@ -219,15 +220,19 @@ const detectSourceType = (files: File[]): SourceType | null => {
     if (name.endsWith('.sql')) return 'sql'
     if (name.endsWith('.java')) return 'java'
     if (name.endsWith('.py')) return 'python'
+    if (name.endsWith('.c') || name.endsWith('.h')) return 'c'
     return 'other'
   })
-  
+
   const hasJava = extensions.includes('java')
   const hasPython = extensions.includes('python')
+  const hasC = extensions.includes('c')
   const hasSql = extensions.includes('sql')
-  
+
   // Java 파일이 있으면 Java
   if (hasJava) return 'java'
+  // C 파일이 있으면 C
+  if (hasC) return 'c'
   // Python 파일이 있으면 Python
   if (hasPython) return 'python'
   // SQL 파일만 있으면 null (사용자가 PostgreSQL/Oracle 선택해야 함)
@@ -264,6 +269,7 @@ const validationError = computed(() => {
 const formatDetectedTypes = (byType: Record<string, number>): string => {
   const typeLabels: Record<string, string> = {
     java: 'Java',
+    c: 'C',
     oracle_sp: 'Oracle SP',
     oracle_ddl: 'Oracle DDL',
     postgresql_sp: 'PostgreSQL SP',

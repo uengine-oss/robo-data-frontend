@@ -103,26 +103,16 @@ const isSearchFocused = ref(false)
 // ============================================================================
 
 
-/** 노드의 모든 라벨 반환 */
-const nodeClassLabels = computed(() => {
-  if (!props.node?.labels) return []
-  return props.node.labels
+/** 노드의 kind 값 반환 (label 대신 kind 사용) */
+const nodeKind = computed(() => {
+  if (!props.node) return ''
+  return props.node.kind || 'Unknown'
 })
 
-/** 노드의 색상 계산 (라벨 기반) */
+/** 노드의 색상 계산 (labels 배열 기반, fallback으로 kind) */
 const nodeColor = computed(() => {
-  if (!props.node?.labels) return '#3b82f6'
-  return getNodeColor(props.node.labels)
-})
-
-/** 각 라벨별 색상 맵 */
-const labelColors = computed(() => {
-  if (!props.node?.labels) return new Map<string, string>()
-  const colorMap = new Map<string, string>()
-  for (const label of props.node.labels) {
-    colorMap.set(label, getNodeColor([label]))
-  }
-  return colorMap
+  if (!props.node) return '#3b82f6'
+  return getNodeColor(props.node.labels || [props.node.kind || 'Unknown'])
 })
 
 /** 속성 목록 (노드용) */
@@ -379,15 +369,13 @@ function getNodeSubInfo(node: GraphNode): string {
   <div class="panel-content">
     <!-- ========== 노드 선택 시: 노드 속성 표시 ========== -->
     <template v-if="node">
-      <!-- 노드 타입 표시 (각 라벨의 색상 적용) -->
+      <!-- 노드 타입 표시 (kind 기반) -->
       <div class="type-header">
-        <span 
-          class="type-badge" 
-          v-for="label in nodeClassLabels" 
-          :key="label"
-          :style="{ background: labelColors.get(label) || nodeColor }"
+        <span
+          class="type-badge"
+          :style="{ background: nodeColor }"
         >
-          {{ label }}
+          {{ nodeKind }}
         </span>
       </div>
       
@@ -501,16 +489,16 @@ function getNodeSubInfo(node: GraphNode): string {
               검색 결과 ({{ searchResults.length }}개{{ searchResults.length >= MAX_SEARCH_RESULTS ? '+' : '' }})
             </div>
             <template v-if="hasSearchResults">
-              <div 
-                v-for="resultNode in searchResults" 
+              <div
+                v-for="resultNode in searchResults"
                 :key="resultNode.id"
                 class="search-result-item"
                 @mousedown.prevent="handleSearchResultSelect(resultNode)"
               >
-                <span 
+                <span
                   class="result-label"
-                  :style="{ background: getNodeColor(resultNode.labels || []) }"
-                >{{ resultNode.labels?.[0] || 'Node' }}</span>
+                  :style="{ background: getNodeColor(resultNode.labels || [resultNode.kind || 'Unknown']) }"
+                >{{ resultNode.kind || 'Node' }}</span>
                 <div class="result-info">
                   <span class="result-name">{{ getNodeDisplayName(resultNode) }}</span>
                   <span class="result-sub" v-if="getNodeSubInfo(resultNode)">{{ getNodeSubInfo(resultNode) }}</span>

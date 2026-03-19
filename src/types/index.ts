@@ -8,7 +8,7 @@
 // ============================================================================
 
 /** 소스 코드 타입 */
-export type SourceType = 'oracle' | 'postgresql' | 'java' | 'python'
+export type SourceType = 'oracle' | 'postgresql' | 'java' | 'python' | 'c'
 
 /** 백엔드 전략 타입 */
 export type Strategy = 'dbms' | 'framework'
@@ -81,6 +81,7 @@ export interface Neo4jGraphResponse {
 export interface GraphNode {
   id: string
   labels: string[]
+  kind: string
   properties: Record<string, unknown>
 }
 
