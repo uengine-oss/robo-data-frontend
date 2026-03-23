@@ -20,7 +20,7 @@ interface TableNodeData {
   schema: string
   datasource?: string  // 데이터소스명 (예: robo_postgres)
   description?: string
-  description_source?: 'ddl' | 'procedure' | 'user' | ''  // 설명 출처
+  description_source?: 'ddl' | 'procedure' | 'code' | 'user' | ''  // 설명 출처
   columns: Text2SqlColumnInfo[]
   columnCount: number
   isPrimary?: boolean  // 직접 선택/드래그한 테이블인지 여부
@@ -38,6 +38,17 @@ interface ProcedureReference {
   statement_line?: number
   file_name?: string
   file_directory?: string
+}
+
+// 프레임워크 참조 정보 타입
+interface FrameworkReference {
+  source_name: string
+  source_type: string  // "FUNCTION" | "MODULE"
+  access_type: string  // "READS" | "WRITES" | "REFER_TO"
+  start_line?: number  // 함수/모듈 시작 라인
+  file_name?: string
+  file_directory?: string
+  module_name?: string
 }
 
 const props = defineProps<{
@@ -116,10 +127,16 @@ function truncateDescription(desc: string, maxLen = 20): string {
   return desc.length > maxLen ? desc.substring(0, maxLen) + '...' : desc
 }
 
+// 코드 분석 출처 여부 판별 (procedure와 code는 동일 취급)
+function isCodeSource(source?: string): boolean {
+  return source === 'procedure' || source === 'code'
+}
+
 // 설명 출처에 따른 색상 반환 (범례와 일치)
-// procedure: 하늘색, ddl: 초록색, user: 주황색
+// code(코드 분석): 하늘색, ddl: 초록색, user: 주황색
 const descriptionSourceColors: Record<string, string> = {
-  procedure: '#38bdf8',  // 하늘색 (스토어드 프로시저 분석)
+  procedure: '#38bdf8',  // 하늘색 (코드 분석) — 레거시 호환
+  code: '#38bdf8',       // 하늘색 (코드 분석)
   ddl: '#22c55e',        // 초록색 (DDL에서 추출)
   user: '#f59e0b',       // 주황색 (사용자 입력)
 }
@@ -136,7 +153,8 @@ function getDescriptionSourceLabel(source?: string): string {
   if (!source) return ''
   const labels: Record<string, string> = {
     ddl: 'DDL',
-    procedure: '분석',
+    procedure: '코드 분석',
+    code: '코드 분석',
     user: '사용자'
   }
   return labels[source] || ''
@@ -146,6 +164,7 @@ function getDescriptionSourceLabel(source?: string): string {
 const isDescriptionHovered = ref(false)
 const isLoadingReferences = ref(false)
 const procedureReferences = ref<ProcedureReference[]>([])
+const frameworkReferences = ref<FrameworkReference[]>([])
 const showReferencesPopup = ref(false)
 const referencesPopupPosition = ref({ x: 0, y: 0 })
 
@@ -157,22 +176,23 @@ const showColumnReferencesPopup = ref(false)
 const columnReferencesPopupPosition = ref({ x: 0, y: 0 })
 const isLoadingColumnReferences = ref(false)
 const columnReferences = ref<ProcedureReference[]>([])
+const columnFrameworkReferences = ref<FrameworkReference[]>([])
 const activeColumnName = ref<string>('')
 
-// 프로시저 분석 출처인 경우 참조 정보 로드
+// 참조 정보 로드 (프로시저 + 프레임워크)
 async function loadProcedureReferences() {
-  if (props.data.description_source !== 'procedure') return
-  
   isLoadingReferences.value = true
   try {
     const result = await roboSchemaApi.getTableReferences(
       props.data.tableName,
       { schema: props.data.schema }
     )
-    procedureReferences.value = result.references
+    procedureReferences.value = result.references || []
+    frameworkReferences.value = result.framework_references || []
   } catch (error) {
     console.error('Failed to load procedure references:', error)
     procedureReferences.value = []
+    frameworkReferences.value = []
   } finally {
     isLoadingReferences.value = false
   }
@@ -180,7 +200,6 @@ async function loadProcedureReferences() {
 
 // 출처 칩 클릭 시 팝업 표시
 function handleSourceChipClick(event: MouseEvent) {
-  if (props.data.description_source !== 'procedure') return
   
   // 팝업 위치 설정
   referencesPopupPosition.value = {
@@ -213,10 +232,12 @@ async function loadColumnReferences(columnName: string) {
       props.data.tableName,
       { schema: props.data.schema, columnName }
     )
-    columnReferences.value = result.references
+    columnReferences.value = result.references || []
+    columnFrameworkReferences.value = result.framework_references || []
   } catch (error) {
     console.error('Failed to load column references:', error)
     columnReferences.value = []
+    columnFrameworkReferences.value = []
   } finally {
     isLoadingColumnReferences.value = false
   }
@@ -344,14 +365,18 @@ function isReferenceVisited(ref: ProcedureReference): boolean {
 function getAccessTypeLabel(accessType: string): string {
   const labels: Record<string, string> = {
     'FROM': '읽기',
-    'WRITES': '쓰기'
+    'READS': '읽기',
+    'WRITES': '쓰기',
+    'REFER_TO': '참조'
   }
   return labels[accessType] || accessType
 }
 
 // 접근 유형 색상
 function getAccessTypeColor(accessType: string): string {
-  return accessType === 'WRITES' ? '#f59e0b' : '#38bdf8'
+  if (accessType === 'WRITES') return '#f59e0b'
+  if (accessType === 'REFER_TO') return '#a78bfa'
+  return '#38bdf8'
 }
 
 // Hover state for showing handles
@@ -566,24 +591,24 @@ function onColumnMouseLeave() {
         v-if="!canvasStore.showLogicalNames && data.description_source" 
         class="table-node__description-badge"
         :class="{ 
-          'is-clickable': data.description_source === 'procedure',
-          'is-hovered': isDescriptionHovered && data.description_source === 'procedure'
+          'is-clickable': isCodeSource(data.description_source),
+          'is-hovered': isDescriptionHovered && isCodeSource(data.description_source)
         }"
         :style="{ background: getDescriptionColor(data.description_source) }"
         @click="handleSourceChipClick"
       >
         {{ getDescriptionSourceLabel(data.description_source) }}
-        <span v-if="data.description_source === 'procedure' && isDescriptionHovered" class="table-node__source-hint">
+        <span v-if="isCodeSource(data.description_source) && isDescriptionHovered" class="table-node__source-hint">
           📍
         </span>
       </span>
       {{ canvasStore.showLogicalNames ? data.tableName : data.description }}
     </div>
     
-    <!-- 컬럼 프로시저 참조 팝업 -->
+    <!-- 컬럼 참조 팝업 (프로시저 + 프레임워크) -->
     <Teleport to="body">
-      <div 
-        v-if="showColumnReferencesPopup" 
+      <div
+        v-if="showColumnReferencesPopup"
         class="references-popup"
         :style="{ left: `${columnReferencesPopupPosition.x}px`, top: `${columnReferencesPopupPosition.y}px` }"
       >
@@ -595,89 +620,140 @@ function onColumnMouseLeave() {
           <div v-if="isLoadingColumnReferences" class="references-popup__loading">
             로딩 중...
           </div>
-          <div v-else-if="columnReferences.length === 0" class="references-popup__empty">
+          <div v-else-if="columnReferences.length === 0 && columnFrameworkReferences.length === 0" class="references-popup__empty">
             참조 정보를 찾을 수 없습니다.
           </div>
-          <div 
-            v-else 
-            v-for="ref in columnReferences" 
-            :key="`${ref.procedure_name}-${ref.statement_line}`"
-            class="references-popup__item"
-            :class="{ 'visited': isReferenceVisited(ref) }"
-            @click="handleProcedureClick(ref)"
-          >
-            <div class="references-popup__proc-name">
-              <span class="references-popup__proc-type">{{ ref.procedure_type }}</span>
-              {{ ref.procedure_name }}
+          <template v-else>
+            <!-- 프로시저 참조 -->
+            <div
+              v-for="ref in columnReferences"
+              :key="`col-proc-${ref.procedure_name}-${ref.statement_line}`"
+              class="references-popup__item"
+              :class="{ 'visited': isReferenceVisited(ref) }"
+              @click="handleProcedureClick(ref)"
+            >
+              <div class="references-popup__proc-name">
+                <span class="references-popup__proc-type">{{ ref.procedure_type }}</span>
+                {{ ref.procedure_name }}
+              </div>
+              <div class="references-popup__details">
+                <span
+                  class="references-popup__access-type"
+                  :style="{ color: getAccessTypeColor(ref.access_type) }"
+                >
+                  {{ getAccessTypeLabel(ref.access_type) }}
+                </span>
+                <span v-if="ref.statement_type" class="references-popup__stmt-type">
+                  {{ ref.statement_type }}
+                </span>
+                <span v-if="ref.statement_line" class="references-popup__line">
+                  Line {{ ref.statement_line }}
+                </span>
+              </div>
             </div>
-            <div class="references-popup__details">
-              <span 
-                class="references-popup__access-type"
-                :style="{ color: getAccessTypeColor(ref.access_type) }"
-              >
-                {{ getAccessTypeLabel(ref.access_type) }}
-              </span>
-              <span v-if="ref.statement_type" class="references-popup__stmt-type">
-                {{ ref.statement_type }}
-              </span>
-              <span v-if="ref.statement_line" class="references-popup__line">
-                Line {{ ref.statement_line }}
-              </span>
+            <!-- 프레임워크 참조 -->
+            <div
+              v-for="ref in columnFrameworkReferences"
+              :key="`col-fw-${ref.source_name}-${ref.start_line}`"
+              class="references-popup__item"
+            >
+              <div class="references-popup__proc-name">
+                <span class="references-popup__proc-type references-popup__proc-type--fw">{{ ref.source_type }}</span>
+                {{ ref.source_name }}
+                <span v-if="ref.module_name && ref.module_name !== ref.source_name" class="references-popup__module-name">
+                  ({{ ref.module_name }})
+                </span>
+              </div>
+              <div class="references-popup__details">
+                <span
+                  class="references-popup__access-type"
+                  :style="{ color: getAccessTypeColor(ref.access_type) }"
+                >
+                  {{ getAccessTypeLabel(ref.access_type) }}
+                </span>
+              </div>
             </div>
-          </div>
+          </template>
         </div>
       </div>
     </Teleport>
-    
-    <!-- 프로시저 참조 팝업 -->
+
+    <!-- 참조 팝업 (프로시저 + 프레임워크) -->
     <Teleport to="body">
-      <div 
-        v-if="showReferencesPopup" 
+      <div
+        v-if="showReferencesPopup"
         class="references-popup"
         :style="{ left: `${referencesPopupPosition.x}px`, top: `${referencesPopupPosition.y}px` }"
       >
         <div class="references-popup__header">
-          <span>📍 참조 프로시저</span>
+          <span>📍 테이블 참조</span>
           <button class="references-popup__close" @click="closeReferencesPopup">✕</button>
         </div>
         <div class="references-popup__content">
           <div v-if="isLoadingReferences" class="references-popup__loading">
             로딩 중...
           </div>
-          <div v-else-if="procedureReferences.length === 0" class="references-popup__empty">
+          <div v-else-if="procedureReferences.length === 0 && frameworkReferences.length === 0" class="references-popup__empty">
             참조 정보를 찾을 수 없습니다.
           </div>
-          <div 
-            v-else 
-            v-for="ref in procedureReferences" 
-            :key="`${ref.procedure_name}-${ref.statement_line}`"
-            class="references-popup__item"
-            :class="{ 'visited': isReferenceVisited(ref) }"
-            @click="handleProcedureClick(ref)"
-          >
-            <div class="references-popup__proc-name">
-              <span class="references-popup__proc-type">{{ ref.procedure_type }}</span>
-              {{ ref.procedure_name }}
+          <template v-else>
+            <!-- 프로시저 참조 -->
+            <div
+              v-for="ref in procedureReferences"
+              :key="`proc-${ref.procedure_name}-${ref.statement_line}`"
+              class="references-popup__item"
+              :class="{ 'visited': isReferenceVisited(ref) }"
+              @click="handleProcedureClick(ref)"
+            >
+              <div class="references-popup__proc-name">
+                <span class="references-popup__proc-type">{{ ref.procedure_type }}</span>
+                {{ ref.procedure_name }}
+              </div>
+              <div class="references-popup__details">
+                <span
+                  class="references-popup__access-type"
+                  :style="{ color: getAccessTypeColor(ref.access_type) }"
+                >
+                  {{ getAccessTypeLabel(ref.access_type) }}
+                </span>
+                <span v-if="ref.statement_type" class="references-popup__stmt-type">
+                  {{ ref.statement_type }}
+                </span>
+                <span v-if="ref.statement_line" class="references-popup__line">
+                  Line {{ ref.statement_line }}
+                </span>
+              </div>
             </div>
-            <div class="references-popup__details">
-              <span 
-                class="references-popup__access-type"
-                :style="{ color: getAccessTypeColor(ref.access_type) }"
-              >
-                {{ getAccessTypeLabel(ref.access_type) }}
-              </span>
-              <span v-if="ref.statement_type" class="references-popup__stmt-type">
-                {{ ref.statement_type }}
-              </span>
-              <span v-if="ref.statement_line" class="references-popup__line">
-                Line {{ ref.statement_line }}
-              </span>
+            <!-- 프레임워크 참조 -->
+            <div
+              v-for="ref in frameworkReferences"
+              :key="`fw-${ref.source_name}-${ref.start_line}`"
+              class="references-popup__item"
+            >
+              <div class="references-popup__proc-name">
+                <span class="references-popup__proc-type references-popup__proc-type--fw">{{ ref.source_type }}</span>
+                {{ ref.source_name }}
+                <span v-if="ref.module_name && ref.module_name !== ref.source_name" class="references-popup__module-name">
+                  ({{ ref.module_name }})
+                </span>
+              </div>
+              <div class="references-popup__details">
+                <span
+                  class="references-popup__access-type"
+                  :style="{ color: getAccessTypeColor(ref.access_type) }"
+                >
+                  {{ getAccessTypeLabel(ref.access_type) }}
+                </span>
+                <span v-if="ref.start_line" class="references-popup__line">
+                  Line {{ ref.start_line }}
+                </span>
+              </div>
             </div>
-          </div>
+          </template>
         </div>
       </div>
     </Teleport>
-    
+
     <!-- Columns -->
     <div class="table-node__columns">
       <div 
@@ -746,17 +822,17 @@ function onColumnMouseLeave() {
           class="table-node__column-desc"
           :class="{ 
             'is-updating': isColumnUpdating(col.name),
-            'is-clickable': col.description_source === 'procedure'
+            'is-clickable': isCodeSource(col.description_source)
           }"
           :style="{ color: getDescriptionColor(col.description_source) }"
           :title="canvasStore.showLogicalNames 
             ? `${col.name} ${col.description_source ? `[출처: ${getDescriptionSourceLabel(col.description_source)}]` : ''}`
             : `${col.description} ${col.description_source ? `[출처: ${getDescriptionSourceLabel(col.description_source)}]` : ''}`"
-          @click="col.description_source === 'procedure' ? handleColumnSourceClick($event, col.name) : null"
+          @click="isCodeSource(col.description_source) ? handleColumnSourceClick($event, col.name) : null"
         >
           <span v-if="col.description_source" class="table-node__desc-source-dot" :style="{ background: getDescriptionColor(col.description_source) }"></span>
           {{ canvasStore.showLogicalNames ? col.name : truncateDescription(col.description) }}
-          <span v-if="col.description_source === 'procedure'" class="table-node__column-link-icon">🔍</span>
+          <span v-if="isCodeSource(col.description_source)" class="table-node__column-link-icon">🔍</span>
         </div>
         
         <!-- Drag hint for FK columns -->
@@ -1117,6 +1193,17 @@ function onColumnMouseLeave() {
   padding: 1px 5px;
   border-radius: 3px;
   text-transform: uppercase;
+}
+
+.references-popup__proc-type--fw {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.15);
+}
+
+.references-popup__module-name {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  margin-left: 4px;
 }
 
 .references-popup__details {

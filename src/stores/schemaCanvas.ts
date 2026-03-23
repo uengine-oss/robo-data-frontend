@@ -24,7 +24,7 @@ export interface TableNodeData {
   schema: string
   datasource?: string  // 데이터소스명 (예: robo_postgres)
   description?: string
-  description_source?: 'ddl' | 'procedure' | 'user' | ''  // 설명 출처 (code는 procedure로 정규화됨)
+  description_source?: 'ddl' | 'procedure' | 'code' | 'user' | ''  // 설명 출처
   columns: Text2SqlColumnInfo[]
   columnCount: number
   isPrimary?: boolean  // 직접 선택/드래그한 테이블인지 여부
@@ -315,17 +315,20 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   const semanticSearchError = ref<string | null>(null)
   
   // FK 관계 유형별 표시 여부 (범례 체크박스용)
-  // source: 'ddl' | 'procedure' | 'user' | 'code' (code는 procedure와 동일하게 취급)
+  // source: 'ddl' | 'code' | 'user' (procedure는 code로 통합)
   const fkVisibility = ref({
     ddl: true,        // DDL에서 추출 (실선, 초록색)
-    procedure: true,  // 프로시저 분석 (점선, 하늘색)
+    code: true,       // 코드 분석 (점선, 하늘색)
     user: true        // 사용자 추가 (실선, 주황색)
-  })
+  } as Record<string, boolean>)
   
   // FK 표시 토글 함수
-  function toggleFkVisibility(source: 'ddl' | 'procedure' | 'user' | 'code') {
-    // 'code'는 procedure와 동일 그룹으로 토글
-    const key = source === 'code' ? 'procedure' : source
+  function toggleFkVisibility(source: 'ddl' | 'procedure' | 'code' | 'user') {
+    // 'procedure'는 'code'와 동일 그룹으로 토글
+    const key = source === 'procedure' ? 'code' : source
+    if (!(key in fkVisibility.value)) {
+      fkVisibility.value[key] = true
+    }
     fkVisibility.value[key] = !fkVisibility.value[key]
     updateEdgesFromRelationships()
   }
@@ -692,19 +695,16 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
           limit: 1000
         })
         allTables.value = tables.map(t => {
-          // 데이터 소스가 'code' 인 경우도 'procedure' 와 동일하게 취급
           const rawSource = (t as any).description_source as string | undefined
-          const normalizedSource =
-            rawSource === 'code' ? 'procedure' : rawSource
-          
+
           return {
             name: t.name,
             schema: t.table_schema,  // Backend returns table_schema
             datasource: t.datasource || '',  // 데이터소스명 추가
             description: t.description || '',
-            description_source: (normalizedSource && (normalizedSource === 'ddl' || normalizedSource === 'procedure' || normalizedSource === 'user' || normalizedSource === '')) 
-              ? normalizedSource 
-              : undefined,  // 설명 출처 - 타입 안전하게 변환
+            description_source: (rawSource && (rawSource === 'ddl' || rawSource === 'procedure' || rawSource === 'code' || rawSource === 'user' || rawSource === ''))
+              ? rawSource
+              : undefined,  // 설명 출처
             analyzed_description: t.analyzed_description,
             column_count: t.column_count
           }
@@ -816,18 +816,16 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         })
         columns = roboColumns.map(c => {
           const rawSource = (c as any).description_source as string | undefined
-          const normalizedSource =
-            rawSource === 'code' ? 'procedure' : rawSource
-          
+
           return {
             name: c.name,
             table_name: c.table_name,
             dtype: c.dtype,
             nullable: c.nullable,
             description: c.description || '',
-            description_source: (normalizedSource && (normalizedSource === 'ddl' || normalizedSource === 'procedure' || normalizedSource === 'user' || normalizedSource === '')) 
-              ? normalizedSource 
-              : undefined,  // 설명 출처 - 타입 안전하게 변환
+            description_source: (rawSource && (rawSource === 'ddl' || rawSource === 'procedure' || rawSource === 'code' || rawSource === 'user' || rawSource === ''))
+              ? rawSource
+              : undefined,  // 설명 출처
             analyzed_description: c.analyzed_description
           }
         })
@@ -921,9 +919,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         schema: table.schema || 'public',
         datasource: table.datasource || '',  // 데이터소스명 (멀티 데이터소스 지원)
         description: table.description || undefined,
-        description_source: (table.description_source && table.description_source !== 'code')
-          ? table.description_source
-          : (table.description_source === 'code' ? 'procedure' : undefined),  // 설명 출처 (code → procedure)
+        description_source: table.description_source || undefined,
         columns: columns,
         columnCount: table.column_count || columns.length,
         isPrimary: isPrimary,  // 직접 선택한 테이블 표시
@@ -1020,7 +1016,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
             from_table: rel.from_table,
             to_table: rel.to_table,
             type: rel.type,
-            source: rel.source,  // ddl, procedure, user
+            source: rel.source,  // ddl, code, user
             column_pairs: rel.column_pairs || []
           })
         }
@@ -1749,24 +1745,23 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     // source 속성에 따라 스타일 구분:
     // - 'ddl': 실선, 초록색
     // - 'user': 실선, 주황색
-    // - 'procedure' / 'code': 점선, 하늘색/푸른색
+    // - 'code': 점선, 하늘색/푸른색 (레거시 'procedure' 포함)
     neo4jRelationships.value.forEach((rel) => {
       if (tableNamesOnCanvas.has(rel.from_table) && tableNamesOnCanvas.has(rel.to_table)) {
         // source에 따른 스타일 결정
-        // code 데이터 소스는 procedure와 동일한 스타일로 처리
-        const isProcedure = rel.source === 'procedure' || rel.type === 'CO_REFERENCED' || (rel.source as string | undefined) === 'code'
+        // code와 레거시 procedure는 동일 스타일로 처리
+        const isCode = rel.source === 'code' || rel.source === 'procedure' || rel.type === 'CO_REFERENCED'
         const isUser = rel.source === 'user'
         
         // visibility 체크 - 해당 source 유형이 비활성화되어 있으면 스킵
-        const sourceType: 'ddl' | 'procedure' | 'user' =
-          isProcedure ? 'procedure' : isUser ? 'user' : 'ddl'
+        const sourceType = isCode ? 'code' : isUser ? 'user' : 'ddl'
         if (!fkVisibility.value[sourceType]) {
           return  // 이 관계는 표시하지 않음
         }
-        
-        // 색상: procedure=하늘색, ddl=초록, user=주황
-        const strokeColor = isProcedure ? '#38bdf8' : isUser ? '#f59e0b' : '#22c55e'
-        const strokeDasharray = isProcedure ? '6 3' : undefined  // 프로시저만 점선
+
+        // 색상: code=하늘색, ddl=초록, user=주황
+        const strokeColor = isCode ? '#38bdf8' : isUser ? '#f59e0b' : '#22c55e'
+        const strokeDasharray = isCode ? '6 3' : undefined  // 코드 분석만 점선
         
         // 각 컬럼 페어에 대해 별도의 엣지 생성
         // source와 target 컬럼이 모두 유효한 경우에만 엣지 생성

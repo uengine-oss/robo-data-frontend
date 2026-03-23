@@ -1209,16 +1209,16 @@ async function handleRefresh() {
           <span class="legend-label">DDL 정의</span>
         </label>
         
-        <!-- 프로시저 분석 FK (점선, 하늘색) -->
+        <!-- 코드 분석 FK (점선, 하늘색) -->
         <label class="legend-item legend-item--checkbox">
-          <input 
-            type="checkbox" 
-            :checked="store.fkVisibility.procedure" 
-            @change="store.toggleFkVisibility('procedure')"
+          <input
+            type="checkbox"
+            :checked="store.fkVisibility.code"
+            @change="store.toggleFkVisibility('code')"
             class="legend-checkbox"
           />
           <span class="legend-line legend-line--procedure"></span>
-          <span class="legend-label">코드 (프로시저) 분석</span>
+          <span class="legend-label">코드 분석</span>
         </label>
         
         <!-- 사용자 추가 FK (실선, 주황색) -->

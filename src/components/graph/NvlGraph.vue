@@ -1098,15 +1098,15 @@ onUnmounted(() => {
 // 워처
 // ============================================================================
 
-// 그래프 데이터 변경 감시 (배열 길이 기반 shallow watch — 인제스천 중 append-only)
+// 그래프 데이터 변경 감시 — 배열 참조 + 길이 모두 감지하여 실시간 업데이트 보장
 watch(
-  [() => props.graphData.nodes.length, () => props.graphData.links.length],
-  ([newNodeLen], [oldNodeLen]) => {
-    if (newNodeLen === 0 && nodeMap.size > 0) {
+  () => props.graphData,
+  (newData, oldData) => {
+    if (newData.nodes.length === 0 && nodeMap.size > 0) {
       resetGraph()
       return
     }
-    if (newNodeLen > 0) {
+    if (newData.nodes.length > 0) {
       updateExpandableNodes()
       updateGraph()
     }
