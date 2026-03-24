@@ -47,6 +47,7 @@ interface FrameworkReference {
   access_type: string  // "READS" | "WRITES" | "REFER_TO"
   start_line?: number  // 함수/모듈 시작 라인
   file_name?: string
+  file_path?: string   // 전체 소스 경로 (예: "swing_system/src/core/db_engine.c")
   file_directory?: string
   module_name?: string
 }
@@ -355,9 +356,63 @@ function handleProcedureClick(procRef: ProcedureReference) {
   // 팝업은 유지 (closeReferencesPopup() 호출 안함)
 }
 
+// 프레임워크 참조 클릭 시 처리 - 우측 소스 코드 패널에 표시
+function handleFrameworkClick(fwRef: FrameworkReference) {
+  const lineNumber = fwRef.start_line || 1
+  const allFiles = [...projectStore.uploadedFiles, ...projectStore.uploadedDdlFiles]
+
+  let foundFile = null
+
+  // 1. file_path(전체 소스 경로)로 정확 매칭
+  if (fwRef.file_path) {
+    const normalizedPath = fwRef.file_path.toLowerCase()
+    foundFile = allFiles.find(f => {
+      const filePath = f.fileName.toLowerCase()
+      return filePath === normalizedPath ||
+             filePath.endsWith(normalizedPath) ||
+             normalizedPath.endsWith(filePath)
+    })
+  }
+
+  // 2. file_name으로 매칭 (fallback)
+  if (!foundFile && fwRef.file_name) {
+    const normalizedFileName = fwRef.file_name.toLowerCase()
+    foundFile = allFiles.find(f => {
+      const fileName = f.fileName.split('/').pop()?.toLowerCase() || ''
+      return fileName === normalizedFileName
+    })
+  }
+
+  const refKey = `fw-${fwRef.source_name}-${fwRef.start_line}`
+  visitedReferences.value.add(refKey)
+
+  if (foundFile && foundFile.fileContent) {
+    canvasStore.openSourceCodePanel(
+      fwRef.file_name || foundFile.fileName.split('/').pop() || '',
+      fwRef.file_directory || foundFile.fileName,
+      foundFile.fileContent,
+      lineNumber,
+      fwRef.source_name
+    )
+  } else if (fwRef.file_name || fwRef.source_name) {
+    canvasStore.openSourceCodePanel(
+      fwRef.file_name || fwRef.source_name || 'Unknown',
+      fwRef.file_directory || '',
+      `// 파일 내용을 찾을 수 없습니다.\n// 함수: ${fwRef.source_name}\n// 파일 경로: ${fwRef.file_directory || 'N/A'}`,
+      lineNumber,
+      fwRef.source_name
+    )
+  }
+}
+
 // 참조가 방문됐는지 확인
 function isReferenceVisited(ref: ProcedureReference): boolean {
   const refKey = `${ref.procedure_name}-${ref.statement_line}`
+  return visitedReferences.value.has(refKey)
+}
+
+function isFrameworkReferenceVisited(ref: FrameworkReference): boolean {
+  const refKey = `fw-${ref.source_name}-${ref.start_line}`
   return visitedReferences.value.has(refKey)
 }
 
@@ -729,6 +784,8 @@ function onColumnMouseLeave() {
               v-for="ref in frameworkReferences"
               :key="`fw-${ref.source_name}-${ref.start_line}`"
               class="references-popup__item"
+              :class="{ 'visited': isFrameworkReferenceVisited(ref) }"
+              @click="handleFrameworkClick(ref)"
             >
               <div class="references-popup__proc-name">
                 <span class="references-popup__proc-type references-popup__proc-type--fw">{{ ref.source_type }}</span>
