@@ -1023,20 +1023,6 @@
             />
           </div>
           
-          <div class="form-group checkbox-group">
-            <label>
-              <input type="checkbox" v-model="generateForm.inferRelations" />
-              레이어 간 관계 자동 추론
-            </label>
-            <label>
-              <input type="checkbox" v-model="generateForm.parallelExtraction" />
-              병렬 추출 (빠름)
-            </label>
-            <label>
-              <input type="checkbox" v-model="generateForm.enableWebSearch" />
-              🌐 부족시 웹 검색 (Tavily)
-            </label>
-          </div>
         </div>
         
         <!-- 진행 상태 뷰어 (생성 중일 때) -->
@@ -1056,61 +1042,44 @@
               <div class="summary-stats">
                 <span class="summary-percent">{{ overallProgressPercent }}%</span>
                 <span class="summary-detail">
-                  {{ completedLayerCount }}/{{ totalLayerCount }} 완료<template v-if="totalExtractedNodes > 0"> · {{ totalExtractedNodes }}개 추출</template>
+                  {{ completedStageCount }}/{{ totalStageCount }} 단계 완료<template v-if="totalExtractedNodes > 0"> · {{ totalExtractedNodes }}개 추출</template>
                 </span>
               </div>
             </div>
           </div>
           
-          <!-- 레이어별 진행 상태 (컴팩트 그리드) -->
+          <!-- 파이프라인 단계별 진행 상태 -->
           <div class="layer-progress-list">
-            <!-- BPMN 프로세스 추출 -->
             <div 
-              v-if="layerProgress['BPMN']"
+              v-for="stage in activePipelineStages" 
+              :key="stage"
               class="layer-progress-row"
-              :class="layerProgress['BPMN']?.status || 'pending'"
+              :class="pipelineProgress[stage]?.status || 'pending'"
             >
-              <span class="lp-icon" style="color: #8b5cf6">📐</span>
-              <span class="lp-name">BPMN</span>
+              <span class="lp-icon" :style="{ color: STAGE_LABELS[stage]?.color || '#888' }">{{ STAGE_LABELS[stage]?.icon || '⚙️' }}</span>
+              <span class="lp-name">{{ STAGE_LABELS[stage]?.label || stage }}</span>
               <div class="lp-bar-wrap">
                 <div class="lp-bar-track">
                   <div 
                     class="lp-bar-fill" 
-                    :style="{ width: (layerProgress['BPMN']?.progress || 0) + '%', backgroundColor: '#8b5cf6' }"
+                    :style="{ width: (pipelineProgress[stage]?.progress || 0) + '%', backgroundColor: STAGE_LABELS[stage]?.color || '#888' }"
                   ></div>
                 </div>
               </div>
-              <span class="lp-badge" :class="layerProgress['BPMN']?.status">
-                {{ getStatusLabel(layerProgress['BPMN']?.status) }}
+              <span class="lp-badge" :class="pipelineProgress[stage]?.status">
+                {{ getStatusLabel(pipelineProgress[stage]?.status) }}
               </span>
-              <span class="lp-detail" :title="layerProgress['BPMN']?.message || ''">
-                <template v-if="layerProgress['BPMN']?.nodesCount">{{ layerProgress['BPMN']?.nodesCount }}개</template>
-                <template v-if="layerProgress['BPMN']?.message"> · {{ layerProgress['BPMN']?.message }}</template>
+              <span class="lp-detail" :title="pipelineProgress[stage]?.message || ''">
+                <template v-if="stage === 'Unified' && chunkProgress.total > 0">
+                  청크 {{ chunkProgress.current }}/{{ chunkProgress.total }}
+                </template>
+                <template v-if="pipelineProgress[stage]?.message"> · {{ pipelineProgress[stage]?.message }}</template>
               </span>
             </div>
-            <!-- 5개 온톨로지 레이어 -->
-            <div 
-              v-for="layer in layers" 
-              :key="layer.id"
-              class="layer-progress-row"
-              :class="layerProgress[layer.id]?.status || 'pending'"
-            >
-              <span class="lp-icon" :style="{ color: layer.color }">{{ layer.icon }}</span>
-              <span class="lp-name">{{ layer.name }}</span>
-              <div class="lp-bar-wrap">
-                <div class="lp-bar-track">
-                  <div 
-                    class="lp-bar-fill" 
-                    :style="{ width: (layerProgress[layer.id]?.progress || 0) + '%', backgroundColor: layer.color }"
-                  ></div>
-                </div>
-              </div>
-              <span class="lp-badge" :class="layerProgress[layer.id]?.status">
-                {{ getStatusLabel(layerProgress[layer.id]?.status) }}
-              </span>
-              <span class="lp-detail" :title="layerProgress[layer.id]?.message || ''">
-                <template v-if="layerProgress[layer.id]?.nodesCount">{{ layerProgress[layer.id]?.nodesCount }}개</template>
-                <template v-if="layerProgress[layer.id]?.message"> · {{ layerProgress[layer.id]?.message }}</template>
+            <!-- Unified 단계 하위: 레이어별 노드 수 요약 -->
+            <div v-if="Object.keys(layerResults).length > 0 && pipelineProgress['Unified']?.status !== 'pending'" class="layer-results-summary">
+              <span v-for="(result, layerName) in layerResults" :key="layerName" class="layer-result-tag">
+                {{ layerName }}: {{ result.nodeCount }}개
               </span>
             </div>
           </div>
@@ -1129,41 +1098,6 @@
               </div>
             </div>
           </div>
-        </div>
-        
-        <!-- Human-in-the-loop 질문 다이얼로그 -->
-        <div class="hitl-section" v-if="pendingQuestion">
-          <div class="hitl-header">
-            <span class="hitl-icon">💬</span>
-            <h4>추가 정보가 필요합니다</h4>
-          </div>
-          <div class="hitl-content">
-            <p class="hitl-question">{{ pendingQuestion.question }}</p>
-            <div v-if="pendingQuestion.missingInfo" class="hitl-missing-info">
-              <span v-for="(info, idx) in pendingQuestion.missingInfo" :key="idx" class="missing-tag">
-                {{ info }}
-              </span>
-            </div>
-            <textarea 
-              v-model="userResponse"
-              rows="4"
-              placeholder="추가 정보를 입력하세요... (입력하지 않으면 웹 검색을 시도합니다)"
-            ></textarea>
-          </div>
-          <div class="hitl-actions">
-            <button class="hitl-skip-btn" @click="skipQuestion">
-              {{ generateForm.enableWebSearch ? '🌐 웹 검색으로 대체' : '건너뛰기' }}
-            </button>
-            <button class="hitl-submit-btn" @click="submitAnswer" :disabled="!userResponse.trim()">
-              ✅ 답변 제출
-            </button>
-          </div>
-        </div>
-        
-        <!-- 웹 검색 중 표시 -->
-        <div class="web-search-indicator" v-if="isSearchingWeb">
-          <div class="search-spinner"></div>
-          <span>🌐 웹에서 추가 정보 검색 중...</span>
         </div>
         
         <div class="dialog-footer" v-if="!generating && !generateError">
@@ -2172,10 +2106,7 @@ const generateForm = ref({
   inputType: 'text',
   text: '',
   pdfUrl: '',
-  domainHint: '',
-  inferRelations: true,
-  parallelExtraction: true,
-  enableWebSearch: true
+  domainHint: ''
 })
 
 // File upload
@@ -2186,49 +2117,55 @@ const isDraggingFile = ref(false)
 // 생성 오류 메시지 (화면에 고정 표시, 초기화면으로 돌아가도 배너로 남김)
 const generateError = ref('')
 
-// Progress tracking
+// Progress tracking — 파이프라인 단계 기반
 const currentStep = ref('')
-const layerProgress = ref<Record<string, { 
-  status: string; 
-  progress: number; 
-  nodesCount?: number; 
-  message?: string 
-}>>({})
 const logListRef = ref<HTMLElement | null>(null)
 const logsExpanded = ref(false)
 
-const allProgressKeys = computed(() => {
-  const keys = layers.map(l => l.id)
-  if (layerProgress.value['BPMN']) keys.unshift('BPMN')
-  return keys
-})
+const DEFAULT_PIPELINE_STAGES = ['Normalization', 'Chunking', 'Unified', 'MergeRefine'] as const
+const activePipelineStages = ref<string[]>([...DEFAULT_PIPELINE_STAGES])
+const pipelineProgress = ref<Record<string, { status: string; progress: number; message?: string }>>({})
+const chunkProgress = ref<{ current: number; total: number }>({ current: 0, total: 0 })
+const layerResults = ref<Record<string, { nodeCount: number; relationCount: number }>>({})
 
-const totalLayerCount = computed(() => allProgressKeys.value.length)
+const STAGE_WEIGHTS: Record<string, number> = {
+  Normalization: 5,
+  BPMN: 10,
+  Chunking: 5,
+  Unified: 70,
+  MergeRefine: 10,
+}
 
-const completedLayerCount = computed(() =>
-  allProgressKeys.value.filter(k => layerProgress.value[k]?.status === 'completed').length
+const STAGE_LABELS: Record<string, { icon: string; label: string; color: string }> = {
+  Normalization: { icon: '📄', label: '문서 정규화', color: '#6366f1' },
+  BPMN: { icon: '📐', label: 'BPMN 추출', color: '#8b5cf6' },
+  Chunking: { icon: '📦', label: '청크 분할', color: '#0ea5e9' },
+  Unified: { icon: '🔍', label: '개념 추출', color: '#f59e0b' },
+  MergeRefine: { icon: '🔗', label: '병합 & 정제', color: '#10b981' },
+}
+
+const totalStageCount = computed(() => activePipelineStages.value.length)
+
+const completedStageCount = computed(() =>
+  activePipelineStages.value.filter(s => pipelineProgress.value[s]?.status === 'completed').length
 )
 
 const totalExtractedNodes = computed(() =>
-  allProgressKeys.value.reduce((sum, k) => sum + (layerProgress.value[k]?.nodesCount || 0), 0)
+  Object.values(layerResults.value).reduce((sum, r) => sum + (r.nodeCount || 0), 0)
 )
 
 const overallProgressPercent = computed(() => {
-  if (totalLayerCount.value === 0) return 0
-  const total = allProgressKeys.value.reduce((sum, k) => sum + (layerProgress.value[k]?.progress || 0), 0)
-  return Math.round(total / totalLayerCount.value)
+  const stages = activePipelineStages.value
+  let weightedSum = 0
+  let totalWeight = 0
+  for (const stage of stages) {
+    const weight = STAGE_WEIGHTS[stage] || 10
+    const progress = pipelineProgress.value[stage]?.progress || 0
+    weightedSum += weight * progress
+    totalWeight += weight
+  }
+  return totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0
 })
-
-// Human-in-the-loop
-const pendingQuestion = ref<{
-  layer: string;
-  question: string;
-  missingInfo?: string[];
-  allowSkip?: boolean;
-  allowWebSearch?: boolean;
-} | null>(null)
-const userResponse = ref('')
-const isSearchingWeb = ref(false)
 
 // Abort controller for cancellation
 let abortController: AbortController | null = null
@@ -4652,105 +4589,44 @@ function addLog(message: string, type: string = 'info') {
 function getStatusLabel(status?: string): string {
   const labels: Record<string, string> = {
     pending: '대기',
-    running: '실행 중',
-    needs_info: '정보 필요',
-    searching: '검색 중',
+    in_progress: '진행 중',
     completed: '완료',
     failed: '실패'
   }
   return labels[status || 'pending'] || status || '대기'
 }
 
-function isCompletionLikeMessage(message?: string): boolean {
-  return /완료|성공|즉시 반환/.test(message || '')
-}
 
-function isFailureLikeMessage(message?: string): boolean {
-  return /실패|오류/.test(message || '')
-}
-
-function resolveLayerEventStatus(
-  layer: string,
-  progress?: number,
-  message?: string,
-  explicitStatus?: string
-): string {
-  const previousStatus = layerProgress.value[layer]?.status
-
-  if (explicitStatus) return explicitStatus
-  if (previousStatus === 'completed') return 'completed'
-  if (isFailureLikeMessage(message)) return 'failed'
-  if ((progress ?? 0) >= 100 || isCompletionLikeMessage(message)) return 'completed'
-
-  return 'running'
-}
 
 function normalizeStepMessage(message?: string): string {
   return (message || '').replace(/^\[[^\]]+\]\s*/, '').trim()
 }
 
-function updateCurrentStepForLayer(
-  layer: string,
-  status: string,
-  message?: string
-) {
-  const normalized = normalizeStepMessage(message)
-
-  switch (status) {
-    case 'completed':
-      currentStep.value = `${layer} 레이어 완료`
-      break
-    case 'failed':
-      currentStep.value = `${layer} 레이어 실패`
-      break
-    case 'needs_info':
-      currentStep.value = `${layer} 추가 정보 필요`
-      break
-    case 'searching':
-      currentStep.value = `${layer} 웹 검색 중`
-      break
-    default:
-      currentStep.value = normalized || `${layer} 레이어 처리 중`
-      break
+function updateCurrentStepForPhase(phase: string, progress: number, message?: string) {
+  const label = STAGE_LABELS[phase]?.label || phase
+  if (progress >= 100) {
+    currentStep.value = `${label} 완료`
+  } else {
+    currentStep.value = message || `${label} 처리 중`
   }
 }
 
 function resetProgress() {
-  layers.forEach(layer => {
-    layerProgress.value[layer.id] = {
-      status: 'pending',
-      progress: 0
-    }
-  })
+  const isPdfInput = generateForm.value.inputType === 'pdf' || generateForm.value.inputType === 'url'
+  const stages: string[] = isPdfInput
+    ? ['Normalization', 'BPMN', 'Chunking', 'Unified', 'MergeRefine']
+    : [...DEFAULT_PIPELINE_STAGES]
+  activePipelineStages.value = stages
+  const freshProgress: Record<string, { status: string; progress: number; message?: string }> = {}
+  for (const stage of stages) {
+    freshProgress[stage] = { status: 'pending', progress: 0 }
+  }
+  pipelineProgress.value = freshProgress
+  chunkProgress.value = { current: 0, total: 0 }
+  layerResults.value = {}
   generationLogs.value = []
   currentStep.value = ''
   logsExpanded.value = false
-  isSearchingWeb.value = false
-  pendingQuestion.value = null
-  userResponse.value = ''
-}
-
-// Human-in-the-loop
-function skipQuestion() {
-  if (generateForm.value.enableWebSearch) {
-    // Web search will be triggered
-    addLog(`${pendingQuestion.value?.layer} 레이어 - 웹 검색으로 대체`, 'search')
-    if (pendingQuestion.value?.layer) {
-      currentStep.value = `${pendingQuestion.value.layer} 웹 검색 준비`
-    }
-  }
-  pendingQuestion.value = null
-  userResponse.value = ''
-}
-
-function submitAnswer() {
-  if (pendingQuestion.value && userResponse.value.trim()) {
-    addLog(`${pendingQuestion.value.layer} 레이어 - 사용자 응답 제출됨`, 'success')
-    currentStep.value = `${pendingQuestion.value.layer} 응답 반영 중`
-    // The answer will be processed by the streaming handler
-  }
-  pendingQuestion.value = null
-  userResponse.value = ''
 }
 
 function cancelGeneration() {
@@ -7309,10 +7185,7 @@ async function generateOntology() {
     // Prepare request body
     let requestBody: Record<string, any> = {
       inputType: generateForm.value.inputType === 'url' ? 'pdf' : generateForm.value.inputType,
-      domainHint: generateForm.value.domainHint || undefined,
-      inferRelations: generateForm.value.inferRelations,
-      parallelExtraction: generateForm.value.parallelExtraction,
-      enableWebSearch: generateForm.value.enableWebSearch
+      domainHint: generateForm.value.domainHint || undefined
     }
     
     if (generateForm.value.inputType === 'text') {
@@ -7405,80 +7278,81 @@ function handleStreamEvent(event: any) {
   switch (event.event) {
     case 'start':
       addLog('Multi-Layer 스키마 생성 시작', 'info')
-      currentStep.value = '레이어 추출 준비'
+      currentStep.value = '파이프라인 시작'
       break
       
     case 'layer_progress':
       {
-      const status = resolveLayerEventStatus(event.layer, event.progress, event.message)
-      const previous = layerProgress.value[event.layer]
-      const hasNewCompletion = status === 'completed' && previous?.status !== 'completed'
-      layerProgress.value[event.layer] = {
-        status,
-        progress: status === 'completed' ? 100 : Math.max(0, Math.min(100, event.progress || 0)),
-        nodesCount: previous?.nodesCount,
-        message: event.message
+      const phaseName: string = event.layer
+      
+      // BPMN 이벤트가 처음 오면 동적으로 파이프라인에 추가
+      if (phaseName === 'BPMN' && !pipelineProgress.value['BPMN']) {
+        activePipelineStages.value = ['Normalization', 'BPMN', 'Chunking', 'Unified', 'MergeRefine']
+        pipelineProgress.value['BPMN'] = { status: 'pending', progress: 0 }
       }
-      updateCurrentStepForLayer(event.layer, status, event.message)
+      
+      // Merge와 Refinement를 하나의 "병합 & 정제" 단계로 통합
+      const uiPhase = (phaseName === 'Merge' || phaseName === 'Refinement') ? 'MergeRefine' : phaseName
+      
+      const prevProgress = pipelineProgress.value[uiPhase]?.progress || 0
+      const incomingProgress = Math.max(0, Math.min(100, event.progress || 0))
+      
+      // MergeRefine 특수 처리: Merge 100% → 50%, Refinement 100% → 100%
+      if (phaseName === 'Merge') {
+        const mergeProgress = incomingProgress >= 100 ? 50 : Math.round(incomingProgress * 0.5)
+        pipelineProgress.value['MergeRefine'] = {
+          status: incomingProgress >= 100 ? 'in_progress' : 'in_progress',
+          progress: Math.max(prevProgress, mergeProgress),
+          message: event.message
+        }
+      } else if (phaseName === 'Refinement') {
+        const refineProgress = incomingProgress >= 100 ? 100 : 50 + Math.round(incomingProgress * 0.5)
+        pipelineProgress.value['MergeRefine'] = {
+          status: incomingProgress >= 100 ? 'completed' : 'in_progress',
+          progress: Math.max(prevProgress, refineProgress),
+          message: event.message
+        }
+      } else {
+        pipelineProgress.value[uiPhase] = {
+          status: incomingProgress >= 100 ? 'completed' : 'in_progress',
+          progress: Math.max(prevProgress, incomingProgress),
+          message: event.message
+        }
+      }
+      
+      // "청크 N/M 처리 완료" 패턴에서 진행률 파싱
+      if (phaseName === 'Unified') {
+        const match = event.message?.match(/청크 (\d+)\/(\d+)/)
+        if (match) {
+          chunkProgress.value = { current: parseInt(match[1]), total: parseInt(match[2]) }
+        }
+      }
+      
+      updateCurrentStepForPhase(uiPhase, pipelineProgress.value[uiPhase]?.progress || 0, event.message)
       addLog(
-        `[${event.layer}] ${event.message}`,
-        hasNewCompletion ? 'success' : status === 'failed' ? 'error' : 'info'
+        `[${phaseName}] ${event.message}`,
+        (pipelineProgress.value[uiPhase]?.status === 'completed') ? 'success' : 'info'
       )
       }
       break
       
     case 'layer_complete':
       {
-      const previous = layerProgress.value[event.layer]
-      layerProgress.value[event.layer] = {
-        status: 'completed',
-        progress: 100,
-        nodesCount: event.nodeCount,
-        message: `${event.nodeCount}개 노드 추출 완료`
+      layerResults.value[event.layer] = {
+        nodeCount: event.nodeCount,
+        relationCount: event.relationCount || 0
       }
-      updateCurrentStepForLayer(event.layer, 'completed')
-      if (previous?.status !== 'completed' || previous?.nodesCount !== event.nodeCount) {
-        addLog(`[${event.layer}] 완료 - ${event.nodeCount}개 노드 추출`, 'success')
+      addLog(`[${event.layer}] ${event.nodeCount}개 노드 추출 완료`, 'success')
       }
-      }
-      break
-      
-    case 'needs_info':
-      // Human-in-the-loop
-      layerProgress.value[event.layer] = {
-        status: 'needs_info',
-        progress: 50,
-        message: '추가 정보 필요'
-      }
-      updateCurrentStepForLayer(event.layer, 'needs_info')
-      pendingQuestion.value = {
-        layer: event.layer,
-        question: event.question,
-        missingInfo: event.missingInfo,
-        allowSkip: event.allowSkip,
-        allowWebSearch: event.allowWebSearch
-      }
-      addLog(`[${event.layer}] 추가 정보 필요`, 'warning')
-      break
-      
-    case 'web_search':
-      isSearchingWeb.value = true
-      layerProgress.value[event.layer] = {
-        status: 'searching',
-        progress: 60,
-        message: '웹 검색 중...'
-      }
-      updateCurrentStepForLayer(event.layer, 'searching')
-      addLog(`[${event.layer}] 웹에서 정보 검색 중...`, 'search')
-      break
-      
-    case 'web_search_complete':
-      isSearchingWeb.value = false
-      currentStep.value = `${event.layer} 웹 검색 완료`
-      addLog(`[${event.layer}] 웹 검색 완료 - ${event.resultsCount}개 결과`, 'success')
       break
       
     case 'complete':
+      // 미완료 파이프라인 단계를 모두 completed로 마킹
+      activePipelineStages.value.forEach(stage => {
+        if (pipelineProgress.value[stage]?.status !== 'completed') {
+          pipelineProgress.value[stage] = { status: 'completed', progress: 100, message: '완료' }
+        }
+      })
       currentStep.value = '완료'
       if (event.data?.success && event.data?.schema) {
         nodes.value = event.data.schema.nodes || []
@@ -7533,15 +7407,19 @@ function handleStreamEvent(event: any) {
       break
       
     case 'error':
-      currentStep.value = '생성 오류'
-      addLog(`오류: ${event.message}`, 'error')
-      generateError.value = event.message || '온톨로지 생성 중 오류가 발생했습니다.'
-      // Mark all running layers as failed
-      Object.keys(layerProgress.value).forEach(layer => {
-        if (layerProgress.value[layer].status === 'running') {
-          layerProgress.value[layer].status = 'failed'
+      // 현재 in_progress인 단계를 failed로 마킹
+      activePipelineStages.value.forEach(stage => {
+        if (pipelineProgress.value[stage]?.status === 'in_progress') {
+          pipelineProgress.value[stage] = {
+            ...pipelineProgress.value[stage],
+            status: 'failed',
+            message: event.message || '오류 발생'
+          }
         }
       })
+      currentStep.value = '오류 발생'
+      addLog(`오류: ${event.message}`, 'error')
+      generateError.value = event.message || '온톨로지 생성 중 오류가 발생했습니다.'
       break
   }
 }
@@ -11292,17 +11170,17 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 .layer-progress-row {
   display: grid;
-  grid-template-columns: 22px 68px 1fr 58px minmax(0, 130px);
+  grid-template-columns: 22px 90px 1fr 58px minmax(0, 160px);
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
   border-radius: var(--radius-sm);
   border-left: 3px solid var(--color-border);
   background: var(--color-bg-tertiary);
-  transition: background 0.2s ease, border-color 0.2s ease;
+  transition: all 0.3s ease;
 }
 
-.layer-progress-row.running {
+.layer-progress-row.in_progress {
   border-left-color: var(--color-accent);
   background: rgba(34, 139, 230, 0.06);
 }
@@ -11312,19 +11190,26 @@ watch(detailPanelTab, (newTab, oldTab) => {
   opacity: 0.8;
 }
 
-.layer-progress-row.needs_info {
-  border-left-color: var(--color-warning);
-  background: rgba(250, 176, 5, 0.06);
-}
-
-.layer-progress-row.searching {
-  border-left-color: #06b6d4;
-  background: rgba(6, 182, 212, 0.06);
-}
-
 .layer-progress-row.failed {
   border-left-color: var(--color-error);
   background: rgba(250, 82, 82, 0.06);
+}
+
+.layer-results-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px;
+  margin-top: 2px;
+}
+
+.layer-result-tag {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
 }
 
 .lp-icon {
@@ -11368,10 +11253,8 @@ watch(detailPanelTab, (newTab, oldTab) => {
 }
 
 .lp-badge.pending { background: var(--color-bg-hover); color: var(--color-text-muted); }
-.lp-badge.running { background: rgba(34, 139, 230, 0.15); color: var(--color-accent); }
+.lp-badge.in_progress { background: rgba(34, 139, 230, 0.15); color: var(--color-accent); }
 .lp-badge.completed { background: rgba(64, 192, 87, 0.15); color: var(--color-success); }
-.lp-badge.needs_info { background: rgba(250, 176, 5, 0.15); color: var(--color-warning); }
-.lp-badge.searching { background: rgba(6, 182, 212, 0.15); color: #06b6d4; }
 .lp-badge.failed { background: rgba(250, 82, 82, 0.15); color: var(--color-error); }
 
 .lp-detail {
@@ -11458,130 +11341,6 @@ watch(detailPanelTab, (newTab, oldTab) => {
 .log-item.success .log-message { color: var(--color-success); }
 .log-item.error .log-message { color: var(--color-error); }
 .log-item.warning .log-message { color: var(--color-warning); }
-.log-item.search .log-message { color: #06b6d4; }
-
-/* Human-in-the-loop section */
-.hitl-section {
-  padding: 16px 20px;
-  border-top: 2px solid var(--color-warning);
-  background: rgba(250, 176, 5, 0.05);
-}
-
-.hitl-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.hitl-icon {
-  font-size: 1.25rem;
-}
-
-.hitl-header h4 {
-  margin: 0;
-  font-size: 0.9375rem;
-  color: var(--color-text-bright);
-}
-
-.hitl-content {
-  margin-bottom: 12px;
-}
-
-.hitl-question {
-  font-size: 0.875rem;
-  color: var(--color-text);
-  margin: 0 0 12px;
-  line-height: 1.5;
-}
-
-.hitl-missing-info {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-
-.missing-tag {
-  padding: 4px 10px;
-  background: var(--color-bg-tertiary);
-  border-radius: var(--radius-sm);
-  font-size: 0.75rem;
-  color: var(--color-text-light);
-}
-
-.hitl-content textarea {
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
-  color: var(--color-text);
-  font-family: inherit;
-  font-size: 0.875rem;
-  resize: vertical;
-}
-
-.hitl-content textarea:focus {
-  outline: none;
-  border-color: var(--color-accent);
-}
-
-.hitl-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.hitl-skip-btn {
-  padding: 8px 16px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text);
-  font-size: 0.8125rem;
-  cursor: pointer;
-}
-
-.hitl-skip-btn:hover {
-  background: var(--color-bg-hover);
-}
-
-.hitl-submit-btn {
-  padding: 8px 16px;
-  border: none;
-  border-radius: var(--radius-md);
-  background: var(--color-success);
-  color: white;
-  font-size: 0.8125rem;
-  cursor: pointer;
-}
-
-.hitl-submit-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* Web search indicator */
-.web-search-indicator {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 20px;
-  background: rgba(6, 182, 212, 0.1);
-  border-top: 1px solid rgba(6, 182, 212, 0.3);
-  font-size: 0.875rem;
-  color: #06b6d4;
-}
-
-.search-spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(6, 182, 212, 0.3);
-  border-top-color: #06b6d4;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
 
 /* Data Source Dialog */
 .datasource-dialog {
