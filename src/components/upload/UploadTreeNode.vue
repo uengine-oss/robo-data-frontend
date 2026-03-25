@@ -28,6 +28,8 @@ const iconFor = (node: UploadTreeNode) => {
   const ext = node.name.split('.').pop()?.toLowerCase()
   switch (ext) {
     case 'java': return '☕'
+    case 'py': return '🐍'
+    case 'c': case 'h': return '⚙️'
     case 'sql': return '🗄️'
     case 'xml': return '📋'
     case 'json': return '📊'

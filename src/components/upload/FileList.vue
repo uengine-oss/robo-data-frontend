@@ -27,6 +27,8 @@ const getFileIcon = (fileName: string): string => {
   const ext = fileName.split('.').pop()?.toLowerCase()
   switch (ext) {
     case 'java': return '☕'
+    case 'py': return '🐍'
+    case 'c': case 'h': return '⚙️'
     case 'sql': return '📝'  // 문서 형태 아이콘
     case 'xml': return '📋'
     case 'json': return '📊'

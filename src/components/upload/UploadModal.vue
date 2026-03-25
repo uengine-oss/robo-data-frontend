@@ -206,6 +206,7 @@ const totalFileCount = computed(() => files.value.length)
 // 소스 타입 옵션 (antlr-code-parser에서 지원하는 타입만)
 const sourceTypeOptions: { value: SourceType; label: string }[] = [
   { value: 'java', label: 'Java' },
+  { value: 'python', label: 'Python' },
   { value: 'c', label: 'C' },
   { value: 'postgresql', label: 'PostgreSQL' },
   { value: 'oracle', label: 'Oracle' }
@@ -248,10 +249,9 @@ watch(files, (newFiles) => {
   if (userManuallySelectedType.value) return
   
   const detected = detectSourceType(newFiles)
-  // 자동 감지가 가능한 경우(Java)에만 자동 설정
-  // SQL인 경우는 사용자가 직접 선택해야 함
-  // Python은 antlr-code-parser에서 미지원이므로 자동 설정하지 않음
-  if (detected === 'java') {
+  // 자동 감지가 가능한 경우(Java/Python/C)에 자동 설정
+  // SQL인 경우는 사용자가 직접 PostgreSQL/Oracle 선택해야 함
+  if (detected && detected !== 'oracle' && detected !== 'postgresql') {
     sourceType.value = detected
   }
 }, { deep: true })
