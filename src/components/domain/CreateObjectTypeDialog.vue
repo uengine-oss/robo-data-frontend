@@ -8,7 +8,7 @@
  * - Materialized View 생성 옵션
  * - 기존 ObjectType과의 연결 설정
  */
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { Teleport } from 'vue'
 import Text2SqlTab from '@/components/text2sql/Text2SqlTab.vue'
 import { useReactStore } from '@/stores/text2sql'
@@ -74,6 +74,7 @@ const isExecutingSql = ref(false)
 const sqlExecutionError = ref<string | null>(null)
 const sqlResultColumns = ref<string[]>([])
 const sqlResultRows = ref<any[]>([])
+const selectedSqlDatasourceName = ref('')
 
 // LLM 이름 생성 관련
 const isGeneratingNames = ref(false)
@@ -161,15 +162,80 @@ function selectDataSource(type: DataSourceType) {
   }
 }
 
-// SQL에서 datasource.schema.table 패턴의 datasource를 자동 감지
+function normalizeDatasourceToken(token?: string | null): string {
+  return String(token || '')
+    .trim()
+    .replace(/^[`'"]+/, '')
+    .replace(/[`'"]+$/, '')
+}
+
+// SQL에서 datasource를 자동 감지
 function detectDatasourceFromSql(sql: string): string | null {
-  // FROM datasource.schema.table 패턴 (3단 이름)
-  const match = sql.match(/(?:FROM|JOIN)\s+([a-zA-Z_]\w*)\.([a-zA-Z_]\w*)\.([a-zA-Z_]\w*)/i)
-  if (match) {
-    return match[1]  // 첫 번째 부분이 datasource
+  const patterns = [
+    // MindsDB federated query: FROM `postgresql` (SELECT ...)
+    /(?:FROM|JOIN)\s+[`"]?([a-zA-Z_][\w-]*)[`"]?\s*\(/i,
+    // datasource.schema.table
+    /(?:FROM|JOIN)\s+[`"]?([a-zA-Z_][\w-]*)[`"]?\s*\.\s*[`"]?([a-zA-Z_][\w-]*)[`"]?\s*\.\s*[`"]?([a-zA-Z_][\w-]*)[`"]?/i
+  ]
+
+  for (const pattern of patterns) {
+    const match = sql.match(pattern)
+    if (match?.[1]) {
+      return normalizeDatasourceToken(match[1])
+    }
   }
+
   return null
 }
+
+const sqlDatasourceOptions = computed(() => {
+  const options: Array<{ name: string; label: string }> = []
+  const seen = new Set<string>()
+  const detected = detectDatasourceFromSql(directSqlInput.value)
+
+  if (detected) {
+    seen.add(detected)
+    options.push({
+      name: detected,
+      label: `${detected} (SQL에서 감지됨)`
+    })
+  }
+
+  for (const ds of datasourcesStore.sortedDatasources) {
+    if (seen.has(ds.name)) continue
+    seen.add(ds.name)
+    options.push({
+      name: ds.name,
+      label: ds.name
+    })
+  }
+
+  return options
+})
+
+const resolvedSqlDatasourceName = computed(() => {
+  const manual = normalizeDatasourceToken(selectedSqlDatasourceName.value)
+  if (manual) return manual
+
+  const detected = detectDatasourceFromSql(directSqlInput.value)
+  if (detected) return detected
+
+  const storeSelected = normalizeDatasourceToken(datasourcesStore.selectedDatasource?.name)
+  if (storeSelected) return storeSelected
+
+  if (datasourcesStore.datasources.length === 1) {
+    return normalizeDatasourceToken(datasourcesStore.datasources[0]?.name)
+  }
+
+  return ''
+})
+
+const sqlDatasourceSelectModel = computed({
+  get: () => resolvedSqlDatasourceName.value,
+  set: (value: string) => {
+    selectedSqlDatasourceName.value = value
+  }
+})
 
 // 직접 SQL 실행
 async function executeSql() {
@@ -182,13 +248,9 @@ async function executeSql() {
   sqlExecutionError.value = null
   
   try {
-    // 1) 선택된 데이터소스 우선, 없으면 SQL에서 자동 감지
-    let datasourceName = datasourcesStore.selectedDatasource?.name
+    const datasourceName = resolvedSqlDatasourceName.value || undefined
     if (!datasourceName) {
-      datasourceName = detectDatasourceFromSql(directSqlInput.value) || undefined
-    }
-    if (!datasourceName) {
-      throw new Error('데이터소스를 선택해주세요')
+      throw new Error('데이터소스를 선택하거나 SQL에 datasource를 명시해주세요')
     }
     const response = await fetch('/api/gateway/text2sql/direct-sql/stream', {
       method: 'POST',
@@ -419,6 +481,7 @@ async function createObjectType() {
     let requestBody: any = {
       name: objectTypeName.value,
       description: objectTypeDescription.value,
+      dataSourceType: dataSourceType.value,
       columns: resultColumns.value.map((col, idx) => ({
         name: col,
         type: dataSourceType.value === 'manual-input' 
@@ -551,6 +614,10 @@ onMounted(async () => {
   console.log('[CreateObjectTypeDialog] 마운트됨, initialSql:', !!props.initialSql, 'initialQuestion:', props.initialQuestion)
   
   loadExistingObjectTypes()
+
+  if (!datasourcesStore.hasDatasources) {
+    await datasourcesStore.fetchDatasources()
+  }
   
   // 초기 SQL이 전달되면 SQL 입력 모드로 자동 전환
   if (props.initialSql) {
@@ -566,9 +633,9 @@ onMounted(async () => {
       
       // SQL 실행과 이름 생성을 병렬로 진행
       // 1. SQL 실행
-      executeDirectSql().then(() => {
+      executeSql().then(() => {
         console.log('[CreateObjectTypeDialog] SQL 실행 완료, step:', step.value, '컬럼:', sqlResultColumns.value)
-      }).catch(err => {
+      }).catch((err: unknown) => {
         console.error('[CreateObjectTypeDialog] SQL 실행 오류:', err)
       })
       
@@ -601,7 +668,7 @@ onMounted(async () => {
         <div class="steps">
           <div class="step" :class="{ active: step === 'source-select', completed: step !== 'source-select' }">
             <span class="step-number">1</span>
-            <span class="step-label">소스 선택</span>
+            <span class="step-label">생성 방식</span>
           </div>
           <div class="step-connector"></div>
           <div class="step" :class="{ 
@@ -626,7 +693,7 @@ onMounted(async () => {
           <!-- Step 1: 데이터 소스 선택 -->
           <div v-if="step === 'source-select'" class="source-select-step">
             <p class="step-description">
-              ObjectType의 데이터 소스를 선택하세요.
+              ObjectType 생성 방식을 선택하세요.
             </p>
             
             <div class="source-options">
@@ -727,7 +794,7 @@ onMounted(async () => {
           <!-- Step 2b: 직접 SQL 입력 -->
           <div v-else-if="step === 'sql-input'" class="sql-input-step">
             <p class="step-description">
-              SELECT SQL 문을 입력하세요. 결과 컬럼이 ObjectType의 속성이 됩니다.
+              SELECT SQL 문과 실행할 데이터소스를 확인하세요. 결과 컬럼이 ObjectType의 속성이 됩니다.
             </p>
             
             <div class="sql-editor-container">
@@ -740,17 +807,27 @@ onMounted(async () => {
               
               <!-- 데이터소스 선택 또는 자동 감지 -->
               <div class="datasource-selector">
-                <template v-if="datasourcesStore.selectedDatasource">
-                  <span class="ds-label">데이터소스:</span>
-                  <span class="ds-name">{{ datasourcesStore.selectedDatasource.name }}</span>
-                </template>
-                <template v-else-if="detectDatasourceFromSql(directSqlInput)">
-                  <span class="ds-label">자동 감지된 데이터소스:</span>
-                  <span class="ds-name ds-auto">{{ detectDatasourceFromSql(directSqlInput) }}</span>
-                </template>
-                <template v-else>
-                  <span class="ds-warning">데이터소스를 선택해주세요</span>
-                </template>
+                <label class="ds-select-label" for="objecttype-sql-datasource">데이터소스</label>
+                <select
+                  id="objecttype-sql-datasource"
+                  v-model="sqlDatasourceSelectModel"
+                  class="ds-select"
+                >
+                  <option value="">-- 데이터소스 선택 --</option>
+                  <option
+                    v-for="option in sqlDatasourceOptions"
+                    :key="option.name"
+                    :value="option.name"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+                <span v-if="resolvedSqlDatasourceName" class="ds-name">
+                  사용 데이터소스: <strong>{{ resolvedSqlDatasourceName }}</strong>
+                </span>
+                <span v-else class="ds-warning">
+                  데이터소스를 선택하거나 SQL에 datasource를 명시해주세요
+                </span>
               </div>
               
               <div v-if="sqlExecutionError" class="error-message">
@@ -761,7 +838,7 @@ onMounted(async () => {
                 <button 
                   class="execute-btn"
                   @click="executeSql"
-                  :disabled="isExecutingSql || !directSqlInput.trim()"
+                  :disabled="isExecutingSql || !directSqlInput.trim() || !resolvedSqlDatasourceName"
                 >
                   <span v-if="isExecutingSql" class="spinner"></span>
                   <span>{{ isExecutingSql ? '실행 중...' : 'SQL 실행' }}</span>
@@ -2002,23 +2079,43 @@ onMounted(async () => {
 .datasource-selector {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 8px 12px;
   margin-top: 8px;
   border-radius: 8px;
   font-size: 0.85rem;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
   
-  .ds-label {
+  .ds-label,
+  .ds-select-label {
     color: var(--color-text-muted);
+    font-weight: 600;
   }
   
   .ds-name {
     color: #00d4aa;
-    font-weight: 600;
-    font-family: 'Fira Code', monospace;
+    font-weight: 500;
     
-    &.ds-auto {
-      color: #a78bfa;
+    strong {
+      font-weight: 700;
+      font-family: 'Fira Code', monospace;
+    }
+  }
+
+  .ds-select {
+    min-width: 220px;
+    padding: 8px 10px;
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    color: var(--color-text);
+
+    &:focus {
+      outline: none;
+      border-color: #00d4aa;
+      box-shadow: 0 0 0 3px rgba(0, 212, 170, 0.15);
     }
   }
   
