@@ -1070,10 +1070,19 @@
                 {{ getStatusLabel(pipelineProgress[stage]?.status) }}
               </span>
               <span class="lp-detail" :title="pipelineProgress[stage]?.message || ''">
-                <template v-if="stage === 'Unified' && chunkProgress.total > 0">
-                  청크 {{ chunkProgress.current }}/{{ chunkProgress.total }}
+                <template v-if="stage === 'Sanitize' && sanitizeChunkProgress.total > 0">
+                  청크 {{ sanitizeChunkProgress.current }}/{{ sanitizeChunkProgress.total }}
                 </template>
-                <template v-if="pipelineProgress[stage]?.message"> · {{ pipelineProgress[stage]?.message }}</template>
+                <template v-else-if="stage === 'Unified' && chunkProgress.total > 0">
+                  청크 {{ chunkProgress.current }}/{{ chunkProgress.total }}
+                  <template v-if="chunkProgress.substepTotal > 0">
+                    · 단계 {{ chunkProgress.substepCurrent }}/{{ chunkProgress.substepTotal }}
+                  </template>
+                  <template v-if="chunkProgress.totalSteps > 0">
+                    · {{ chunkProgress.completedSteps }}/{{ chunkProgress.totalSteps }} 세부단계
+                  </template>
+                </template>
+                <template v-if="getStageDisplayMessage(stage)"> · {{ getStageDisplayMessage(stage) }}</template>
               </span>
             </div>
             <!-- Unified 단계 하위: 레이어별 노드 수 요약 -->
@@ -2122,17 +2131,52 @@ const currentStep = ref('')
 const logListRef = ref<HTMLElement | null>(null)
 const logsExpanded = ref(false)
 
-const DEFAULT_PIPELINE_STAGES = ['Normalization', 'Chunking', 'Unified', 'MergeRefine'] as const
+interface PipelineProgressDetail {
+  chunkCurrent?: number
+  chunkTotal?: number
+  substepCurrent?: number
+  substepTotal?: number
+  completedSteps?: number
+  totalSteps?: number
+  substepLabel?: string
+}
+
+interface PipelineProgressState {
+  status: string
+  progress: number
+  message?: string
+  detail?: PipelineProgressDetail
+}
+
+interface UnifiedChunkProgressState {
+  current: number
+  total: number
+  substepCurrent: number
+  substepTotal: number
+  completedSteps: number
+  totalSteps: number
+}
+
+const DEFAULT_PIPELINE_STAGES = ['Normalization', 'Chunking', 'Sanitize', 'Unified', 'MergeRefine'] as const
 const activePipelineStages = ref<string[]>([...DEFAULT_PIPELINE_STAGES])
-const pipelineProgress = ref<Record<string, { status: string; progress: number; message?: string }>>({})
-const chunkProgress = ref<{ current: number; total: number }>({ current: 0, total: 0 })
+const pipelineProgress = ref<Record<string, PipelineProgressState>>({})
+const chunkProgress = ref<UnifiedChunkProgressState>({
+  current: 0,
+  total: 0,
+  substepCurrent: 0,
+  substepTotal: 0,
+  completedSteps: 0,
+  totalSteps: 0
+})
+const sanitizeChunkProgress = ref<{ current: number; total: number }>({ current: 0, total: 0 })
 const layerResults = ref<Record<string, { nodeCount: number; relationCount: number }>>({})
 
 const STAGE_WEIGHTS: Record<string, number> = {
   Normalization: 5,
   BPMN: 10,
   Chunking: 5,
-  Unified: 70,
+  Sanitize: 10,
+  Unified: 60,
   MergeRefine: 10,
 }
 
@@ -2140,6 +2184,7 @@ const STAGE_LABELS: Record<string, { icon: string; label: string; color: string 
   Normalization: { icon: '📄', label: '문서 정규화', color: '#6366f1' },
   BPMN: { icon: '📐', label: 'BPMN 추출', color: '#8b5cf6' },
   Chunking: { icon: '📦', label: '청크 분할', color: '#0ea5e9' },
+  Sanitize: { icon: '🧹', label: '청크 정제', color: '#8b5cf6' },
   Unified: { icon: '🔍', label: '개념 추출', color: '#f59e0b' },
   MergeRefine: { icon: '🔗', label: '병합 & 정제', color: '#10b981' },
 }
@@ -4602,6 +4647,19 @@ function normalizeStepMessage(message?: string): string {
   return (message || '').replace(/^\[[^\]]+\]\s*/, '').trim()
 }
 
+function getStageDisplayMessage(stage: string): string {
+  const stageMessage = normalizeStepMessage(pipelineProgress.value[stage]?.message)
+  if (!stageMessage) return ''
+  if (stage !== 'Unified') return stageMessage
+
+  const unifiedDetail = pipelineProgress.value[stage]?.detail
+  if (unifiedDetail?.substepLabel) {
+    return unifiedDetail.substepLabel
+  }
+
+  return stageMessage.replace(/^청크 \d+\/\d+(?:\s*·\s*단계 \d+\/\d+)?(?:\s*·\s*)?/, '').trim()
+}
+
 function updateCurrentStepForPhase(phase: string, progress: number, message?: string) {
   const label = STAGE_LABELS[phase]?.label || phase
   if (progress >= 100) {
@@ -4614,15 +4672,23 @@ function updateCurrentStepForPhase(phase: string, progress: number, message?: st
 function resetProgress() {
   const isPdfInput = generateForm.value.inputType === 'pdf' || generateForm.value.inputType === 'url'
   const stages: string[] = isPdfInput
-    ? ['Normalization', 'BPMN', 'Chunking', 'Unified', 'MergeRefine']
+    ? ['Normalization', 'BPMN', 'Chunking', 'Sanitize', 'Unified', 'MergeRefine']
     : [...DEFAULT_PIPELINE_STAGES]
   activePipelineStages.value = stages
-  const freshProgress: Record<string, { status: string; progress: number; message?: string }> = {}
+  const freshProgress: Record<string, PipelineProgressState> = {}
   for (const stage of stages) {
     freshProgress[stage] = { status: 'pending', progress: 0 }
   }
   pipelineProgress.value = freshProgress
-  chunkProgress.value = { current: 0, total: 0 }
+  chunkProgress.value = {
+    current: 0,
+    total: 0,
+    substepCurrent: 0,
+    substepTotal: 0,
+    completedSteps: 0,
+    totalSteps: 0
+  }
+  sanitizeChunkProgress.value = { current: 0, total: 0 }
   layerResults.value = {}
   generationLogs.value = []
   currentStep.value = ''
@@ -5184,6 +5250,17 @@ function sanitizeRelationshipsForCanvas(
   }
 }
 
+function destroyCytoscapeCanvas() {
+  resetEdgehandlesInteractionState({ removeTransientEdges: true })
+
+  detachEdgehandleCyEvents()
+  edgehandlesInstance?.destroy()
+  edgehandlesInstance = null
+  if (!cy) return
+  cy.destroy()
+  cy = null
+}
+
 // Cytoscape
 function initCytoscape(shouldRestoreSelection: boolean = false) {
   if (!cytoscapeContainer.value) {
@@ -5201,13 +5278,7 @@ function initCytoscape(shouldRestoreSelection: boolean = false) {
   
   console.log('Initializing Cytoscape with', nodes.value.length, 'nodes and', relationships.value.length, 'relationships')
   
-  if (cy) {
-    detachEdgehandleCyEvents()
-    edgehandlesInstance?.destroy()
-    edgehandlesInstance = null
-    cy.destroy()
-    cy = null
-  }
+  destroyCytoscapeCanvas()
 
   // 스키마를 새로 로드한 직후에는 마우스 위치가 우연히 노드 테두리 위에 있어도
   // 연결 모드로 즉시 진입하지 않도록 잠시 보호 시간을 둔다.
@@ -7284,10 +7355,12 @@ function handleStreamEvent(event: any) {
     case 'layer_progress':
       {
       const phaseName: string = event.layer
+      const progressDetail: PipelineProgressDetail | undefined =
+        event.detail && typeof event.detail === 'object' ? event.detail as PipelineProgressDetail : undefined
       
       // BPMN 이벤트가 처음 오면 동적으로 파이프라인에 추가
       if (phaseName === 'BPMN' && !pipelineProgress.value['BPMN']) {
-        activePipelineStages.value = ['Normalization', 'BPMN', 'Chunking', 'Unified', 'MergeRefine']
+        activePipelineStages.value = ['Normalization', 'BPMN', 'Chunking', 'Sanitize', 'Unified', 'MergeRefine']
         pipelineProgress.value['BPMN'] = { status: 'pending', progress: 0 }
       }
       
@@ -7303,28 +7376,58 @@ function handleStreamEvent(event: any) {
         pipelineProgress.value['MergeRefine'] = {
           status: incomingProgress >= 100 ? 'in_progress' : 'in_progress',
           progress: Math.max(prevProgress, mergeProgress),
-          message: event.message
+          message: event.message,
+          detail: progressDetail
         }
       } else if (phaseName === 'Refinement') {
         const refineProgress = incomingProgress >= 100 ? 100 : 50 + Math.round(incomingProgress * 0.5)
         pipelineProgress.value['MergeRefine'] = {
           status: incomingProgress >= 100 ? 'completed' : 'in_progress',
           progress: Math.max(prevProgress, refineProgress),
-          message: event.message
+          message: event.message,
+          detail: progressDetail
         }
       } else {
         pipelineProgress.value[uiPhase] = {
           status: incomingProgress >= 100 ? 'completed' : 'in_progress',
           progress: Math.max(prevProgress, incomingProgress),
-          message: event.message
+          message: event.message,
+          detail: progressDetail
+        }
+      }
+      
+      // Sanitize 청크 진행률 파싱
+      if (phaseName === 'Sanitize') {
+        const sanitizeMatch = event.message?.match(/청크 (\d+)\/(\d+)/)
+        if (sanitizeMatch) {
+          sanitizeChunkProgress.value = { current: parseInt(sanitizeMatch[1]), total: parseInt(sanitizeMatch[2]) }
         }
       }
       
       // "청크 N/M 처리 완료" 패턴에서 진행률 파싱
       if (phaseName === 'Unified') {
-        const match = event.message?.match(/청크 (\d+)\/(\d+)/)
-        if (match) {
-          chunkProgress.value = { current: parseInt(match[1]), total: parseInt(match[2]) }
+        if (progressDetail) {
+          chunkProgress.value = {
+            current: Number(progressDetail.chunkCurrent || 0),
+            total: Number(progressDetail.chunkTotal || 0),
+            substepCurrent: Number(progressDetail.substepCurrent || 0),
+            substepTotal: Number(progressDetail.substepTotal || 0),
+            completedSteps: Number(progressDetail.completedSteps || 0),
+            totalSteps: Number(progressDetail.totalSteps || 0)
+          }
+        } else {
+          const nextChunkProgress = { ...chunkProgress.value }
+          const chunkMatch = event.message?.match(/청크 (\d+)\/(\d+)/)
+          if (chunkMatch) {
+            nextChunkProgress.current = parseInt(chunkMatch[1])
+            nextChunkProgress.total = parseInt(chunkMatch[2])
+          }
+          const substepMatch = event.message?.match(/단계 (\d+)\/(\d+)/)
+          if (substepMatch) {
+            nextChunkProgress.substepCurrent = parseInt(substepMatch[1])
+            nextChunkProgress.substepTotal = parseInt(substepMatch[2])
+          }
+          chunkProgress.value = nextChunkProgress
         }
       }
       
@@ -7480,6 +7583,15 @@ function saveRecentSchemaId(schemaId: string) {
   }
 }
 
+function removeRecentSchemaId(schemaId: string) {
+  try {
+    const updated = getRecentSchemaIds().filter(id => id !== schemaId)
+    localStorage.setItem(RECENT_SCHEMAS_KEY, JSON.stringify(updated))
+  } catch (error) {
+    console.warn('최근 스키마 제거 실패:', error)
+  }
+}
+
 // 선택된 노드 목록 가져오기 (FIFO 큐)
 function getSelectedNodes(): SelectedNodeInfo[] {
   try {
@@ -7630,11 +7742,24 @@ async function confirmDeleteSchema() {
       alert(`삭제 실패: ${err.detail || response.status}`)
       return
     }
+    removeRecentSchemaId(id)
     if (currentSchemaId.value === id) {
-      currentSchemaId.value = ''
+      currentSchemaId.value = null
+      schemaName.value = ''
       nodes.value = []
       relationships.value = []
       selectedNodeId.value = null
+      nodeDataResult.value = null
+      detailPanelTab.value = 'info'
+      showModelOverlay.value = false
+      modelOverlayData.value = []
+      isWhatIfPanelOpen.value = false
+      causalBrushSelection.value = null
+      analysisState.value = null
+      clearCausalHighlight()
+      closeRelationEditor()
+      closeContextMenu()
+      destroyCytoscapeCanvas()
       try {
         const selectedNodes = getSelectedNodes().filter(n => n.schemaId !== id)
         localStorage.setItem(SELECTED_NODES_KEY, JSON.stringify(selectedNodes))
@@ -7642,7 +7767,7 @@ async function confirmDeleteSchema() {
     }
     schemaToDelete.value = null
     showOntologyListDropdown.value = true
-    await loadOntologyList()
+    await loadOntologyList({ autoLoadRecent: false })
     alert(`온톨로지 「${name}」이(가) 삭제되었습니다.`)
   } catch (e: any) {
     const msg = e?.message || String(e)
@@ -7658,7 +7783,8 @@ async function confirmDeleteSchema() {
   }
 }
 
-async function loadOntologyList() {
+async function loadOntologyList(options: { autoLoadRecent?: boolean } = {}) {
+  const { autoLoadRecent = true } = options
   loadingSchemalist.value = true
   
   try {
@@ -7714,7 +7840,7 @@ async function loadOntologyList() {
       console.log(`✅ 유효한 스키마 ${validSchemas.length}개 로드됨 (최근 열어본 순서로 정렬)`)
       
       // 최근 스키마 자동 로드 (화면 진입 시)
-      if (recentIds.length > 0 && validSchemas.length > 0) {
+      if (autoLoadRecent && recentIds.length > 0 && validSchemas.length > 0) {
         // 최근 스키마 ID 중 유효한 스키마 찾기
         const recentSchemaId = recentIds.find(id => 
           validSchemas.some(s => s.id === id)
@@ -8406,9 +8532,14 @@ watch(chartContainerRef, async (newVal) => {
 watch([nodes, relationships], () => {
   // 스키마 로드 중에는 loadSchema에서 initCytoscape(true)를 호출하므로 여기서 덮어쓰지 않음
   if (isLoadingSchema.value) return
-  if (nodes.value.length > 0) {
-    nextTick(() => initCytoscape())
+  if (nodes.value.length === 0) {
+    closeContextMenu()
+    closeRelationEditor()
+    clearCausalHighlight()
+    destroyCytoscapeCanvas()
+    return
   }
+  nextTick(() => initCytoscape())
 })
 
 // 분석 탭 클릭 시 구간 선택이 있으면 자동으로 분석 시작 (watch는 백업용, 핸들러에서 먼저 처리)
