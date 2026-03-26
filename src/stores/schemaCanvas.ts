@@ -1324,10 +1324,24 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     let resolvedDatasource = normalizedInputDatasource || (matchedTable?.datasource || '').trim()
 
     const extractDatasourceFromSql = (query: string): string => {
-      // FROM/JOIN datasource.schema.table 패턴만 datasource로 인식한다.
-      const fromMatch = query.match(/\b(?:FROM|JOIN)\s+`?([A-Za-z_][A-Za-z0-9_]*)`?\s*\.\s*[`"]?[A-Za-z_][A-Za-z0-9_]*[`"]?\s*\.\s*[`"]?[A-Za-z_][A-Za-z0-9_]*[`"]?/i)
-      if (!fromMatch?.[1]) return ''
-      return fromMatch[1].replace(/[`"]/g, '').trim()
+      const trimmedQuery = String(query || '').trim()
+      if (!trimmedQuery) return ''
+
+      const datasourcePatterns = [
+        // MindsDB 래퍼 문법: SELECT * FROM datasource ( ... )
+        /\bFROM\s+[`"]?([A-Za-z_][A-Za-z0-9_]*)[`"]?\s*\(/i,
+        // FROM/JOIN datasource.schema.table 패턴
+        /\b(?:FROM|JOIN)\s+[`"]?([A-Za-z_][A-Za-z0-9_]*)[`"]?\s*\.\s*[`"]?[A-Za-z_][A-Za-z0-9_]*[`"]?\s*\.\s*[`"]?[A-Za-z_][A-Za-z0-9_]*[`"]?/i
+      ]
+
+      for (const pattern of datasourcePatterns) {
+        const match = trimmedQuery.match(pattern)
+        if (match?.[1]) {
+          return match[1].replace(/[`"]/g, '').trim()
+        }
+      }
+
+      return ''
     }
 
     const withLimit = (rawSql: string, rowLimit: number): string => {
@@ -1435,7 +1449,11 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         }
         const otData = await response.json()
         const otQuery = String(otData.query || '').trim()
-        const otDatasource = extractDatasourceFromSql(otQuery)
+        const otDatasource = [
+          String(otData.datasource || '').trim(),
+          String(otData.dataSource || '').trim(),
+          extractDatasourceFromSql(otQuery)
+        ].find(Boolean) || ''
         if (!resolvedDatasource && otDatasource) {
           resolvedDatasource = otDatasource
         }
