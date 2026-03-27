@@ -25,7 +25,8 @@ import {
   IconWhatIf,
   IconSecurity,
   IconCalendar,
-  IconSettings
+  IconSettings,
+  IconEye
 } from '@/components/icons'
 import type { Component } from 'vue'
 
@@ -75,6 +76,7 @@ const domainLayerGroup: NavGroup = {
     { id: 'schema-modeling', label: '도메인 스키마', icon: IconDatabase },
     { id: 'multi-layer-ontology', label: '온톨로지 관리', icon: IconLineage },
     { id: 'object-explorer', label: '오브젝트 탐색기', icon: IconSearch },
+    { id: 'ontology-viewer', label: '온톨로지 뷰어', icon: IconEye },
     // { id: 'ontology', label: '문서에서 스키마 추출', icon: IconOntology },  // 임시 숨김
     { id: 'domain-text2sql', label: '자연어 질의', icon: IconMessageSquare }
   ]

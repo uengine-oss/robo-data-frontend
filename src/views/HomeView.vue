@@ -12,6 +12,7 @@ import { OntologyTab } from '@/components/ontology'
 import ObjectTypeModeler from '@/components/domain/ObjectTypeModeler.vue'
 import MultiLayerOntologyViewer from '@/components/domain/MultiLayerOntologyViewer.vue'
 import ObjectExplorerTab from '@/components/object-explorer/ObjectExplorerTab.vue'
+import OntologyViewerRemote from '@/components/domain/OntologyViewerRemote.vue'
 import DataSourcesTab from '@/components/datasources/DataSourcesTab.vue'
 import AlarmToast from '@/components/common/AlarmToast.vue'
 import { WhatIfSimulator } from '@/components/whatif'
@@ -48,6 +49,7 @@ const { activeTab } = storeToRefs(sessionStore)
     <ObjectTypeModeler v-else-if="activeTab === 'schema-modeling'" />
     <MultiLayerOntologyViewer v-else-if="activeTab === 'multi-layer-ontology'" />
     <ObjectExplorerTab v-else-if="activeTab === 'object-explorer'" />
+    <OntologyViewerRemote v-else-if="activeTab === 'ontology-viewer'" />
     <OntologyTab v-else-if="activeTab === 'ontology'" />
     
     <!-- What-If 시뮬레이터 -->
