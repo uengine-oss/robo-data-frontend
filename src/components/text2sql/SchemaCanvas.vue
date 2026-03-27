@@ -3709,7 +3709,6 @@ async function handleRefresh() {
   }
 }
 
-// 레거시 호환 (기존 스타일 유지)
 .behavior-result-popup:not(.behavior-result-popup--large) {
   min-width: 400px;
   max-width: 600px;

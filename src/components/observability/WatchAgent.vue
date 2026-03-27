@@ -340,7 +340,7 @@ const loadWhatifScenarios = async () => {
     const response = await fetch(`${API_GATEWAY_URL}/domain-whatif/scenarios`)
     if (response.ok) {
       const data = await response.json()
-      // 새 API는 직접 배열 반환, 레거시 호환: {scenarios: [...]}
+      // 배열 또는 {scenarios: [...]} 형식 모두 지원
       whatifScenarios.value = Array.isArray(data) ? data : (data.scenarios ?? [])
     }
   } catch (error) {

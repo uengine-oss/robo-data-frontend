@@ -632,7 +632,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     return Array.from(schemaSet).sort()
   })
   
-  // 스키마별 테이블 그룹화 (캔버스에 없는 테이블만) - 레거시 호환
+  // 스키마별 테이블 그룹화 (캔버스에 없는 테이블만)
   const tablesBySchema = computed(() => {
     const onCanvas = new Set(tablesOnCanvas.value)
     const grouped: Record<string, Text2SqlTableInfo[]> = {}

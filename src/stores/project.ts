@@ -1112,8 +1112,6 @@ export const useProjectStore = defineStore('project', () => {
     isPipelinePaused,
     isPipelineStopped,
     
-    // Computed (하위호환성: uploadMessages로도 접근 가능)
-    uploadMessages: consoleMessages,
     metadata,
     analyzeMeta,
     isValidConfig,

@@ -136,7 +136,7 @@ function isCodeSource(source?: string): boolean {
 // 설명 출처에 따른 색상 반환 (범례와 일치)
 // code(코드 분석): 하늘색, ddl: 초록색, user: 주황색
 const descriptionSourceColors: Record<string, string> = {
-  procedure: '#38bdf8',  // 하늘색 (코드 분석) — 레거시 호환
+  procedure: '#38bdf8',  // 하늘색 (코드 분석)
   code: '#38bdf8',       // 하늘색 (코드 분석)
   ddl: '#22c55e',        // 초록색 (DDL에서 추출)
   user: '#f59e0b',       // 주황색 (사용자 입력)
