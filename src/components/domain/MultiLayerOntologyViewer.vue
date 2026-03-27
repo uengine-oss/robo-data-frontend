@@ -608,12 +608,34 @@
           </div>
           <div class="detail-row">
             <label>레이어</label>
-            <span 
-              class="layer-badge"
-              :style="{ backgroundColor: getLayerColor(selectedNode.layer || selectedNode.label) }"
-            >
-              {{ selectedNode.layer || selectedNode.label }}
-            </span>
+            <div class="layer-selector-wrapper" style="position: relative;">
+              <span
+                class="layer-badge layer-badge-clickable"
+                :style="{ backgroundColor: getLayerColor(selectedNode.layer || selectedNode.label) }"
+                @click="toggleLayerSelector"
+                title="클릭하여 레이어 변경"
+              >
+                {{ selectedNode.layer || selectedNode.label }}
+                <span class="layer-badge-arrow">▾</span>
+              </span>
+              <div v-if="isLayerSelectorOpen" class="layer-selector-dropdown">
+                <div
+                  v-for="layer in layers"
+                  :key="layer.id"
+                  class="layer-selector-item"
+                  :class="{ active: (selectedNode.layer || selectedNode.label) === layer.id }"
+                  :style="{ '--layer-color': layer.color }"
+                  @click="changeNodeLayer(layer.id)"
+                >
+                  <span class="layer-selector-icon">{{ layer.icon }}</span>
+                  <span class="layer-selector-name">{{ layer.name }}</span>
+                  <span
+                    class="layer-selector-dot"
+                    :style="{ backgroundColor: layer.color }"
+                  ></span>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="detail-row" v-if="selectedNode.description">
             <label>설명</label>
@@ -2061,6 +2083,9 @@ const isEditingNodeName = ref(false)
 const editingNodeNameValue = ref('')
 const nodeNameInput = ref<HTMLInputElement | null>(null)
 
+// 레이어(스테레오타입) 변경
+const isLayerSelectorOpen = ref(false)
+
 // 캔버스 우클릭 컨텍스트 메뉴
 const showContextMenu = ref(false)
 const contextMenuMode = ref<'canvas' | 'node' | 'edge'>('canvas')
@@ -2805,7 +2830,8 @@ function selectNode(nodeId: string) {
   detailPanelTab.value = 'info'  // 탭 초기화
   nodeDataResult.value = null    // 데이터 초기화
   isEditingNodeName.value = false  // 이름 편집 초기화
-  
+  isLayerSelectorOpen.value = false  // 레이어 셀렉터 초기화
+
   // 분석 탭 상태 초기화
   if (analysisState.value) {
     analysisState.value = null
@@ -3862,6 +3888,59 @@ function saveNodeName() {
 function cancelEditNodeName() {
   isEditingNodeName.value = false
   editingNodeNameValue.value = ''
+}
+
+// ========== 레이어(스테레오타입) 변경 ==========
+
+function toggleLayerSelector() {
+  isLayerSelectorOpen.value = !isLayerSelectorOpen.value
+}
+
+function changeNodeLayer(newLayerId: string) {
+  if (!selectedNode.value) return
+
+  const currentLayer = selectedNode.value.layer || selectedNode.value.label
+  if (currentLayer === newLayerId) {
+    isLayerSelectorOpen.value = false
+    return
+  }
+
+  // 상태 저장 (undo 가능하도록)
+  saveState()
+
+  // nodes 배열에서 해당 노드의 layer/label 업데이트
+  const nodeIndex = nodes.value.findIndex(n => n.id === selectedNode.value!.id)
+  if (nodeIndex !== -1) {
+    nodes.value[nodeIndex] = {
+      ...nodes.value[nodeIndex],
+      layer: newLayerId,
+      label: newLayerId
+    }
+    // selectedNode도 업데이트
+    selectedNode.value = nodes.value[nodeIndex]
+  }
+
+  // Cytoscape 노드 스타일 업데이트
+  if (cy) {
+    const cyNode = cy.$(`#${selectedNode.value.id}`)
+    if (cyNode.length > 0) {
+      cyNode.data('layer', newLayerId)
+      cyNode.data('color', getLayerColor(newLayerId))
+    }
+  }
+
+  isLayerSelectorOpen.value = false
+  console.info(`[Ontology] Node ${selectedNode.value.id} layer changed to ${newLayerId}`)
+}
+
+// 다른 곳 클릭 시 레이어 셀렉터 닫기
+function closeLayerSelectorOnOutsideClick(e: MouseEvent) {
+  if (isLayerSelectorOpen.value) {
+    const wrapper = (e.target as HTMLElement).closest('.layer-selector-wrapper')
+    if (!wrapper) {
+      isLayerSelectorOpen.value = false
+    }
+  }
 }
 
 // ========== 노드 삭제 기능 ==========
@@ -8460,6 +8539,9 @@ onMounted(async () => {
   
   // 노드 추가 드롭다운 및 컨텍스트 메뉴 외부 클릭 시 닫기
   document.addEventListener('click', onDocumentClick)
+
+  // 레이어 셀렉터 외부 클릭 시 닫기
+  document.addEventListener('click', closeLayerSelectorOnOutsideClick)
   
   // 온톨로지 목록 로드 및 최근 온톨로지 자동 열기
   await loadOntologyList()
@@ -10605,6 +10687,88 @@ watch(detailPanelTab, (newTab, oldTab) => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.layer-badge-clickable {
+  cursor: pointer;
+  transition: filter 0.15s, box-shadow 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+}
+
+.layer-badge-clickable:hover {
+  filter: brightness(1.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.layer-badge-arrow {
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+
+.layer-selector-wrapper {
+  display: inline-block;
+}
+
+.layer-selector-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 1000;
+  min-width: 180px;
+  background: #1e293b;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  animation: layerDropdownFadeIn 0.15s ease-out;
+}
+
+@keyframes layerDropdownFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.layer-selector-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: background 0.12s;
+}
+
+.layer-selector-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.layer-selector-item.active {
+  background: rgba(255, 255, 255, 0.12);
+  color: white;
+  font-weight: 600;
+}
+
+.layer-selector-icon {
+  font-size: 1rem;
+  width: 20px;
+  text-align: center;
+}
+
+.layer-selector-name {
+  flex: 1;
+}
+
+.layer-selector-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .related-section {
@@ -13821,6 +13985,25 @@ watch(detailPanelTab, (newTab, oldTab) => {
 .light-mode .layer-badge {
   /* 레이어 색상은 인라인 스타일로 지정되므로 배경색 유지 */
   color: white !important;
+}
+
+.light-mode .layer-selector-dropdown {
+  background: #ffffff !important;
+  border: 1px solid rgba(0, 0, 0, 0.12) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15) !important;
+}
+
+.light-mode .layer-selector-item {
+  color: #334155 !important;
+}
+
+.light-mode .layer-selector-item:hover {
+  background: rgba(0, 0, 0, 0.05) !important;
+}
+
+.light-mode .layer-selector-item.active {
+  background: rgba(0, 0, 0, 0.08) !important;
+  color: #1e293b !important;
 }
 
 .light-mode .related-section h4 {
