@@ -916,16 +916,41 @@
       </div>
     </div>
 
+    <div v-if="showSynonymSuggestionToast" class="synonym-toast-banner">
+      <span class="toast-message">
+        동의어 {{ synonymSuggestions.length }}건이 발견되었습니다. 수락하면 용어집에 자동 추가됩니다.
+      </span>
+      <button
+        type="button"
+        class="toast-action"
+        @click="showSynonymSuggestionModal = true; showSynonymSuggestionToast = false"
+      >
+        리뷰하기
+      </button>
+      <button type="button" class="toast-dismiss" @click="dismissSynonymSuggestions">
+        닫기
+      </button>
+    </div>
+
+    <div v-if="showSynonymAppliedToast" class="synonym-applied-banner">
+      <span class="toast-message">
+        {{ synonymAppliedCount }}개의 동의어가 용어집에 추가되었습니다.
+      </span>
+      <button type="button" class="toast-dismiss" @click="showSynonymAppliedToast = false">
+        닫기
+      </button>
+    </div>
+
     <!-- 생성 다이얼로그 (오류 시 배경 클릭으로 닫히지 않음) -->
-    <div v-if="showGenerateDialog" class="dialog-overlay" @click.self="!generating && !generateError && (showGenerateDialog = false)">
-      <div class="generate-dialog" :class="{ 'dialog-expanded': generating || !!generateError }">
+    <div v-if="showGenerateDialog" class="dialog-overlay" @click.self="!generating && !generateError && (showGenerateDialog = false, generationCompleted = false)">
+        <div class="generate-dialog" :class="{ 'dialog-expanded': generating || !!generateError || generationCompleted }">
         <div class="dialog-header">
           <h3>{{ generationMode === 'schema' ? '🗃️ DB 스키마에서 온톨로지 생성' : '📄 문서에서 온톨로지 생성' }}</h3>
           <button class="close-btn" @click="onCloseGenerateDialog" :disabled="generating">✕</button>
         </div>
         
         <!-- 생성 모드 탭 -->
-        <div class="generation-mode-tabs" v-if="!generating && !generateError">
+        <div class="generation-mode-tabs" v-if="!generating && !generateError && !generationCompleted">
           <button 
             :class="['mode-tab', { active: generationMode === 'document' }]"
             @click="generationMode = 'document'"
@@ -941,7 +966,7 @@
         </div>
         
         <!-- 스키마 기반 생성 모드 -->
-        <div v-if="generationMode === 'schema' && !generating && !generateError" class="schema-generation-content">
+        <div v-if="generationMode === 'schema' && !generating && !generateError && !generationCompleted" class="schema-generation-content">
           <SchemaBasedGenerator 
             @generated="handleSchemaBasedGenerated"
             @cancel="showGenerateDialog = false"
@@ -959,8 +984,8 @@
           </div>
         </div>
         
-        <!-- 문서 기반 입력 폼 (생성 중도 아니고 오류도 아닐 때만) -->
-        <div class="dialog-content" v-else-if="generationMode === 'document' && !generating">
+        <!-- 문서 기반 입력 폼 (생성 중도 아니고 오류도 완료도 아닐 때만) -->
+        <div class="dialog-content" v-else-if="generationMode === 'document' && !generating && !generationCompleted">
           <div class="form-group">
             <label>입력 방식</label>
             <div class="input-type-tabs">
@@ -1036,17 +1061,121 @@
             />
           </div>
           
-          <div class="form-group">
-            <label>도메인 힌트 (선택)</label>
-            <input 
-              type="text" 
-              v-model="generateForm.domainHint" 
-              placeholder="예: 정수장 운영, 보험, 제조"
-            />
+          <div class="form-group glossary-selector">
+            <label>사용할 용어집</label>
+            <p class="glossary-help">선택한 용어집의 표준 용어를 기반으로 온톨로지를 더 정확하게 생성합니다.</p>
+            <div class="glossary-toggle">
+              <label class="toggle-label">
+                <input type="checkbox" v-model="useAllGlossaries" @change="onToggleAllGlossaries" />
+                <span>{{ allGlossariesLabel }}</span>
+              </label>
+            </div>
+
+            <div v-if="!useAllGlossaries" class="glossary-checklist">
+              <div v-if="glossaryLoading" class="glossary-loading">용어집 목록 로드 중...</div>
+              <div v-else-if="glossariesForSelect.length === 0" class="glossary-empty">
+                등록된 용어집이 없습니다.
+              </div>
+              <template v-else>
+                <label
+                  v-for="glossary in glossariesForSelect"
+                  :key="glossary.id"
+                  class="glossary-check-item"
+                >
+                  <input
+                    v-model="generateForm.selectedGlossaryIds"
+                    type="checkbox"
+                    :value="glossary.id"
+                  />
+                  <span class="glossary-check-name">{{ glossary.name }}</span>
+                  <span class="glossary-check-count">{{ glossary.termCount }}개 용어</span>
+                </label>
+                <p v-if="generateForm.selectedGlossaryIds.length === 0" class="glossary-validation-hint">
+                  용어집을 1개 이상 선택해주세요.
+                </p>
+              </template>
+            </div>
           </div>
           
         </div>
         
+        <!-- 생성 완료 결과 화면 -->
+        <div class="generation-complete-view" v-else-if="generationCompleted">
+          <div class="complete-icon-row">
+            <span class="complete-icon">&#x2705;</span>
+            <h4 class="complete-title">온톨로지 생성 완료</h4>
+          </div>
+
+          <div class="complete-summary">
+            <div class="summary-stat">
+              <span class="stat-value">{{ generationResult.nodeCount }}</span>
+              <span class="stat-label">노드</span>
+            </div>
+            <div class="summary-stat">
+              <span class="stat-value">{{ generationResult.relationshipCount }}</span>
+              <span class="stat-label">관계</span>
+            </div>
+            <div class="summary-stat">
+              <span class="stat-value">{{ Object.keys(generationResult.layerBreakdown).length }}</span>
+              <span class="stat-label">레이어</span>
+            </div>
+          </div>
+
+          <div class="complete-layer-tags">
+            <span
+              v-for="(count, layerName) in generationResult.layerBreakdown"
+              :key="layerName"
+              class="layer-tag"
+            >
+              {{ layerName }}: {{ count }}개
+            </span>
+          </div>
+
+          <div class="complete-save-status">
+            <template v-if="generationSaveStatus === 'saving'">
+              <span class="save-spinner"></span>
+              <span>Neo4j에 저장 중...</span>
+            </template>
+            <template v-else-if="generationSaveStatus === 'saved'">
+              <span class="save-check">&#x2714;</span>
+              <span>Neo4j에 저장 완료</span>
+            </template>
+            <template v-else-if="generationSaveStatus === 'failed'">
+              <span class="save-fail">&#x2716;</span>
+              <span>저장 실패: {{ generationSaveError }}</span>
+            </template>
+          </div>
+
+          <div class="complete-synonym-section" v-if="generationResult.synonymSuggestionCount > 0">
+            <p class="synonym-info-text">
+              문서에서 추출된 용어 중 기존 용어집 항목과 유사한 <strong>{{ generationResult.synonymSuggestionCount }}건</strong>이 발견되었습니다.
+              수락하면 해당 용어의 동의어로 용어집에 자동 추가됩니다.
+            </p>
+            <button
+              type="button"
+              class="synonym-review-btn"
+              @click="showSynonymSuggestionModal = true; showGenerateDialog = false; generationCompleted = false"
+            >
+              동의어 리뷰하기
+            </button>
+          </div>
+          <div class="complete-synonym-section no-suggestions" v-else>
+            <p class="synonym-info-text">
+              용어집에 추가할 동의어 후보가 발견되지 않았습니다.
+            </p>
+          </div>
+
+          <div class="complete-actions">
+            <button
+              type="button"
+              class="complete-close-btn"
+              @click="showGenerateDialog = false; generationCompleted = false"
+            >
+              온톨로지 보기
+            </button>
+          </div>
+        </div>
+
         <!-- 진행 상태 뷰어 (생성 중일 때) -->
         <div class="progress-viewer" v-else-if="generating">
           <div class="progress-header">
@@ -1131,7 +1260,7 @@
           </div>
         </div>
         
-        <div class="dialog-footer" v-if="!generating && !generateError">
+        <div class="dialog-footer" v-if="!generating && !generateError && !generationCompleted">
           <button class="cancel-btn" @click="showGenerateDialog = false">취소</button>
           <button class="generate-btn" @click="generateOntology" :disabled="!canGenerate">
             🚀 온톨로지 생성
@@ -1142,6 +1271,13 @@
         </div>
       </div>
     </div>
+
+    <SynonymSuggestionModal
+      v-if="showSynonymSuggestionModal"
+      :suggestions="synonymSuggestions"
+      @close="dismissSynonymSuggestions"
+      @applied="handleSynonymSuggestionsApplied"
+    />
 
     <!-- 데이터 소스 연결 다이얼로그 -->
     <div v-if="showDataSourceDialog" class="dialog-overlay" @click.self="!linkingDataSources && (showDataSourceDialog = false)">
@@ -1757,12 +1893,16 @@ import LineChart from '@/components/charts/LineChart.vue'
 import CausalAnalysisPanel from '@/components/domain/CausalAnalysisPanel.vue'
 import BpmnViewer from '@/components/domain/BpmnViewer.vue'
 import AgentsMdEditor from '@/components/domain/AgentsMdEditor.vue'
+import SynonymSuggestionModal from '@/components/domain/SynonymSuggestionModal.vue'
 import SchemaBasedGenerator from '@/components/ontology/SchemaBasedGenerator.vue'
-import { text2sqlApi } from '@/services/api'
+import { glossaryApi, text2sqlApi, type Glossary } from '@/services/api'
+import { useSessionStore } from '@/stores/session'
 import type { ReactRequest, ReactStreamEvent } from '@/types'
 
 // Register edgehandles extension
 cytoscape.use(edgehandles)
+
+const sessionStore = useSessionStore()
 
 // Types
 interface FilterField {
@@ -2130,18 +2270,104 @@ const showGenerateDialog = ref(false)
 const generationMode = ref<'document' | 'schema'>('document')
 const generating = ref(false)
 const generationLogs = ref<{ time: string; message: string; type?: string }[]>([])
+const glossariesForSelect = ref<Glossary[]>([])
+const glossaryLoading = ref(false)
+const useAllGlossaries = ref(true)
+const allGlossariesLabel = computed(() => (
+  glossaryLoading.value
+    ? '전체 용어집 사용 (확인 중...)'
+    : `전체 용어집 사용 (${glossariesForSelect.value.length}개)`
+))
+interface SynonymSuggestion {
+  termId: string
+  termName: string
+  glossaryId: string
+  glossaryName: string
+  suggestedSynonym: string
+  similarity: number
+  sourceNodeName: string
+  sourceLayer: string
+  accepted: boolean
+}
+const synonymSuggestions = ref<SynonymSuggestion[]>([])
+const showSynonymSuggestionModal = ref(false)
+const showSynonymSuggestionToast = ref(false)
+const showSynonymAppliedToast = ref(false)
+const synonymAppliedCount = ref(0)
+
+// 생성 완료 결과 화면 상태
+const generationCompleted = ref(false)
+const generationSaveStatus = ref<'saving' | 'saved' | 'failed'>('saving')
+const generationSaveError = ref('')
+interface GenerationResultSummary {
+  nodeCount: number
+  relationshipCount: number
+  layerBreakdown: Record<string, number>
+  synonymSuggestionCount: number
+}
+const generationResult = ref<GenerationResultSummary>({
+  nodeCount: 0,
+  relationshipCount: 0,
+  layerBreakdown: {},
+  synonymSuggestionCount: 0,
+})
 
 // 온톨로지 생성 다이얼로그 열기
 function openGenerateDialog(mode: 'document' | 'schema') {
   generationMode.value = mode
+  if (mode === 'document') {
+    glossaryLoading.value = true
+  }
   showGenerateDialog.value = true
+  generateError.value = ''
 }
+
+watch([showGenerateDialog, generationMode], ([isOpen, mode]) => {
+  if (isOpen && mode === 'document') {
+    void loadGlossariesForGeneration()
+  }
+})
+
 const generateForm = ref({
   inputType: 'text',
   text: '',
   pdfUrl: '',
-  domainHint: ''
+  selectedGlossaryIds: [] as string[]
 })
+
+async function loadGlossariesForGeneration() {
+  glossaryLoading.value = true
+  try {
+    const headers = sessionStore.getHeaders()
+    const result = await glossaryApi.getGlossaries(headers)
+    glossariesForSelect.value = result.glossaries
+  } catch (error) {
+    console.warn('용어집 목록 로드 실패:', error)
+    glossariesForSelect.value = []
+  } finally {
+    glossaryLoading.value = false
+  }
+}
+
+function onToggleAllGlossaries() {
+  if (useAllGlossaries.value) {
+    generateForm.value.selectedGlossaryIds = []
+  }
+}
+
+function dismissSynonymSuggestions() {
+  showSynonymSuggestionToast.value = false
+  showSynonymSuggestionModal.value = false
+  synonymSuggestions.value = []
+}
+
+function handleSynonymSuggestionsApplied(count: number) {
+  showSynonymSuggestionModal.value = false
+  showSynonymSuggestionToast.value = false
+  synonymSuggestions.value = []
+  synonymAppliedCount.value = count
+  showSynonymAppliedToast.value = count > 0
+}
 
 // File upload
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -2659,14 +2885,21 @@ const selectedNode = computed(() => {
 })
 
 const canGenerate = computed(() => {
+  let hasInput = false
   if (generateForm.value.inputType === 'text') {
-    return generateForm.value.text.trim().length > 0
+    hasInput = generateForm.value.text.trim().length > 0
   } else if (generateForm.value.inputType === 'pdf') {
-    return uploadedFile.value !== null
+    hasInput = uploadedFile.value !== null
   } else if (generateForm.value.inputType === 'url') {
-    return generateForm.value.pdfUrl.trim().length > 0
+    hasInput = generateForm.value.pdfUrl.trim().length > 0
   }
-  return false
+  if (!hasInput) {
+    return false
+  }
+  if (!useAllGlossaries.value && generateForm.value.selectedGlossaryIds.length === 0) {
+    return false
+  }
+  return true
 })
 
 // LineChart 컴포넌트용 데이터 변환
@@ -4772,6 +5005,15 @@ function resetProgress() {
   generationLogs.value = []
   currentStep.value = ''
   logsExpanded.value = false
+  showSynonymSuggestionModal.value = false
+  showSynonymSuggestionToast.value = false
+  showSynonymAppliedToast.value = false
+  synonymAppliedCount.value = 0
+  synonymSuggestions.value = []
+  generationCompleted.value = false
+  generationSaveStatus.value = 'saving'
+  generationSaveError.value = ''
+  generationResult.value = { nodeCount: 0, relationshipCount: 0, layerBreakdown: {}, synonymSuggestionCount: 0 }
 }
 
 function cancelGeneration() {
@@ -4787,6 +5029,7 @@ function cancelGeneration() {
 function onCloseGenerateDialog() {
   if (!generating.value) {
     generateError.value = ''
+    generationCompleted.value = false
     showGenerateDialog.value = false
   }
 }
@@ -7335,7 +7578,7 @@ async function generateOntology() {
     // Prepare request body
     let requestBody: Record<string, any> = {
       inputType: generateForm.value.inputType === 'url' ? 'pdf' : generateForm.value.inputType,
-      domainHint: generateForm.value.domainHint || undefined
+      glossary_ids: useAllGlossaries.value ? undefined : generateForm.value.selectedGlossaryIds
     }
     
     if (generateForm.value.inputType === 'text') {
@@ -7558,28 +7801,60 @@ function handleStreamEvent(event: any) {
         // 자동으로 이름 생성 (이름이 없거나 기본값인 경우)
         if (!event.data.schema.name || event.data.schema.name.startsWith('온톨로지_') || event.data.schema.name === 'Multi-Layer Ontology') {
           addLog('온톨로지 이름 자동 생성 중...', 'info')
-          const autoName = generateOntologyName(nodes.value, relationships.value, generateForm.value.domainHint)
+          const autoName = generateOntologyName(nodes.value)
           schemaName.value = autoName
           addLog(`이름 생성 완료: ${autoName}`, 'success')
         } else {
           schemaName.value = event.data.schema.name
         }
+
+        if (Array.isArray(event.data.synonymSuggestions) && event.data.synonymSuggestions.length > 0) {
+          synonymSuggestions.value = event.data.synonymSuggestions.map((suggestion: any) => ({
+            termId: suggestion.termId ?? suggestion.term_id ?? '',
+            termName: suggestion.termName ?? suggestion.term_name ?? '',
+            glossaryId: suggestion.glossaryId ?? suggestion.glossary_id ?? '',
+            glossaryName: suggestion.glossaryName ?? suggestion.glossary_name ?? '',
+            suggestedSynonym: suggestion.suggestedSynonym ?? suggestion.suggested_synonym ?? '',
+            similarity: Number(suggestion.similarity ?? 0),
+            sourceNodeName: suggestion.sourceNodeName ?? suggestion.source_node_name ?? '',
+            sourceLayer: suggestion.sourceLayer ?? suggestion.source_layer ?? '',
+            accepted: true
+          }))
+          addLog(`동의어 제안 ${synonymSuggestions.value.length}건을 수집했습니다.`, 'info')
+        } else {
+          synonymSuggestions.value = []
+        }
         
         addLog(`온톨로지 생성 완료 - 총 ${nodes.value.length}개 노드`, 'success')
-        
-        // 자동 저장
+
+        const layerBreakdown: Record<string, number> = {}
+        nodes.value.forEach(node => {
+          const layer = node.layer || node.label || 'Unknown'
+          layerBreakdown[layer] = (layerBreakdown[layer] || 0) + 1
+        })
+        generationResult.value = {
+          nodeCount: nodes.value.length,
+          relationshipCount: relationships.value.length,
+          layerBreakdown,
+          synonymSuggestionCount: synonymSuggestions.value.length,
+        }
+
+        generationSaveStatus.value = 'saving'
+        generationSaveError.value = ''
+        generationCompleted.value = true
+
         addLog('Neo4j에 저장 중...', 'info')
-        saveToNeo4j().then(() => {
+        saveToNeo4jSilent().then(() => {
+          generationSaveStatus.value = 'saved'
           addLog('Neo4j에 저장 완료', 'success')
         }).catch(err => {
+          generationSaveStatus.value = 'failed'
+          generationSaveError.value = err.message || '저장 실패'
           addLog(`저장 실패: ${err.message}`, 'error')
         })
-        
+
         nextTick(() => {
           initCytoscape()
-          setTimeout(() => {
-            showGenerateDialog.value = false
-          }, 1500)
         })
       } else {
         const errMsg = event.data?.error || '알 수 없는 오류'
@@ -8052,6 +8327,40 @@ async function loadSchema(schemaId: string) {
   }
 }
 
+async function saveToNeo4jSilent(): Promise<void> {
+  const nodesWithPositions = nodes.value.map(node => {
+    const cyNode = cy?.getElementById(node.id)
+    if (cyNode && cyNode.length > 0) {
+      const pos = cyNode.position()
+      return { ...node, position: { x: pos.x, y: pos.y } }
+    }
+    return node
+  })
+
+  const schema: OntologySchema = {
+    id: currentSchemaId.value || undefined,
+    name: schemaName.value || `온톨로지_${new Date().toISOString().slice(0, 10)}`,
+    domain: 'multi-layer',
+    description: '다층 온톨로지 스키마',
+    nodes: nodesWithPositions,
+    relationships: relationships.value
+  }
+
+  const response = await fetch('/api/gateway/ontology/schema', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(schema)
+  })
+
+  if (response.ok) {
+    const result = await response.json()
+    currentSchemaId.value = result.id
+  } else {
+    const errorText = await response.text()
+    throw new Error(errorText)
+  }
+}
+
 async function saveToNeo4j() {
   if (nodes.value.length === 0) {
     alert('저장할 온톨로지가 없습니다.')
@@ -8064,49 +8373,13 @@ async function saveToNeo4j() {
   }
 
   resetEdgehandlesInteractionState({ removeTransientEdges: true })
-  
+
   loading.value = true
   loadingMessage.value = 'Neo4j에 온톨로지 저장 중...'
-  
+
   try {
-    // Cytoscape에서 현재 노드 위치 가져오기
-    const nodesWithPositions = nodes.value.map(node => {
-      const cyNode = cy?.getElementById(node.id)
-      if (cyNode && cyNode.length > 0) {
-        const pos = cyNode.position()
-        return {
-          ...node,
-          position: { x: pos.x, y: pos.y }
-        }
-      }
-      return node
-    })
-    
-    const schema: OntologySchema = {
-      id: currentSchemaId.value || undefined,
-      name: schemaName.value || `온톨로지_${new Date().toISOString().slice(0, 10)}`,
-      domain: 'multi-layer',
-      description: '다층 온톨로지 스키마',
-      nodes: nodesWithPositions,
-      relationships: relationships.value
-    }
-    
-    const response = await fetch('/api/gateway/ontology/schema', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(schema)
-    })
-    
-    if (response.ok) {
-      const result = await response.json()
-      currentSchemaId.value = result.id
-      alert('온톨로지가 Neo4j에 저장되었습니다.')
-    } else {
-      const errorText = await response.text()
-      throw new Error(errorText)
-    }
+    await saveToNeo4jSilent()
+    alert('온톨로지가 Neo4j에 저장되었습니다.')
   } catch (error) {
     console.error('Neo4j 저장 오류:', error)
     alert('저장에 실패했습니다: ' + (error as Error).message)
@@ -8310,7 +8583,7 @@ function stopResizeWhatIf() {
 }
 
 // 온톨로지 이름 자동 생성 함수
-function generateOntologyName(nodes: OntologyNode[], relationships: OntologyRelationship[], domainHint?: string): string {
+function generateOntologyName(nodes: OntologyNode[]): string {
   if (nodes.length === 0) {
     return `온톨로지_${new Date().toISOString().slice(0, 10)}`
   }
@@ -8332,12 +8605,6 @@ function generateOntologyName(nodes: OntologyNode[], relationships: OntologyRela
   
   // 주요 노드 이름들 추출 (상위 3개)
   const topNodes = nodeNames.slice(0, 3).join('_')
-  
-  // 도메인 힌트가 있으면 사용
-  if (domainHint && domainHint.trim()) {
-    const hint = domainHint.trim().replace(/\s+/g, '_')
-    return `${hint}_온톨로지`
-  }
   
   // 레이어와 노드 수 기반 이름 생성
   if (mainLayer && topNodes) {
@@ -11247,6 +11514,71 @@ watch(detailPanelTab, (newTab, oldTab) => {
   color: var(--color-text-muted);
 }
 
+.glossary-selector {
+  margin-bottom: 0;
+}
+
+.glossary-help {
+  margin: 0 0 10px;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.glossary-toggle {
+  margin-bottom: 10px;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.glossary-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+.glossary-loading,
+.glossary-empty,
+.glossary-validation-hint {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.glossary-validation-hint {
+  margin: 4px 0 0;
+  color: var(--color-error, #dc2626);
+}
+
+.glossary-check-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  cursor: pointer;
+}
+
+.glossary-check-name {
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.glossary-check-count {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
 .checkbox-group {
   display: flex;
   gap: 16px;
@@ -11302,6 +11634,209 @@ watch(detailPanelTab, (newTab, oldTab) => {
 .generate-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.generation-complete-view {
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.complete-icon-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.complete-icon {
+  font-size: 2rem;
+}
+
+.complete-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-text-bright);
+}
+
+.complete-summary {
+  display: flex;
+  gap: 32px;
+}
+
+.summary-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.stat-value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--color-accent);
+}
+
+.stat-label {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.complete-layer-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.layer-tag {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+
+.complete-save-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.save-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.save-check {
+  color: #16a34a;
+}
+
+.save-fail {
+  color: var(--color-error, #dc2626);
+}
+
+.complete-synonym-section {
+  width: 100%;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: rgba(34, 139, 230, 0.08);
+  border: 1px solid rgba(34, 139, 230, 0.25);
+  text-align: center;
+}
+
+.complete-synonym-section.no-suggestions {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border);
+}
+
+.synonym-info-text {
+  margin: 0 0 12px;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--color-text);
+}
+
+.no-suggestions .synonym-info-text {
+  margin-bottom: 0;
+  color: var(--color-text-muted);
+}
+
+.synonym-review-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-accent);
+  color: white;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.synonym-review-btn:hover {
+  background: var(--color-accent-hover);
+}
+
+.complete-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.complete-close-btn {
+  padding: 10px 28px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.complete-close-btn:hover {
+  background: var(--color-bg-hover);
+}
+
+.synonym-toast-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid rgba(34, 139, 230, 0.35);
+  border-radius: var(--radius-md);
+  background: rgba(34, 139, 230, 0.12);
+}
+
+.synonym-applied-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: var(--radius-md);
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.toast-message {
+  flex: 1;
+  font-size: 0.875rem;
+  color: var(--color-text);
+}
+
+.toast-action,
+.toast-dismiss {
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  font-size: 0.8125rem;
+}
+
+.toast-action {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: white;
+}
+
+.toast-dismiss {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
 }
 
 /* 오류 전용 화면 (폼으로 돌아가지 않고 고정 표시) */
