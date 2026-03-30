@@ -103,16 +103,16 @@ const isSearchFocused = ref(false)
 // ============================================================================
 
 
-/** 노드의 kind 값 반환 (label 대신 kind 사용) */
+/** 노드의 라벨 표시 */
 const nodeKind = computed(() => {
   if (!props.node) return ''
-  return props.node.kind || 'Unknown'
+  return props.node.labels?.join(' / ') || 'Unknown'
 })
 
 /** 노드의 색상 계산 (labels 배열 기반, fallback으로 kind) */
 const nodeColor = computed(() => {
   if (!props.node) return '#3b82f6'
-  return getNodeColor(props.node.labels || [props.node.kind || 'Unknown'])
+  return getNodeColor(props.node.labels || ['Unknown'])
 })
 
 /** 속성 목록 (노드용) */
@@ -497,8 +497,8 @@ function getNodeSubInfo(node: GraphNode): string {
               >
                 <span
                   class="result-label"
-                  :style="{ background: getNodeColor(resultNode.labels || [resultNode.kind || 'Unknown']) }"
-                >{{ resultNode.kind || 'Node' }}</span>
+                  :style="{ background: getNodeColor(resultNode.labels || ['Unknown']) }"
+                >{{ resultNode.labels?.join(' / ') || 'Node' }}</span>
                 <div class="result-info">
                   <span class="result-name">{{ getNodeDisplayName(resultNode) }}</span>
                   <span class="result-sub" v-if="getNodeSubInfo(resultNode)">{{ getNodeSubInfo(resultNode) }}</span>

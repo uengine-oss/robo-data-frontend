@@ -81,7 +81,6 @@ export interface Neo4jGraphResponse {
 export interface GraphNode {
   id: string
   labels: string[]
-  kind: string
   properties: Record<string, unknown>
 }
 

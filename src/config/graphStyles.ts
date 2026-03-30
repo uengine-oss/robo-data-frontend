@@ -123,6 +123,48 @@ export const NODE_COLORS: Record<string, string> = {
   ENUM: '#A855F7',         // 열거형 (퍼플)
   Enum: '#A855F7',
   
+  // ========================================
+  // 스테레오타입 라벨 (아키텍처 역할)
+  // ========================================
+  Service: '#6366F1',        // 인디고
+  Controller: '#EC4899',     // 핑크
+  Repository: '#14B8A6',     // 틸
+  Entity: '#F97316',         // 오렌지
+  DTO: '#8B5CF6',            // 바이올렛
+  Config: '#64748B',         // 슬레이트
+  Component: '#0EA5E9',      // 스카이
+  Util: '#78716C',           // 스톤
+  ExceptionHandler: '#EF4444', // 레드
+  Gateway: '#7C3AED',        // 퍼플
+  Facade: '#2563EB',         // 블루
+  Factory: '#D97706',        // 앰버
+  Scheduler: '#059669',      // 에메랄드
+  Client: '#0891B2',         // 시안
+  Validator: '#DC2626',      // 레드
+  Mapper: '#9333EA',         // 퍼플
+  Filter: '#CA8A04',         // 옐로
+  Listener: '#16A34A',       // 그린
+  Aspect: '#7C2D12',         // 브라운
+  DataStructure: '#57534E',  // 스톤
+
+  // CQRS 라벨
+  COMMAND: '#EF4444',        // 레드
+  READMODEL: '#3B82F6',      // 블루
+
+  // Method 스테레오타입
+  Endpoint: '#EC4899',       // 핑크
+  Query: '#3B82F6',          // 블루
+  Command: '#EF4444',        // 레드
+  BusinessLogic: '#6366F1',  // 인디고
+  Init: '#64748B',           // 슬레이트
+  Validation: '#F59E0B',     // 앰버
+  Lifecycle: '#78716C',      // 스톤
+  Scheduled: '#059669',      // 에메랄드
+  Transactional: '#7C3AED',  // 퍼플
+
+  // GWT
+  GWT: '#10B981',            // 에메랄드
+
   // 기타
   DBLink: '#7D4A15',
   JOIN: '#85C1E9',
@@ -206,43 +248,47 @@ import { getNodeStyle } from '@/utils/nodeStyleStorage'
  * 노드 라벨에 따른 색상 반환
  * 사용자 설정 > Table 우선 > 라벨 매칭 > 기본값 순서로 반환
  */
+// Primary 라벨 (일반적) — 우선순위가 낮은 라벨
+const PRIMARY_LABELS = new Set(['MODULE', 'FUNCTION', 'VARIABLE', 'CONSTANT', 'FIELD'])
+
 export function getNodeColor(labels: string[]): string {
-  // 사용자 설정 확인
+  // 1. 사용자 커스텀 설정 확인 (가장 구체적인 라벨부터)
   try {
-    // 각 라벨에 대해 사용자 설정 확인
-    for (const label of labels) {
+    // 서브라벨(구체적) 먼저, 프라이머리라벨(일반적) 나중에
+    const sorted = [...labels].sort((a, b) => {
+      const aIsPrimary = PRIMARY_LABELS.has(a.toUpperCase()) ? 1 : 0
+      const bIsPrimary = PRIMARY_LABELS.has(b.toUpperCase()) ? 1 : 0
+      return aIsPrimary - bIsPrimary
+    })
+    for (const label of sorted) {
       const style = getNodeStyle(label)
-      if (style?.color) {
-        return style.color
-      }
-      
-      const upperLabel = label.toUpperCase()
-      const upperStyle = getNodeStyle(upperLabel)
-      if (upperStyle?.color) {
-        return upperStyle.color
-      }
+      if (style?.color) return style.color
+      const upperStyle = getNodeStyle(label.toUpperCase())
+      if (upperStyle?.color) return upperStyle.color
     }
   } catch (e) {
     // nodeStyleStorage가 없으면 기본 로직 사용
   }
-  
-  // Table 우선 처리
+
+  // 2. Table 우선 처리
   if (labels.includes('Table')) {
     return NODE_COLORS.Table
   }
-  
-  // 라벨 순회하며 색상 찾기
+
+  // 3. 서브라벨(구체적) 우선 매칭
+  // 예: ['MODULE', 'CLASS', 'Service'] → Service > CLASS > MODULE 순
   for (const label of labels) {
-    if (NODE_COLORS[label]) {
-      return NODE_COLORS[label]
-    }
-    
-    const upperLabel = label.toUpperCase()
-    if (NODE_COLORS[upperLabel]) {
-      return NODE_COLORS[upperLabel]
-    }
+    if (PRIMARY_LABELS.has(label.toUpperCase())) continue
+    if (NODE_COLORS[label]) return NODE_COLORS[label]
+    if (NODE_COLORS[label.toUpperCase()]) return NODE_COLORS[label.toUpperCase()]
   }
-  
+
+  // 4. 프라이머리 라벨 매칭
+  for (const label of labels) {
+    if (NODE_COLORS[label]) return NODE_COLORS[label]
+    if (NODE_COLORS[label.toUpperCase()]) return NODE_COLORS[label.toUpperCase()]
+  }
+
   return NODE_COLORS.DEFAULT
 }
 
@@ -258,36 +304,35 @@ export function getRelationshipColor(type: string): string {
  * 사용자 설정 > 라벨 매칭 > 기본값 순서로 반환
  */
 export function getNodeSize(labels: string[]): number {
-  // 사용자 설정 확인
+  // 1. 사용자 커스텀 설정 확인 (서브라벨 우선)
   try {
-    // 각 라벨에 대해 사용자 설정 확인
-    for (const label of labels) {
+    const sorted = [...labels].sort((a, b) => {
+      const aIsPrimary = PRIMARY_LABELS.has(a.toUpperCase()) ? 1 : 0
+      const bIsPrimary = PRIMARY_LABELS.has(b.toUpperCase()) ? 1 : 0
+      return aIsPrimary - bIsPrimary
+    })
+    for (const label of sorted) {
       const style = getNodeStyle(label)
-      if (style?.size) {
-        return style.size
-      }
-      
-      const upperLabel = label.toUpperCase()
-      const upperStyle = getNodeStyle(upperLabel)
-      if (upperStyle?.size) {
-        return upperStyle.size
-      }
+      if (style?.size) return style.size
+      const upperStyle = getNodeStyle(label.toUpperCase())
+      if (upperStyle?.size) return upperStyle.size
     }
   } catch (e) {
     // nodeStyleStorage가 없으면 기본 로직 사용
   }
-  
-  // 라벨 순회하며 크기 찾기
+
+  // 2. 서브라벨 우선 매칭
   for (const label of labels) {
-    if (NODE_SIZES[label]) {
-      return NODE_SIZES[label]
-    }
-    
-    const upperLabel = label.toUpperCase()
-    if (NODE_SIZES[upperLabel]) {
-      return NODE_SIZES[upperLabel]
-    }
+    if (PRIMARY_LABELS.has(label.toUpperCase())) continue
+    if (NODE_SIZES[label]) return NODE_SIZES[label]
+    if (NODE_SIZES[label.toUpperCase()]) return NODE_SIZES[label.toUpperCase()]
   }
-  
+
+  // 3. 프라이머리 라벨 매칭
+  for (const label of labels) {
+    if (NODE_SIZES[label]) return NODE_SIZES[label]
+    if (NODE_SIZES[label.toUpperCase()]) return NODE_SIZES[label.toUpperCase()]
+  }
+
   return NODE_SIZES.DEFAULT
 }

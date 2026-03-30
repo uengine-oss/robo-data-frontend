@@ -78,12 +78,10 @@ function convertNeo4jNode(node: Neo4jNode): GraphNode {
   const labels = node['Labels'] || []
   const properties = node['Properties'] || {}
   // 멀티라벨 아키텍처: 서브라벨을 kind로 사용, fallback으로 properties.type 또는 첫 번째 라벨
-  const kind = extractSubLabel(labels) || (properties.type as string) || 'Unknown'
   return {
-  id: node['Node ID'],
-  labels,
-  kind,
-  properties
+    id: node['Node ID'],
+    labels,
+    properties
   }
 }
 

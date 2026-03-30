@@ -267,9 +267,8 @@ function updateExpandableNodes(): void {
  * GraphNode를 NVL 형식으로 변환
  */
 function toNvlNode(node: GraphNode, isSelected: boolean = false, isExpandable: boolean = false): NvlNode {
-  const kind = node.kind || 'Unknown'
   const name = (node.properties?.name as string)
-    || kind
+    || node.labels?.[node.labels.length - 1]
     || node.id
 
   return {
@@ -281,7 +280,6 @@ function toNvlNode(node: GraphNode, isSelected: boolean = false, isExpandable: b
     properties: {
       ...node.properties,
       labels: node.labels,
-      kind,
       isExpandable: isExpandable
     }
   }
@@ -308,23 +306,25 @@ function toNvlRelationship(link: GraphData['links'][0], isSelected: boolean = fa
 // ============================================================================
 
 /**
- * 노드 타입별 통계 업데이트 (전체 데이터 기반)
+ * 노드 라벨별 통계 업데이트 (전체 데이터 기반)
+ * 멀티라벨 노드는 각 라벨마다 카운트됨
  */
 function updateNodeStats(): void {
   const stats = new Map<string, NodeStat>()
 
-  // 전체 props.graphData에서 kind 기반 통계 계산 (labels 배열로 색상 결정)
   for (const node of props.graphData.nodes) {
-    const kind = node.kind || 'Unknown'
-    if (kind === '_Placeholder') continue
-    const existing = stats.get(kind)
-    if (existing) {
-      existing.count++
-    } else {
-      stats.set(kind, {
-        count: 1,
-        color: getNodeColor(node.labels)
-      })
+    const labels = node.labels || ['Unknown']
+    for (const label of labels) {
+      if (label === '_Placeholder') continue
+      const existing = stats.get(label)
+      if (existing) {
+        existing.count++
+      } else {
+        stats.set(label, {
+          count: 1,
+          color: getNodeColor([label])
+        })
+      }
     }
   }
 
@@ -455,9 +455,9 @@ function matchesLabelFilter(node: GraphNode): boolean {
   if (!props.labelFilters || props.labelFilters.length === 0) {
     return true // 필터가 없으면 모든 노드 표시
   }
-  // kind 기반 필터링 (label 대신 kind 사용)
-  const kind = node.kind || 'Unknown'
-  return props.labelFilters!.includes(kind)
+  // labels 배열 기반 필터링 — 노드의 라벨 중 하나라도 필터에 포함되면 표시
+  const labels = node.labels || ['Unknown']
+  return labels.some(label => props.labelFilters!.includes(label))
 }
 
 /**
@@ -974,7 +974,7 @@ function updateNodeStyles(): void {
   const nodesToUpdate: PartialNode[] = []
   
   for (const [nodeId, node] of nodeMap.entries()) {
-    const labels = (node.properties?.labels as string[]) || [((node.properties?.kind as string) || 'Unknown')]
+    const labels = (node.properties?.labels as string[]) || ['Unknown']
     const newColor = getNodeColor(labels)
     const newSize = getNodeSize(labels)
     
