@@ -316,6 +316,29 @@
           class="cytoscape-container"
           @contextmenu.prevent="onCanvasContextMenu"
         ></div>
+
+        <!-- 소스 노드 선택 후 타겟 대기 안내 -->
+        <div v-if="pendingRelationSourceId" class="relation-pending-banner">
+          <span class="relation-pending-badge">🔗 관계 생성</span>
+          <span class="relation-pending-text">
+            <strong>{{ getNodeName(pendingRelationSourceId!) }}</strong>에서 연결할 노드를 클릭하세요
+          </span>
+          <button type="button" class="relation-pending-cancel" @click="cancelPendingRelation">취소</button>
+        </div>
+
+        <!-- 플로팅 미니 툴바 (연결 모드 토글) -->
+        <div class="graph-floating-toolbar">
+          <button
+            type="button"
+            class="floating-tool-btn"
+            :class="{ active: isRelationDrawModeEnabled }"
+            @click="toggleRelationDrawMode"
+            :disabled="loading || nodes.length < 2"
+            :title="isRelationDrawModeEnabled ? '연결 모드 끄기 (노드 이동 모드로 전환)' : '연결 모드 켜기 (노드 가장자리 드래그로 관계 생성)'"
+          >
+            <span class="floating-tool-icon">🔗</span>
+          </button>
+        </div>
         
         <!-- 캔버스 우클릭 컨텍스트 메뉴 (빈 영역 우클릭 → 새 노드 추가) -->
         <div 
@@ -343,6 +366,13 @@
           :style="{ left: contextMenuPos.x + 'px', top: contextMenuPos.y + 'px' }"
         >
           <div class="context-menu-header">{{ contextMenuNodeName }}</div>
+          <div 
+            class="context-menu-item"
+            @click="startRelationFromContextMenu"
+          >
+            <span class="context-menu-icon" style="color: #22d3ee;">🔗</span>
+            <span class="context-menu-label">관계 생성</span>
+          </div>
           <div 
             class="context-menu-item"
             @click="openFilterFromContextMenu"
@@ -730,8 +760,58 @@
         
         <!-- 분석 탭 -->
         <div class="detail-content analysis-tab" v-if="detailPanelTab === 'analysis'">
+          <div v-if="analysisState?.result && !analysisState?.loading" class="analysis-result-header">
+            <div class="result-summary">
+              <span class="result-metric">{{ analysisState.result.target_metric }}</span>
+              <span class="result-range">
+                {{ analysisState.result.time_range?.start }} ~ {{ analysisState.result.time_range?.end }}
+              </span>
+              <span class="result-type">
+                {{ analysisState.result.analysis_type === 'increase' ? '📈 상승' : '📉 하락' }}
+              </span>
+            </div>
+            <div class="result-reanalyze">
+              <div v-if="causalBrushSelection" class="config-metric-control">
+                <span
+                  class="config-color-dot"
+                  :style="{ background: getMetricOptionColor(causalBrushSelection.targetMetric) }"
+                ></span>
+                <select
+                  v-model="causalBrushSelection.targetMetric"
+                  @change="recalcAnalysisType"
+                  class="result-metric-select"
+                >
+                  <option
+                    v-for="col in analysisMetricOptions"
+                    :key="col"
+                    :value="col"
+                    :style="{ color: getMetricOptionColor(col) }"
+                  >
+                    ● {{ col }}
+                  </option>
+                </select>
+              </div>
+              <button type="button" class="reanalyze-btn" @click="startAnalysisFromConfig">
+                재분석
+              </button>
+              <button type="button" class="reconfigure-btn" @click="goBackToDataTab">
+                구간 변경
+              </button>
+            </div>
+          </div>
+
+          <div v-if="!analysisState?.loading && !analysisState?.result && !analysisState?.error" class="analysis-empty">
+            <p>
+              데이터 탭의 추이 차트에서 분석할 구간을 드래그한 후,<br />
+              설정 바에서 "분석 시작"을 클릭하세요.
+            </p>
+            <button type="button" class="goto-data-btn" @click="goBackToDataTab">
+              📊 데이터 탭으로 이동
+            </button>
+          </div>
+
           <CausalAnalysisPanel
-            v-if="selectedNode"
+            v-if="selectedNode && (analysisState?.loading || analysisState?.result || analysisState?.error)"
             :node="selectedNode"
             :schema-id="currentSchemaId"
             :node-data-result="nodeDataResult"
@@ -844,14 +924,86 @@
               <div class="chart-header">
                 <h5>📈 {{ nodeDataResult.chartRecommendation?.type === 'line' ? '추이 차트' : '막대 차트' }}</h5>
               </div>
-              <!-- 차트 컨테이너 (라인 차트 및 막대 차트 모두 echarts로 직접 렌더링) -->
-              <div 
-                ref="chartContainerRef" 
-                class="chart-container"
-              >
-                <div v-if="nodeDataResult.chartRecommendation?.type === 'line' && !chartInstance" class="chart-loading">
+              <!-- ECharts가 chart-container 내부 DOM을 직접 관리하므로 자식 노드를 두지 않는다 -->
+              <div class="chart-shell">
+                <div
+                  v-if="nodeDataResult.chartRecommendation?.type === 'line' && !isChartReady"
+                  class="chart-loading chart-loading-overlay"
+                >
                   차트 데이터 준비 중...
                 </div>
+                <div
+                  ref="chartContainerRef"
+                  class="chart-container"
+                ></div>
+              </div>
+
+              <div
+                v-if="causalBrushSelection && isKPIOrMeasure(selectedNode)"
+                ref="analysisConfigBarRef"
+                class="analysis-config-bar"
+              >
+                <div class="config-hint">분석 대상 메트릭을 확인하세요</div>
+                <div class="config-row">
+                  <span class="config-label">구간</span>
+                  <span class="config-value">{{ causalBrushSelection.start }} ~ {{ causalBrushSelection.end }}</span>
+                </div>
+                <div class="config-row">
+                  <span class="config-label">메트릭</span>
+                  <div class="config-metric-control">
+                    <span
+                      class="config-color-dot"
+                      :style="{ background: getMetricOptionColor(causalBrushSelection.targetMetric) }"
+                    ></span>
+                    <select
+                      v-model="causalBrushSelection.targetMetric"
+                      @change="recalcAnalysisType"
+                      class="config-metric-select config-metric-highlight"
+                    >
+                      <option
+                        v-for="col in analysisMetricOptions"
+                        :key="col"
+                        :value="col"
+                        :style="{ color: getMetricOptionColor(col) }"
+                      >
+                        ● {{ col }}
+                      </option>
+                    </select>
+                  </div>
+                </div>
+                <div class="config-row">
+                  <span class="config-label">추세</span>
+                  <div class="trend-toggle">
+                    <button
+                      type="button"
+                      :class="['trend-btn', { active: causalBrushSelection.analysisType === 'increase' }]"
+                      @click="causalBrushSelection.analysisType = 'increase'"
+                    >
+                      📈 상승
+                    </button>
+                    <button
+                      type="button"
+                      :class="['trend-btn', { active: causalBrushSelection.analysisType === 'decrease' }]"
+                      @click="causalBrushSelection.analysisType = 'decrease'"
+                    >
+                      📉 하락
+                    </button>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  class="config-analyze-btn"
+                  @click="startAnalysisFromConfig"
+                  :disabled="analysisState?.loading"
+                >
+                  <template v-if="analysisState?.loading">
+                    <span class="btn-spinner"></span>
+                    분석 중...
+                  </template>
+                  <template v-else>
+                    🔍 분석 시작
+                  </template>
+                </button>
               </div>
             </div>
             
@@ -888,31 +1040,6 @@
           </div>
         </div>
         </template>
-      </div>
-    </div>
-
-    <!-- 차트 구간 선택 후 원인 분석 팝업 -->
-    <div v-if="showCausalBrushPopup && causalBrushSelection" class="dialog-overlay causal-brush-overlay" @click.self="closeCausalBrushPopup">
-      <div class="causal-brush-popup">
-        <div class="causal-brush-header">
-          <h4>원인 분석</h4>
-          <button type="button" class="close-btn small" @click="closeCausalBrushPopup" aria-label="닫기">✕</button>
-        </div>
-        <p class="causal-brush-text">선택한 구간에 대해 원인 분석을 실행하시겠습니까?</p>
-        <p class="causal-brush-range">
-          {{ causalBrushSelection.start }} ~ {{ causalBrushSelection.end }}
-        </p>
-        <div class="causal-brush-actions">
-          <button type="button" class="action-btn primary" @click="runCausalAnalysisFromBrush('increase')">
-            상승 원인 분석
-          </button>
-          <button type="button" class="action-btn primary" @click="runCausalAnalysisFromBrush('decrease')">
-            하락 원인 분석
-          </button>
-          <button type="button" class="action-btn secondary" @click="closeCausalBrushPopup">
-            취소
-          </button>
-        </div>
       </div>
     </div>
 
@@ -1999,6 +2126,8 @@ let edgehandlesHoverSuspendUntil = 0
 // 드래그 앤 드롭 연결 상태
 const isDraggingHandle = ref(false)
 const hoveredNodeId = ref<string | null>(null)
+const isRelationDrawModeEnabled = ref(false)
+const pendingRelationSourceId = ref<string | null>(null)
 const showNewRelationDialog = ref(false)
 const newRelation = ref({
   relationId: '',
@@ -2090,6 +2219,21 @@ function detachEdgehandleCyEvents() {
 
 function suspendEdgehandlesHover(ms: number) {
   edgehandlesHoverSuspendUntil = Date.now() + ms
+}
+
+function setRelationDrawMode(enabled: boolean) {
+  isRelationDrawModeEnabled.value = enabled
+  showContextMenu.value = false
+  resetEdgehandlesInteractionState({ removeTransientEdges: true })
+
+  if (enabled) {
+    suspendEdgehandlesHover(150)
+  }
+}
+
+function toggleRelationDrawMode() {
+  if (loading.value || nodes.value.length < 2) return
+  setRelationDrawMode(!isRelationDrawModeEnabled.value)
 }
 
 function handleEdgehandlesComplete(_evt: any, sourceNode: any, targetNode: any, addedEles: any) {
@@ -2235,6 +2379,12 @@ const contextMenuNodeId = ref<string | null>(null)
 const contextMenuNodeName = ref('')
 const contextMenuEdgeId = ref<string | null>(null)
 const contextMenuEdgeLabel = ref('')
+
+watch(() => nodes.value.length, (count) => {
+  if (count < 2 && isRelationDrawModeEnabled.value) {
+    setRelationDrawMode(false)
+  }
+})
 
 // 필터 다이얼로그
 const showFilterDialog = ref(false)
@@ -2530,6 +2680,7 @@ const nodeDataResult = ref<{
 } | null>(null)
 const chartContainerRef = ref<HTMLElement | null>(null)
 let chartInstance: echarts.ECharts | null = null
+const isChartReady = ref(false)
 
 // 원인 분석 상태 (진행·보고서 스트리밍용)
 const analysisState = ref<{
@@ -2557,13 +2708,28 @@ watchEffect((onCleanup) => {
   onCleanup(() => clearInterval(id))
 })
 
-const showCausalBrushPopup = ref(false)
+const analysisConfigBarRef = ref<HTMLElement | null>(null)
+const chartSeriesPalette = [
+  '#06b6d4',
+  '#8b5cf6',
+  '#ec4899',
+  '#f59e0b',
+  '#10b981',
+  '#3b82f6',
+  '#ef4444',
+  '#14b8a6'
+]
 const causalBrushSelection = ref<{
   start: string
   end: string
   targetMetric: string
   analysisType: 'increase' | 'decrease'
 } | null>(null)
+const analysisMetricOptions = computed(() => {
+  const preferred = nodeDataResult.value?.chartRecommendation?.yAxis ?? []
+  const numeric = nodeDataResult.value?.numericColumns ?? []
+  return Array.from(new Set([...preferred, ...numeric].filter(Boolean)))
+})
 
 const highlightedCausalNodeIds = ref<Set<string>>(new Set())
 const highlightedCausalEdgePairs = ref<Set<string>>(new Set())
@@ -2573,6 +2739,143 @@ function handleAnalysisComplete(result: any) {
     loading: false,
     result,
     error: null
+  }
+}
+
+function getMetricOptionColor(metric: string): string {
+  const idx = analysisMetricOptions.value.indexOf(metric)
+  if (idx < 0) return chartSeriesPalette[0]
+  return chartSeriesPalette[idx % chartSeriesPalette.length]
+}
+
+function resolvePreferredCausalMetric(candidateMetrics: string[]): string | null {
+  const availableMetrics = Array.from(new Set([
+    ...analysisMetricOptions.value,
+    ...candidateMetrics
+  ].filter(Boolean)))
+  if (availableMetrics.length === 0) return null
+
+  const currentMetric = causalBrushSelection.value?.targetMetric
+  if (currentMetric && availableMetrics.includes(currentMetric)) {
+    return currentMetric
+  }
+
+  return availableMetrics[0] ?? null
+}
+
+function getAnalysisXAxis(): string | null {
+  return nodeDataResult.value?.chartRecommendation?.xAxis
+    || nodeDataResult.value?.timeColumns?.[0]
+    || nodeDataResult.value?.columns?.[0]
+    || null
+}
+
+function coerceMetricNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function resolveBrushRowRange(rows: any[], xAxis: string, start: string, end: string) {
+  const startIdx = rows.findIndex((row) => String(row?.[xAxis] ?? '') >= start)
+  if (startIdx < 0) return null
+
+  let endIdx = -1
+  for (let i = rows.length - 1; i >= startIdx; i--) {
+    if (String(rows[i]?.[xAxis] ?? '') <= end) {
+      endIdx = i
+      break
+    }
+  }
+
+  if (endIdx <= startIdx) return null
+  return { startIdx, endIdx }
+}
+
+function inferAnalysisTypeFromRange(rows: any[], metric: string, startIdx: number, endIdx: number): 'increase' | 'decrease' {
+  const startValue = coerceMetricNumber(rows[startIdx]?.[metric])
+  const endValue = coerceMetricNumber(rows[endIdx]?.[metric])
+  if (startValue != null && endValue != null) {
+    return endValue > startValue ? 'increase' : 'decrease'
+  }
+
+  let sumStart = 0
+  let sumEnd = 0
+  let countStart = 0
+  let countEnd = 0
+  const midIdx = Math.floor((startIdx + endIdx) / 2)
+
+  for (let i = startIdx; i <= midIdx; i++) {
+    const val = coerceMetricNumber(rows[i]?.[metric])
+    if (val != null) {
+      sumStart += val
+      countStart++
+    }
+  }
+
+  for (let i = midIdx + 1; i <= endIdx; i++) {
+    const val = coerceMetricNumber(rows[i]?.[metric])
+    if (val != null) {
+      sumEnd += val
+      countEnd++
+    }
+  }
+
+  if (countStart > 0 && countEnd > 0) {
+    return (sumEnd / countEnd) > (sumStart / countStart) ? 'increase' : 'decrease'
+  }
+
+  return 'increase'
+}
+
+function restoreCausalBrushSelection(chart: echarts.ECharts, rows: any[], xAxis: string) {
+  const sel = causalBrushSelection.value
+  if (!sel) return
+
+  const range = resolveBrushRowRange(rows, xAxis, sel.start, sel.end)
+  if (!range) return
+
+  nextTick(() => {
+    chart.dispatchAction({
+      type: 'brush',
+      areas: [{
+        brushType: 'lineX',
+        coordRange: [range.startIdx, range.endIdx],
+        xAxisIndex: 0
+      }]
+    })
+  })
+}
+
+function startAnalysisFromConfig() {
+  if (analysisState.value?.loading || !causalBrushSelection.value) return
+
+  detailPanelTab.value = 'analysis'
+  nextTick(() => {
+    runCausalAnalysisFromBrush()
+  })
+}
+
+function recalcAnalysisType() {
+  const sel = causalBrushSelection.value
+  const rows = nodeDataResult.value?.rows
+  const xAxis = getAnalysisXAxis()
+  if (!sel || !rows?.length || !xAxis) return
+
+  const range = resolveBrushRowRange(rows, xAxis, sel.start, sel.end)
+  if (!range) return
+
+  sel.analysisType = inferAnalysisTypeFromRange(rows, sel.targetMetric, range.startIdx, range.endIdx)
+}
+
+function goBackToDataTab() {
+  analysisState.value = null
+  detailPanelTab.value = 'data'
+  if (selectedNode.value?.id && !nodeDataResult.value) {
+    fetchNodeData(selectedNode.value.id)
   }
 }
 
@@ -2640,7 +2943,6 @@ async function runCausalAnalysisFromBrush(analysisType?: 'increase' | 'decrease'
   // analysisType이 제공되지 않으면 저장된 값 사용
   const finalAnalysisType = analysisType || sel.analysisType
   
-  showCausalBrushPopup.value = false
   streamingRevealedLength.value = 0
   analysisState.value = { loading: true, result: null, error: null, progress: undefined, streamingReport: '' }
   // detailPanelTab.value = 'analysis' 제거 (이미 분석 탭으로 전환된 상태)
@@ -2796,48 +3098,12 @@ async function runCausalAnalysisFromBrush(analysisType?: 'increase' | 'decrease'
       error: e?.message || String(e)
     }
     clearCausalHighlight()
-  } finally {
-    causalBrushSelection.value = null
   }
-}
-
-function closeCausalBrushPopup() {
-  showCausalBrushPopup.value = false
-  causalBrushSelection.value = null
 }
 
 // 분석 탭 클릭 핸들러
 function handleAnalysisTabClick() {
-  console.log('=== 분석 탭 클릭 핸들러 호출됨 ===')
   detailPanelTab.value = 'analysis'
-  
-  // 구간 선택이 있으면 자동으로 분석 시작
-  console.log('분석 탭 클릭 - 상태 확인:', {
-    hasSelection: !!causalBrushSelection.value,
-    selection: causalBrushSelection.value,
-    nodeId: selectedNode.value?.id,
-    schemaId: currentSchemaId.value,
-    selectedNode: selectedNode.value
-  })
-  
-  if (!causalBrushSelection.value) {
-    console.log('❌ causalBrushSelection이 없습니다')
-    return
-  }
-  
-  if (!selectedNode.value?.id) {
-    console.log('❌ selectedNode.id가 없습니다')
-    return
-  }
-  
-  if (!currentSchemaId.value) {
-    console.log('❌ currentSchemaId가 없습니다')
-    return
-  }
-  
-  console.log('✅ 모든 조건 만족, 분석 시작')
-  // nextTick 없이 바로 호출
-  runCausalAnalysisFromBrush()
 }
 
 // 상세 패널 리사이즈
@@ -3069,6 +3335,8 @@ function selectNode(nodeId: string) {
   if (analysisState.value) {
     analysisState.value = null
   }
+  causalBrushSelection.value = null
+  clearCausalHighlight()
   
   if (cy) {
     cy.nodes().removeClass('selected')
@@ -3097,6 +3365,9 @@ function deselectNode() {
   selectedNodeId.value = null
   detailPanelTab.value = 'info'
   nodeDataResult.value = null
+  causalBrushSelection.value = null
+  analysisState.value = null
+  clearCausalHighlight()
   
   if (cy) {
     cy.nodes().removeClass('selected')
@@ -3108,8 +3379,12 @@ async function fetchNodeData(nodeId: string) {
   if (nodeDataLoading.value) return
   
   nodeDataLoading.value = true
+  isChartReady.value = false
   nodeDataResult.value = null
   lastDataError.value = null
+  analysisState.value = null
+  causalBrushSelection.value = null
+  clearCausalHighlight()
   
   // 노드 정보 확인
   const node = nodes.value.find(n => n.id === nodeId)
@@ -3376,6 +3651,7 @@ function renderChart() {
     hasData: !!nodeDataResult.value,
     chartType: nodeDataResult.value?.chartRecommendation?.type
   })
+  isChartReady.value = false
   
   if (!chartContainerRef.value) {
     console.warn('renderChart: chartContainerRef가 없음')
@@ -3442,21 +3718,9 @@ function renderChart() {
     return String(val)
   })
   
-  // 여러 컬럼을 색상별로 구분하는 색상 팔레트
-  const colorPalette = [
-    '#06b6d4', // cyan
-    '#8b5cf6', // purple
-    '#ec4899', // pink
-    '#f59e0b', // amber
-    '#10b981', // emerald
-    '#3b82f6', // blue
-    '#ef4444', // red
-    '#14b8a6', // teal
-  ]
-  
   // 시리즈 데이터 생성 (라인 차트 또는 막대 차트)
   const series = yAxes.map((yCol, idx) => {
-    const color = colorPalette[idx % colorPalette.length]
+    const color = chartSeriesPalette[idx % chartSeriesPalette.length]
     const data = rows.map(r => {
       const val = r[yCol]
       if (val == null) return null
@@ -3606,7 +3870,11 @@ function renderChart() {
 
   try {
     chartInstance.setOption(option, true) // notMerge: true로 설정하여 완전히 새로 그리기
+    isChartReady.value = true
     console.log('차트 옵션 설정 완료', { seriesCount: series.length, xDataLength: xData.length })
+    if (chartRecommendation.type === 'line') {
+      restoreCausalBrushSelection(chartInstance, rows, xAxis)
+    }
   } catch (error) {
     console.error('차트 옵션 설정 실패:', error)
     return
@@ -3781,41 +4049,23 @@ function renderChart() {
       
       console.log('변환된 값:', { startVal, endVal })
       
-      // 선택한 구간의 데이터를 보고 상승/하락 자동 판단
-      const targetMetric = yAxes[0]
-      const startValue = rows[startIdx]?.[targetMetric]
-      const endValue = rows[endIdx]?.[targetMetric]
-      let analysisType: 'increase' | 'decrease' = 'increase'
-      if (typeof startValue === 'number' && typeof endValue === 'number') {
-        analysisType = endValue > startValue ? 'increase' : 'decrease'
-      } else {
-        // 숫자가 아닌 경우 전체 구간의 평균을 비교
-        let sumStart = 0
-        let sumEnd = 0
-        let countStart = 0
-        let countEnd = 0
-        const midIdx = Math.floor((startIdx + endIdx) / 2)
-        for (let i = startIdx; i <= midIdx; i++) {
-          const val = rows[i]?.[targetMetric]
-          if (typeof val === 'number') {
-            sumStart += val
-            countStart++
-          }
-        }
-        for (let i = midIdx + 1; i <= endIdx; i++) {
-          const val = rows[i]?.[targetMetric]
-          if (typeof val === 'number') {
-            sumEnd += val
-            countEnd++
-          }
-        }
-        if (countStart > 0 && countEnd > 0) {
-          const avgStart = sumStart / countStart
-          const avgEnd = sumEnd / countEnd
-          analysisType = avgEnd > avgStart ? 'increase' : 'decrease'
-        }
+      // 브러시 크기를 다시 조절해도 사용자가 고른 메트릭은 유지한다
+      const targetMetric = resolvePreferredCausalMetric(yAxes)
+      if (!targetMetric) {
+        console.log('❌ 사용할 메트릭을 찾을 수 없음:', { yAxes, analysisMetricOptions: analysisMetricOptions.value })
+        return
       }
+      const analysisType = inferAnalysisTypeFromRange(rows, targetMetric, startIdx, endIdx)
       
+      if (analysisState.value?.loading) {
+        console.log('⏳ 분석 로딩 중이라 브러시 변경 무시')
+        return
+      }
+
+      if (analysisState.value) {
+        analysisState.value = null
+      }
+
       causalBrushSelection.value = {
         start: startVal,
         end: endVal,
@@ -3824,7 +4074,9 @@ function renderChart() {
       }
       console.log('✅ 구간 선택 완료:', causalBrushSelection.value)
       console.log('저장된 causalBrushSelection:', causalBrushSelection.value)
-      // 팝업을 띄우지 않고 구간 선택만 저장 (분석 탭 클릭 시 자동 시작)
+      nextTick(() => {
+        analysisConfigBarRef.value?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      })
     })
   }
 
@@ -3932,6 +4184,45 @@ function addNewNodeAtPosition(layerId: string, position: { x: number; y: number 
     // Edgehandles 재초기화 (새 노드도 연결 가능하도록)
     initEdgehandles()
   }
+}
+
+// ========== 우클릭 → 관계 생성 (2클릭 방식) ==========
+
+function startRelationFromContextMenu() {
+  showContextMenu.value = false
+  if (!contextMenuNodeId.value) return
+
+  pendingRelationSourceId.value = contextMenuNodeId.value
+
+  const cyNode = cy?.$(`#${contextMenuNodeId.value}`)
+  cyNode?.addClass('eh-source')
+}
+
+function cancelPendingRelation() {
+  if (pendingRelationSourceId.value && cy) {
+    cy.$(`#${pendingRelationSourceId.value}`).removeClass('eh-source')
+  }
+  pendingRelationSourceId.value = null
+}
+
+function completePendingRelation(targetNodeId: string) {
+  const sourceId = pendingRelationSourceId.value
+  if (!sourceId || sourceId === targetNodeId) {
+    cancelPendingRelation()
+    return
+  }
+
+  cancelPendingRelation()
+
+  const relationId = `rel_${sourceId}_${targetNodeId}_CAUSES`
+  newRelation.value = {
+    relationId,
+    sourceId,
+    targetId: targetNodeId,
+    type: 'CAUSES',
+    description: ''
+  }
+  showNewRelationDialog.value = true
 }
 
 // ========== 노드 컨텍스트 메뉴 액션 ==========
@@ -5777,11 +6068,23 @@ function initCytoscape(shouldRestoreSelection: boolean = false) {
   // 이벤트 핸들러
   cy.on('tap', 'node', (evt) => {
     const nodeId = evt.target.id()
+    resetEdgehandlesInteractionState()
+    suspendEdgehandlesHover(150)
+
+    if (pendingRelationSourceId.value) {
+      completePendingRelation(nodeId)
+      return
+    }
+
     selectNode(nodeId)
   })
   
   cy.on('tap', (evt) => {
     if (evt.target === cy) {
+      if (pendingRelationSourceId.value) {
+        cancelPendingRelation()
+        return
+      }
       if (showRelationEditor.value || editingRelation.value) {
         closeRelationEditor()
       }
@@ -5909,7 +6212,7 @@ function initCytoscape(shouldRestoreSelection: boolean = false) {
     openRelationEditor(edgeId)
   })
   
-  // Edgehandles 초기화 - 노드 테두리에서 드래그하여 관계 생성
+  // Edgehandles 초기화 - 관계 생성 모드에서 노드 테두리 드래그로 관계 생성
   initEdgehandles()
   
     // 저장된 위치가 있으면 레이아웃 적용하지 않음, 없으면 계층형 레이아웃 적용
@@ -6048,7 +6351,7 @@ function initEdgehandles() {
     return distance >= borderThreshold
   }
   
-  // 노드 위에서 마우스 이동 - 기본 UX는 유지하되, 로딩 직후에는 잠시 연결 모드 진입을 막는다.
+  // 노드 위에서 마우스 이동 - 관계 생성 모드일 때만 가장자리 드래그로 연결 생성
   edgehandlesMousemoveHandler = (evt: any) => {
     if (isDraggingHandle.value) return
     
@@ -6056,7 +6359,7 @@ function initEdgehandles() {
     const nodeId = node.id()
     const mousePos = evt.position
     const hoverSuspended = Date.now() < edgehandlesHoverSuspendUntil
-    const wantsConnectionMode = !hoverSuspended && !showNewRelationDialog.value && !loading.value && !isLoadingSchema.value
+    const wantsConnectionMode = isRelationDrawModeEnabled.value && !hoverSuspended && !showNewRelationDialog.value && !loading.value && !isLoadingSchema.value
 
     if (!wantsConnectionMode) {
       if (hoveredNodeId.value) {
@@ -8849,6 +9152,7 @@ onUnmounted(() => {
     chartInstance.dispose()
     chartInstance = null
   }
+  isChartReady.value = false
   // Stop agent polling
   if (agentPollInterval) {
     clearInterval(agentPollInterval)
@@ -8891,27 +9195,6 @@ watch([nodes, relationships], () => {
   nextTick(() => initCytoscape())
 })
 
-// 분석 탭 클릭 시 구간 선택이 있으면 자동으로 분석 시작 (watch는 백업용, 핸들러에서 먼저 처리)
-watch(detailPanelTab, (newTab, oldTab) => {
-  console.log('=== detailPanelTab watch 트리거됨 ===', { newTab, oldTab })
-  // 핸들러에서 이미 처리했을 수 있으므로, 다른 경로로 탭이 변경된 경우만 처리
-  if (newTab === 'analysis' && oldTab !== 'analysis') {
-    console.log('watch - 분석 탭으로 변경됨:', {
-      hasSelection: !!causalBrushSelection.value,
-      selection: causalBrushSelection.value,
-      nodeId: selectedNode.value?.id,
-      schemaId: currentSchemaId.value
-    })
-    if (causalBrushSelection.value && selectedNode.value?.id && currentSchemaId.value) {
-      console.log('watch에서 분석 시작 (백업)')
-      nextTick(() => {
-        runCausalAnalysisFromBrush()
-      })
-    } else {
-      console.log('watch - 조건 불만족으로 분석 시작 안 함')
-    }
-  }
-})
 </script>
 
 <style scoped>
@@ -9483,6 +9766,110 @@ watch(detailPanelTab, (newTab, oldTab) => {
   flex-direction: column;
   position: relative;
   background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
+}
+
+/* 플로팅 미니 툴바 (좌하단) */
+.graph-floating-toolbar {
+  position: absolute;
+  bottom: 56px;
+  left: 16px;
+  z-index: 20;
+  display: flex;
+  gap: 6px;
+}
+
+.floating-tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(30, 30, 45, 0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.floating-tool-btn:hover:not(:disabled) {
+  background: rgba(34, 211, 238, 0.12);
+  border-color: rgba(34, 211, 238, 0.4);
+  transform: scale(1.08);
+}
+
+.floating-tool-btn.active {
+  background: #06b6d4;
+  border-color: #06b6d4;
+  box-shadow: 0 4px 20px rgba(6, 182, 212, 0.45);
+}
+
+.floating-tool-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.floating-tool-icon {
+  font-size: 1.1rem;
+}
+
+/* 소스 선택 후 타겟 대기 배너 (상단 중앙) */
+.relation-pending-banner {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.92);
+  box-shadow: 0 8px 24px rgba(8, 47, 73, 0.35);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  white-space: nowrap;
+  animation: slideDownBanner 0.2s ease;
+}
+
+@keyframes slideDownBanner {
+  from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.relation-pending-badge {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #67e8f9;
+}
+
+.relation-pending-text {
+  font-size: 0.82rem;
+  color: rgba(226, 232, 240, 0.92);
+}
+
+.relation-pending-text strong {
+  color: #67e8f9;
+}
+
+.relation-pending-cancel {
+  padding: 4px 10px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.1);
+  color: #fca5a5;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.relation-pending-cancel:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.5);
 }
 
 .graph-toolbar {
@@ -10715,6 +11102,10 @@ watch(detailPanelTab, (newTab, oldTab) => {
   color: rgba(255, 255, 255, 0.9);
 }
 
+.chart-shell {
+  position: relative;
+}
+
 .chart-container {
   width: 100%;
   height: 200px;
@@ -10728,6 +11119,215 @@ watch(detailPanelTab, (newTab, oldTab) => {
   height: 100%;
   color: rgba(255, 255, 255, 0.6);
   font-size: 0.875rem;
+}
+
+.chart-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.analysis-config-bar {
+  margin: 0;
+  padding: 10px 12px;
+  background: rgba(6, 182, 212, 0.06);
+  border-top: 1px solid rgba(6, 182, 212, 0.2);
+  border-bottom: 1px solid rgba(6, 182, 212, 0.2);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.config-hint {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #67e8f9;
+}
+
+.config-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.config-label {
+  font-size: 0.6875rem;
+  color: rgba(255, 255, 255, 0.65);
+  font-weight: 500;
+}
+
+.config-value {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.92);
+  font-weight: 600;
+}
+
+.config-metric-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.config-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.config-metric-select,
+.result-metric-select {
+  min-width: 180px;
+  max-width: 240px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.75rem;
+}
+
+.config-metric-highlight {
+  animation: analysisMetricPulse 1.8s ease-in-out infinite;
+}
+
+.trend-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.trend-btn {
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(6, 182, 212, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.trend-btn.active {
+  background: rgba(6, 182, 212, 0.14);
+  border-color: rgba(6, 182, 212, 0.35);
+  color: #67e8f9;
+}
+
+.config-analyze-btn,
+.reanalyze-btn,
+.reconfigure-btn,
+.goto-data-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.config-analyze-btn,
+.reanalyze-btn {
+  border: none;
+  background: #06b6d4;
+  color: #fff;
+}
+
+.config-analyze-btn:hover:not(:disabled),
+.reanalyze-btn:hover:not(:disabled) {
+  background: #0891b2;
+}
+
+.config-analyze-btn:disabled,
+.reanalyze-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.reconfigure-btn,
+.goto-data-btn {
+  border: 1px solid rgba(6, 182, 212, 0.25);
+  background: transparent;
+  color: #67e8f9;
+}
+
+.reconfigure-btn:hover,
+.goto-data-btn:hover {
+  background: rgba(6, 182, 212, 0.08);
+}
+
+.btn-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.analysis-result-header {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: rgba(6, 182, 212, 0.06);
+  border: 1px solid rgba(6, 182, 212, 0.16);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.result-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.75rem;
+}
+
+.result-metric {
+  font-weight: 700;
+  color: #67e8f9;
+}
+
+.result-range {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.result-type {
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 600;
+}
+
+.result-reanalyze {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.analysis-empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+@keyframes analysisMetricPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.18); }
+  50% { box-shadow: 0 0 0 4px rgba(6, 182, 212, 0.1); }
 }
 
 /* 데이터 테이블 섹션 */
@@ -13926,6 +14526,47 @@ watch(detailPanelTab, (newTab, oldTab) => {
   background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 50%, #f8fafc 100%) !important;
 }
 
+.light-mode .graph-floating-toolbar .floating-tool-btn {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+}
+
+.light-mode .graph-floating-toolbar .floating-tool-btn:hover:not(:disabled) {
+  background: rgba(8, 145, 178, 0.08) !important;
+  border-color: rgba(8, 145, 178, 0.3) !important;
+}
+
+.light-mode .graph-floating-toolbar .floating-tool-btn.active {
+  background: #0891b2 !important;
+  border-color: #0891b2 !important;
+  box-shadow: 0 4px 16px rgba(8, 145, 178, 0.3) !important;
+}
+
+.light-mode .relation-pending-banner {
+  background: rgba(255, 255, 255, 0.95) !important;
+  border-color: rgba(8, 145, 178, 0.2) !important;
+  box-shadow: 0 8px 20px rgba(148, 163, 184, 0.18) !important;
+}
+
+.light-mode .relation-pending-badge {
+  color: #0f766e !important;
+}
+
+.light-mode .relation-pending-text {
+  color: #334155 !important;
+}
+
+.light-mode .relation-pending-text strong {
+  color: #0f766e !important;
+}
+
+.light-mode .relation-pending-cancel {
+  background: rgba(239, 68, 68, 0.06) !important;
+  border-color: rgba(239, 68, 68, 0.2) !important;
+  color: #dc2626 !important;
+}
+
 .light-mode .graph-toolbar {
   background: rgba(255, 255, 255, 0.8) !important;
   border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
@@ -14370,6 +15011,57 @@ watch(detailPanelTab, (newTab, oldTab) => {
 
 .light-mode .chart-loading {
   color: rgba(0, 0, 0, 0.6) !important;
+}
+
+.light-mode .analysis-config-bar {
+  background: rgba(6, 182, 212, 0.04) !important;
+  border-top-color: rgba(6, 182, 212, 0.14) !important;
+  border-bottom-color: rgba(6, 182, 212, 0.14) !important;
+}
+
+.light-mode .config-hint {
+  color: #0891b2 !important;
+}
+
+.light-mode .config-label {
+  color: #64748b !important;
+}
+
+.light-mode .config-value {
+  color: #1e293b !important;
+}
+
+.light-mode .config-metric-select,
+.light-mode .result-metric-select {
+  background: rgba(0, 0, 0, 0.02) !important;
+  border-color: rgba(6, 182, 212, 0.2) !important;
+  color: #1e293b !important;
+}
+
+.light-mode .trend-btn {
+  background: rgba(0, 0, 0, 0.03) !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  color: #64748b !important;
+}
+
+.light-mode .trend-btn.active {
+  background: rgba(6, 182, 212, 0.12) !important;
+  border-color: rgba(6, 182, 212, 0.2) !important;
+  color: #0891b2 !important;
+}
+
+.light-mode .analysis-result-header {
+  background: rgba(6, 182, 212, 0.03) !important;
+  border-color: rgba(6, 182, 212, 0.14) !important;
+}
+
+.light-mode .result-range {
+  color: #64748b !important;
+}
+
+.light-mode .result-type,
+.light-mode .analysis-empty {
+  color: #475569 !important;
 }
 
 .light-mode .chart-header h5,
