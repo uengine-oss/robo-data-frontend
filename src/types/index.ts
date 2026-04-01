@@ -120,6 +120,7 @@ export interface NvlRelationship {
   to: string
   caption?: string
   color?: string
+  width?: number
   selected?: boolean  // NVL이 지원하는 selected 속성
   properties?: Record<string, unknown>
 }

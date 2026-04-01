@@ -5974,8 +5974,10 @@ function initCytoscape(shouldRestoreSelection: boolean = false) {
     'TRIGGERS': 'TRIGGERED_BY',
     'TRIGGERED_BY': 'TRIGGERS',
     // 포함관계
-    'BELONGS_TO': 'CONTAINS',
-    'CONTAINS': 'BELONGS_TO',
+    'BELONGS_TO': 'HAS_PROCEDURE',
+    'HAS_PROCEDURE': 'BELONGS_TO',
+    'BELONGS_TO_PACKAGE': 'HAS_FILE',
+    'LINKS_TO': 'LINKED_FROM',
     // 사용관계
     'USES': 'USED_BY',
     'USED_BY': 'USES',

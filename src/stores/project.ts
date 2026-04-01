@@ -56,8 +56,8 @@ type MessageType = StreamMessage['type']
  * PRIMARY_LABELS(역할 라벨)를 제외한 첫 번째 라벨을 서브라벨로 사용
  */
 const PRIMARY_LABELS = new Set([
-  'MODULE', 'FUNCTION', 'VARIABLE', 'CONSTANT', 'PACKAGE', 'COMMAND',
-  'READMODEL', 'INTERNAL', 'EXTERNAL',
+  'MODULE', 'FUNCTION', 'VARIABLE', 'CONSTANT', 'PACKAGE',
+  'INTERNAL', 'EXTERNAL',
   'Endpoint', 'Query', 'Command', 'Getter', 'Setter', 'Lifecycle',
   'Scheduled', 'EventHandler', 'Init', 'Transactional', 'Validation', 'BusinessLogic'
 ])

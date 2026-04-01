@@ -206,7 +206,7 @@ function getRelColor(relType: string): string {
     'EXTENDS': '#a78bfa',
     'IMPLEMENTS': '#f472b6',
     'HAS_COLUMN': '#22d3ee',
-    'FK_TO': '#fbbf24',
+    'FK_TO_COLUMN': '#fbbf24',
     'READS': '#34d399',
     'WRITES': '#ef4444',
     'PARENT_OF': '#94a3b8',

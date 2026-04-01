@@ -9,7 +9,7 @@ const loadError = ref<string | null>(null)
 const isLoading = ref(true)
 
 const AirSwmmApp = defineAsyncComponent({
-  loader: () => import('airSwmmApp/App').catch((err: Error) => {
+  loader: () => import(/* @vite-ignore */ 'airSwmmApp/App').catch((err: Error) => {
     loadError.value = `원격 모듈 로드 실패: ${err.message}`
     isLoading.value = false
     return { template: '<div></div>' }

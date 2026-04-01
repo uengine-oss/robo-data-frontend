@@ -76,6 +76,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   'node-type-select': [nodeType: string, topOffset: number]
+  'relationship-type-select': [relType: string, topOffset: number]
   'style-updated': []
   'label-filter': [label: string]
   'clear-filters': []
@@ -247,30 +248,33 @@ function handleLabelFilter(label: string): void {
 }
 
 /**
- * 노드 타입 스타일 선택 핸들러 (우클릭 시 색상 변경)
- * 클릭한 라벨의 세로 중앙 위치를 계산하여 스타일 패널 위치 결정
+ * 뱃지 우클릭 시 스타일 패널 위치 계산 후 이벤트 emit
  */
-function handleNodeTypeContextMenu(event: MouseEvent, nodeType: string): void {
+function emitStyleSelect(event: MouseEvent, emitFn: (type: string, offset: number) => void, type: string): void {
   event.preventDefault()
   const target = event.currentTarget as HTMLElement
   const panelBody = target.closest('.panel-body') as HTMLElement
   const panelHeader = target.closest('.floating-panel')?.querySelector('.panel-header') as HTMLElement
-  
+
   if (!panelBody || !panelHeader) {
-    emit('node-type-select', nodeType, 100)
+    emitFn(type, 100)
     return
   }
-  
+
   const panelHeaderHeight = panelHeader.offsetHeight
   const scrollTop = panelBody.scrollTop
   const rect = target.getBoundingClientRect()
   const panelBodyRect = panelBody.getBoundingClientRect()
-  
-  // 라벨의 세로 중앙 위치를 패널 내부 기준으로 계산
   const labelCenterY = rect.top + rect.height / 2 - panelBodyRect.top + scrollTop
-  const topOffset = panelHeaderHeight + labelCenterY
-  
-  emit('node-type-select', nodeType, Math.max(0, topOffset))
+  emitFn(type, Math.max(0, panelHeaderHeight + labelCenterY))
+}
+
+function handleNodeTypeContextMenu(event: MouseEvent, nodeType: string): void {
+  emitStyleSelect(event, (t, o) => emit('node-type-select', t, o), nodeType)
+}
+
+function handleRelTypeContextMenu(event: MouseEvent, relType: string): void {
+  emitStyleSelect(event, (t, o) => emit('relationship-type-select', t, o), relType)
 }
 
 /**
@@ -560,11 +564,13 @@ function getNodeSubInfo(node: GraphNode): string {
           <div class="section-title">Relationship types</div>
           <div class="badge-container">
             <span class="stat-badge total">* ({{ totalRelationships }})</span>
-            <span 
-              v-for="stat in sortedRelStats" 
+            <span
+              v-for="stat in sortedRelStats"
               :key="stat.type"
               class="stat-badge rel"
               :style="{ background: stat.color }"
+              @contextmenu="handleRelTypeContextMenu($event, stat.type)"
+              :title="`우클릭: 색상/두께 변경`"
             >
               {{ stat.type }} ({{ stat.count }})
             </span>

@@ -11,7 +11,7 @@ import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
 import { storeToRefs } from 'pinia'
 import NvlGraph from './NvlGraph.vue'
 import NodeDetailPanel from './NodeDetailPanel.vue'
-import NodeStylePanel from './NodeStylePanel.vue'
+import GraphStylePanel from './GraphStylePanel.vue'
 import VueFlowClassDiagram from './VueFlowClassDiagram.vue'
 import SchemaView from '../text2sql/SchemaView.vue'
 import { getClassName, getDirectory, CLASS_LABELS } from '@/utils/classDiagram'
@@ -162,7 +162,10 @@ const searchQuery = ref('')
 const selectedNode = ref<GraphNode | null>(null)
 const selectedRelationship = ref<GraphLink | null>(null)
 const selectedNodeType = ref<string | null>(null)
+const selectedRelType = ref<string | null>(null)
 const stylePanelTop = ref<number>(0)
+/** 현재 스타일 패널이 노드용인지 관계용인지 */
+const stylePanelCategory = ref<'node' | 'relationship'>('node')
 const nvlGraphRef = ref<InstanceType<typeof NvlGraph> | null>(null)
 const selectedClasses = ref<Array<{ className: string; directory: string }>>([])
 
@@ -287,7 +290,7 @@ function getRelColor(relType: string): string {
     'EXTENDS': '#a78bfa',
     'IMPLEMENTS': '#f472b6',
     'HAS_COLUMN': '#22d3ee',
-    'FK_TO': '#fbbf24',
+    'FK_TO_COLUMN': '#fbbf24',
     'READS': '#34d399',
     'WRITES': '#ef4444',
     'PARENT_OF': '#94a3b8',
@@ -332,11 +335,17 @@ function formatTime(timestamp: string): string {
   })
 }
 
+/** 스타일 패널 상태 초기화 */
+function resetStylePanel(): void {
+  selectedNodeType.value = null
+  selectedRelType.value = null
+  stylePanelTop.value = 0
+}
+
 function handleNodeSelect(node: GraphNode | null): void {
   selectedNode.value = node
   selectedRelationship.value = null
-  selectedNodeType.value = null
-  stylePanelTop.value = 0
+  resetStylePanel()
   if (node) showNodePanel.value = true
 }
 
@@ -344,14 +353,11 @@ function handleNodeSelect(node: GraphNode | null): void {
  * 검색 결과에서 노드 선택 시 처리 (해당 노드와 연결된 노드만 표시)
  */
 function handleNodeSearchSelect(node: GraphNode): void {
-  // 노드 선택 처리
   selectedNode.value = node
   selectedRelationship.value = null
-  selectedNodeType.value = null
-  stylePanelTop.value = 0
+  resetStylePanel()
   showNodePanel.value = true
-  
-  // NvlGraph에서 해당 노드로 포커스 이동 (필터링 하지 않고 카메라만 이동)
+
   if (nvlGraphRef.value) {
     nvlGraphRef.value.focusOnNode?.(node.id)
   }
@@ -360,30 +366,35 @@ function handleNodeSearchSelect(node: GraphNode): void {
 function handleRelationshipSelect(relationship: GraphLink | null): void {
   selectedRelationship.value = relationship
   selectedNode.value = null
-  selectedNodeType.value = null
-  stylePanelTop.value = 0
+  resetStylePanel()
   if (relationship) showNodePanel.value = true
 }
 
 function handleNodeTypeSelect(nodeType: string, topOffset: number): void {
   selectedNodeType.value = nodeType
+  selectedRelType.value = null
   selectedNode.value = null
+  stylePanelCategory.value = 'node'
+  stylePanelTop.value = topOffset
+  showNodePanel.value = true
+}
+
+function handleRelTypeSelect(relType: string, topOffset: number): void {
+  selectedRelType.value = relType
+  selectedNodeType.value = null
+  selectedNode.value = null
+  stylePanelCategory.value = 'relationship'
   stylePanelTop.value = topOffset
   showNodePanel.value = true
 }
 
 function handleStylePanelClose(): void {
-  selectedNodeType.value = null
-  stylePanelTop.value = 0
+  resetStylePanel()
 }
 
 function handleSearchSelect(node: GraphNode): void {
-  // 관계와 타입 선택을 먼저 초기화 (명시적으로)
   selectedRelationship.value = null
-  selectedNodeType.value = null
-  stylePanelTop.value = 0
-  
-  // 노드 선택
+  resetStylePanel()
   selectedNode.value = node
   showNodePanel.value = true
   
@@ -410,8 +421,8 @@ function handleVueFlowClassClick(nodeId: string): void {
   const node = graphData.value?.nodes.find(n => n.id === nodeId)
   if (node) {
     selectedNode.value = node
-    selectedRelationship.value = null  // 관계 선택 초기화
-    selectedNodeType.value = null
+    selectedRelationship.value = null
+    resetStylePanel()
     showNodePanel.value = true
   }
 }
@@ -436,7 +447,7 @@ function removeSelectedClass(className: string, directory: string): void {
 }
 
 function handleStyleUpdated(): void {
-  nvlGraphRef.value?.updateNodeStyles()
+  nvlGraphRef.value?.updateAllStyles()
 }
 
 /**
@@ -610,6 +621,7 @@ watch(hasGraph, (has, prev) => {
             :activeFilters="labelFilters"
             :allNodes="graphData?.nodes || []"
             @node-type-select="handleNodeTypeSelect"
+            @relationship-type-select="handleRelTypeSelect"
             @style-updated="handleStyleUpdated"
             @label-filter="handleLabelFilter"
             @clear-filters="handleClearFilters"
@@ -765,6 +777,7 @@ watch(hasGraph, (has, prev) => {
             :activeFilters="labelFilters"
             :allNodes="graphData?.nodes || []"
             @node-type-select="handleNodeTypeSelect"
+            @relationship-type-select="handleRelTypeSelect"
             @style-updated="handleStyleUpdated"
             @label-filter="handleLabelFilter"
             @clear-filters="handleClearFilters"
@@ -779,15 +792,16 @@ watch(hasGraph, (has, prev) => {
           @mousedown="startPanelResize"
         ></div>
         
-        <!-- 노드 스타일 설정 패널 (노드 패널 바로 왼쪽에 배치) -->
+        <!-- 그래프 요소 스타일 설정 패널 (노드/관계 공통) -->
         <Transition name="fade">
-          <div 
-            v-if="selectedNodeType" 
+          <div
+            v-if="selectedNodeType || selectedRelType"
             class="style-panel-wrapper"
             :style="{ top: `${stylePanelTop}px` }"
           >
-            <NodeStylePanel 
-              :nodeType="selectedNodeType"
+            <GraphStylePanel
+              :category="stylePanelCategory"
+              :elementType="selectedNodeType || selectedRelType"
               @style-updated="handleStyleUpdated"
               @close="handleStylePanelClose"
             />

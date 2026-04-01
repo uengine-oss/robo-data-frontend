@@ -147,10 +147,6 @@ export const NODE_COLORS: Record<string, string> = {
   Aspect: '#7C2D12',         // 브라운
   DataStructure: '#57534E',  // 스톤
 
-  // CQRS 라벨
-  COMMAND: '#EF4444',        // 레드
-  READMODEL: '#3B82F6',      // 블루
-
   // Method 스테레오타입
   Endpoint: '#EC4899',       // 핑크
   Query: '#3B82F6',          // 블루
@@ -194,16 +190,18 @@ export const NODE_COLORS: Record<string, string> = {
  * 관계 타입별 색상
  */
 export const RELATIONSHIP_COLORS: Record<string, string> = {
-  CONTAINS: '#9CA3AB',
+  HAS_PROCEDURE: '#9CA3AB',
+  BELONGS_TO_PACKAGE: '#9CA3AB',
+  LINKS_TO: '#9CA3AB',
   PARENT_OF: '#9CA3AB',
   NEXT: '#9CA3AB',
-  CALL: '#9CA3AB',
+  CALLS: '#9CA3AB',
   FROM: '#9CA3AB',
   WRITES: '#9CA3AB',
   HAS_COLUMN: '#9CA3AB',
   DB_LINK: '#9CA3AB',
   FK_TO_TABLE: '#9CA3AB',
-  FK_TO: '#9CA3AB',
+  FK_TO_COLUMN: '#9CA3AB',
   SCOPE: '#9CA3AB',
   EXTENDS: '#9CA3AB',
   IMPLEMENTS: '#9CA3AB',
@@ -212,6 +210,17 @@ export const RELATIONSHIP_COLORS: Record<string, string> = {
   HAS_AC: '#9CA3AB',
   HAS_USER_STORY: '#9CA3AB',
   DEFAULT: '#9CA3AB'
+}
+
+// ============================================================================
+// 관계 두께 설정
+// ============================================================================
+
+/**
+ * 관계 타입별 두께 (기본값)
+ */
+export const RELATIONSHIP_WIDTHS: Record<string, number> = {
+  DEFAULT: 2
 }
 
 // ============================================================================
@@ -242,7 +251,7 @@ export const NODE_SIZES: Record<string, number> = {
 // 유틸리티 함수
 // ============================================================================
 
-import { getNodeStyle } from '@/utils/nodeStyleStorage'
+import { getNodeStyle, getRelationshipStyle } from '@/utils/graphStyleStorage'
 
 /**
  * 노드 라벨에 따른 색상 반환
@@ -267,7 +276,7 @@ export function getNodeColor(labels: string[]): string {
       if (upperStyle?.color) return upperStyle.color
     }
   } catch (e) {
-    // nodeStyleStorage가 없으면 기본 로직 사용
+    // graphStyleStorage가 없으면 기본 로직 사용
   }
 
   // 2. Table 우선 처리
@@ -294,9 +303,30 @@ export function getNodeColor(labels: string[]): string {
 
 /**
  * 관계 타입에 따른 색상 반환
+ * 사용자 설정 > 타입 매칭 > 기본값 순서로 반환
  */
 export function getRelationshipColor(type: string): string {
+  try {
+    const style = getRelationshipStyle(type)
+    if (style?.color) return style.color
+  } catch (e) {
+    // graphStyleStorage가 없으면 기본 로직 사용
+  }
   return RELATIONSHIP_COLORS[type] || RELATIONSHIP_COLORS.DEFAULT
+}
+
+/**
+ * 관계 타입에 따른 두께 반환
+ * 사용자 설정 > 타입 매칭 > 기본값 순서로 반환
+ */
+export function getRelationshipWidth(type: string): number {
+  try {
+    const style = getRelationshipStyle(type)
+    if (style?.size) return style.size
+  } catch (e) {
+    // graphStyleStorage가 없으면 기본 로직 사용
+  }
+  return RELATIONSHIP_WIDTHS[type] || RELATIONSHIP_WIDTHS.DEFAULT
 }
 
 /**
@@ -318,7 +348,7 @@ export function getNodeSize(labels: string[]): number {
       if (upperStyle?.size) return upperStyle.size
     }
   } catch (e) {
-    // nodeStyleStorage가 없으면 기본 로직 사용
+    // graphStyleStorage가 없으면 기본 로직 사용
   }
 
   // 2. 서브라벨 우선 매칭

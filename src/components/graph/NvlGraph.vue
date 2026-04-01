@@ -20,7 +20,7 @@ import {
 } from '@neo4j-nvl/interaction-handlers'
 import type { GraphData, GraphNode, GraphLink, NvlNode, NvlRelationship } from '@/types'
 import type { PartialNode, PartialRelationship } from '@neo4j-nvl/base'
-import { getNodeColor, getRelationshipColor, getNodeSize } from '@/config/graphStyles'
+import { getNodeColor, getRelationshipColor, getRelationshipWidth, getNodeSize } from '@/config/graphStyles'
 
 // ============================================================================
 // 타입 정의
@@ -295,6 +295,7 @@ function toNvlRelationship(link: GraphData['links'][0], isSelected: boolean = fa
     to: link.target,
     caption: link.type,
     color: getRelationshipColor(link.type),
+    width: getRelationshipWidth(link.type),
     selected: isSelected,
     properties: link.properties
   }
@@ -999,6 +1000,40 @@ function updateNodeStyles(): void {
 }
 
 /**
+ * 관계 스타일만 업데이트 (사용자 설정 변경 시)
+ * PartialRelationship을 사용하여 속성만 업데이트
+ */
+function updateRelationshipStyles(): void {
+  if (!nvlInstance.value) return
+
+  const relsToUpdate: PartialRelationship[] = []
+
+  for (const [relId, rel] of relationshipMap.entries()) {
+    const type = rel.caption || 'UNKNOWN'
+    const newColor = getRelationshipColor(type)
+    const newWidth = getRelationshipWidth(type)
+
+    if (rel.color !== newColor || rel.width !== newWidth) {
+      relsToUpdate.push({ id: relId, color: newColor, width: newWidth })
+      relationshipMap.set(relId, { ...rel, color: newColor, width: newWidth })
+    }
+  }
+
+  if (relsToUpdate.length > 0) {
+    nvlInstance.value.updateElementsInGraph([], relsToUpdate)
+    updateRelationshipStats()
+  }
+}
+
+/**
+ * 노드 + 관계 스타일 모두 업데이트
+ */
+function updateAllStyles(): void {
+  updateNodeStyles()
+  updateRelationshipStyles()
+}
+
+/**
  * 그래프 업데이트 (디바운싱 적용)
  */
 function updateGraph(): void {
@@ -1053,20 +1088,21 @@ function resetGraph(): void {
   relationshipMap.clear()
   // expandedNodeId는 호출자가 관리 (showAll, expandNode 등)
   hiddenNodeIds.clear()
-  
+
   loadingProgress.value = 0
   isLoadingBatch.value = false
+  isInitializing.value = false  // 초기화 중이던 상태도 리셋 (재진입 가능하도록)
   pendingNodeCount.value = 0
   totalNodeCount.value = 0
   hiddenNodeCount.value = 0
   isLimitApplied.value = false
   displayedRelationshipCount.value = 0
-  
+
   if (nvlInstance.value) {
     nvlInstance.value.destroy()
     nvlInstance.value = null
   }
-  
+
   closeContextMenu()
 }
 
@@ -1115,26 +1151,112 @@ watch(
 
 // ============================================================================
 // 통합 뷰 상태 watcher — maxNodes/labelFilters 변경을 단일 진입점에서 처리
-// 이중 트리거(scheduleRerender 2번 호출) 원천 차단
 // ============================================================================
 let _rerenderTimer: ReturnType<typeof setTimeout> | null = null
 let _suppressWatcher = false  // showAll 등 내부 전환 시 watcher 재트리거 방지
+
+/**
+ * NVL 인스턴스가 있으면 destroy 없이 incremental diff로 노드/관계를 추가/제거.
+ * 인스턴스가 없으면 새로 생성.
+ */
 function scheduleRerender() {
   if (_rerenderTimer) clearTimeout(_rerenderTimer)
   _rerenderTimer = setTimeout(async () => {
     _rerenderTimer = null
-    if (props.graphData.nodes.length > 0) {
+    if (props.graphData.nodes.length === 0) return
+
+    if (!nvlInstance.value) {
+      // 인스턴스 없으면 새로 생성
       resetGraph()
       await initNvl()
+      return
     }
-  }, 0)
+
+    // --- Incremental diff: NVL 인스턴스 유지 ---
+    clearBatchTimer()
+    resetQueues()
+
+    // 1) 필터/limit 기준으로 표시할 노드 결정
+    const shouldIgnoreLimit = expandedNodeId.value !== null || showAllMode.value
+    const maxDisplay = shouldIgnoreLimit
+      ? props.graphData.nodes.length
+      : (props.maxNodes || DEFAULT_MAX_NODES)
+
+    const filteredNodes = props.graphData.nodes.filter(n => matchesLabelFilter(n))
+    const visibleNodes = filteredNodes
+      .slice(0, maxDisplay)
+      .filter(n => !hiddenNodeIds.has(n.id))
+    const targetNodeIds = new Set(visibleNodes.map(n => n.id))
+
+    // 2) 제거할 노드 (현재 표시 중이지만 새 필터에는 안 맞는 노드)
+    const nodeIdsToRemove: string[] = []
+    for (const nodeId of nodeMap.keys()) {
+      if (!targetNodeIds.has(nodeId)) {
+        nodeIdsToRemove.push(nodeId)
+      }
+    }
+
+    // 3) 추가할 노드 (새 필터에 맞지만 아직 표시 안 된 노드)
+    const nodesToAdd: NvlNode[] = []
+    for (const node of visibleNodes) {
+      if (!nodeMap.has(node.id)) {
+        const nvlNode = toNvlNode(node, props.selectedNodeId === node.id, false)
+        nodeMap.set(node.id, nvlNode)
+        nodesToAdd.push(nvlNode)
+        renderedNodeIds.add(node.id)
+      }
+    }
+
+    // 4) NVL에서 제거
+    if (nodeIdsToRemove.length > 0) {
+      nvlInstance.value.removeNodesWithIds(nodeIdsToRemove)
+      for (const id of nodeIdsToRemove) {
+        nodeMap.delete(id)
+        renderedNodeIds.delete(id)
+      }
+      // 제거된 노드의 관계도 정리
+      for (const [relId, rel] of relationshipMap.entries()) {
+        if (!targetNodeIds.has(rel.from) || !targetNodeIds.has(rel.to)) {
+          relationshipMap.delete(relId)
+          renderedRelIds.delete(relId)
+        }
+      }
+    }
+
+    // 5) 새 노드의 관계 수집
+    const relsToAdd: NvlRelationship[] = []
+    const currentNodeIds = new Set(nodeMap.keys())
+    for (const link of props.graphData.links) {
+      if (relationshipMap.has(link.id)) continue
+      if (currentNodeIds.has(link.source) && currentNodeIds.has(link.target)) {
+        const nvlRel = toNvlRelationship(link, props.selectedRelationshipId === link.id)
+        relationshipMap.set(link.id, nvlRel)
+        relsToAdd.push(nvlRel)
+        renderedRelIds.add(link.id)
+      }
+    }
+
+    // 6) NVL에 추가
+    if (nodesToAdd.length > 0 || relsToAdd.length > 0) {
+      nvlInstance.value.addAndUpdateElementsInGraph(nodesToAdd, relsToAdd)
+    }
+
+    // 7) 상태 갱신
+    totalNodeCount.value = props.graphData.nodes.length
+    hiddenNodeCount.value = shouldIgnoreLimit ? 0 : Math.max(0, props.graphData.nodes.length - maxDisplay)
+    isLimitApplied.value = shouldIgnoreLimit ? false : (props.graphData.nodes.length > maxDisplay)
+    displayedRelationshipCount.value = relationshipMap.size
+
+    updateExpandableNodes()
+    updateNodeStats()
+    updateRelationshipStats()
+  }, 100)  // 연속 클릭 디바운스
 }
 
 watch(
   [() => props.maxNodes, () => props.labelFilters],
   ([_newMax, _newFilters], [oldMax]) => {
-    if (_suppressWatcher) return  // showAll 등 내부 전환 시 재트리거 방지
-    // maxNodes가 변경되면 showAll 해제
+    if (_suppressWatcher) return
     if (_newMax !== oldMax) {
       showAllMode.value = false
     }
@@ -1289,26 +1411,23 @@ function filterToNode(nodeId: string, depth: number = 1): void {
   console.log(`[filterToNode] 연결된 노드: ${connectedNodeIds.size}개, 관계: ${connectedRelIds.size}개`)
   console.log(`[filterToNode] 노드 IDs:`, Array.from(connectedNodeIds))
   
-  // 기존 그래프 초기화
+  // NVL 인스턴스에서 기존 노드 제거 (내부 맵 clear 전에 ID 수집)
+  const existingNodeIds = Array.from(nodeMap.keys())
+  if (nvlInstance.value && existingNodeIds.length > 0) {
+    try {
+      nvlInstance.value.removeNodesWithIds(existingNodeIds)
+    } catch (e) {
+      // 무시
+    }
+  }
+
+  // 내부 상태 초기화
   nodeMap.clear()
   relationshipMap.clear()
   renderedNodeIds.clear()
   renderedRelIds.clear()
   hiddenNodeIds.clear()
   nodeRenderQueue.length = 0
-  
-  // NVL 인스턴스 초기화
-  if (nvlInstance.value) {
-    try {
-      // 기존 노드/관계 모두 제거
-      const existingNodeIds = Array.from(nodeMap.keys())
-      if (existingNodeIds.length > 0) {
-        nvlInstance.value.removeNodesWithIds(existingNodeIds)
-      }
-    } catch (e) {
-      // 무시
-    }
-  }
   
   // 필터링된 노드/관계 추가
   const nodesToAdd: NvlNode[] = []
@@ -1371,6 +1490,8 @@ defineExpose({
   showAll,
   updateGraph,
   updateNodeStyles,
+  updateRelationshipStyles,
+  updateAllStyles,
   expandNodeChildren: expandNode,
   focusOnNode,
   filterToNode,
