@@ -378,9 +378,16 @@ function processNextBatch(): void {
   
   isProcessingQueue = true
   isLoadingBatch.value = true
-  
-  // 노드 배치 추출
-  const nodeBatch = nodeRenderQueue.splice(0, BATCH_SIZE)
+
+  // 노드 배치 추출 — 현재 labelFilter에 맞는 노드만 렌더링
+  const rawBatch = nodeRenderQueue.splice(0, BATCH_SIZE)
+  const nodeBatch = rawBatch.filter(node => {
+    const labels = (node.properties?.labels as string[]) || ['Unknown']
+    if (props.labelFilters && props.labelFilters.length > 0) {
+      return labels.some(l => props.labelFilters!.includes(l))
+    }
+    return true
+  })
   nodeBatch.forEach(node => renderedNodeIds.add(node.id))
   
   // 렌더링 가능한 관계 추출
@@ -1174,7 +1181,10 @@ function scheduleRerender() {
 
     // --- Incremental diff: NVL 인스턴스 유지 ---
     clearBatchTimer()
-    resetQueues()
+    // 큐만 초기화 (renderedNodeIds/renderedRelIds는 보존 — NVL 인스턴스 상태와 동기화 유지)
+    nodeRenderQueue.length = 0
+    relRenderQueue.length = 0
+    isProcessingQueue = false
 
     // 1) 필터/limit 기준으로 표시할 노드 결정
     const shouldIgnoreLimit = expandedNodeId.value !== null || showAllMode.value
