@@ -5,49 +5,51 @@
  */
 import { computed, ref, watch, nextTick } from 'vue'
 
-const props = withDefaults(
-  defineProps<{
-    node: { id: string; name: string; layer?: string; label?: string; dataSource?: string }
-    schemaId: string | null
-    nodeDataResult: {
-      hasDataSource?: boolean
-      chartRecommendation?: { type: string; xAxis?: string | null; yAxis?: string[] }
-      numericColumns?: string[]
-      timeColumns?: string[]
-      columns?: string[]
-      rows?: Record<string, unknown>[]
-    } | null
-    analysisProgress?: { step: string; message: string; detail?: unknown } | null
-    streamingReport?: string | null
-    analysisResult?: {
-      success: boolean
-      target_node_id: string
-      target_metric: string
-      analysis_type: string
-      time_range: { start: string; end: string }
-      edges: Array<{ source: string; target: string; method: string; strength: number; p_value: number; lag?: number; direction: string }>
-      impact_scores: Record<string, number>
-      top_causes: [string, number][]
-      report: string
-      data_summary?: { total_nodes: number; nodes_with_data: number; data_points: number; variables: number; target_variable?: string }
-      interpolation_info?: { applied: boolean; original_length: number; final_length: number; min_required: number; warning?: string | null }
-      error?: {
-        type: string
-        message: string
-        detail: string
-        user_friendly_message: string
-        node_status?: Record<string, {
-          node_id: string
-          node_name: string
-          has_data_source: boolean
-          data_source: string | null
-          status: string
-          reason: string | null
-          row_count: number
-          column_count: number
-          numeric_column_count: number
-        }>
-      }
+type TopCauseItem = {
+  source: string
+  name: string
+  score: number
+  display_score: number
+  grade: string
+  method: string
+  method_hint: string
+  method_count: number
+}
+
+const props = defineProps<{
+  node: { id: string; name: string; layer?: string; label?: string; dataSource?: string }
+  schemaId: string | null
+  nodeDataResult: {
+    hasDataSource?: boolean
+    chartRecommendation?: { type: string; xAxis?: string | null; yAxis?: string[] }
+    numericColumns?: string[]
+    timeColumns?: string[]
+    columns?: string[]
+    rows?: Record<string, unknown>[]
+  } | null
+  analysisProgress?: { step: string; message: string; detail?: unknown } | null
+  streamingReport?: string | null
+  analysisResult?: {
+    success: boolean
+    target_node_id: string
+    target_metric: string
+    analysis_type: string
+    time_range: { start: string; end: string }
+    edges: Array<{ source: string; target: string; method: string; strength: number; p_value: number; lag?: number; direction: string }>
+    impact_scores: Record<string, number>
+    impact_metadata?: {
+      source_methods?: Record<string, string>
+      method_counts?: Record<string, number>
+    }
+    top_causes: TopCauseItem[]
+    report: string
+    data_summary?: { total_nodes: number; nodes_with_data: number; data_points: number; variables: number; target_variable?: string }
+    interpolation_info?: { applied: boolean; original_length: number; final_length: number; min_required: number; warning?: string | null }
+    error?: {
+      type: string
+      message: string
+      detail: string
+      user_friendly_message: string
       node_status?: Record<string, {
         node_id: string
         node_name: string
@@ -59,18 +61,22 @@ const props = withDefaults(
         column_count: number
         numeric_column_count: number
       }>
-    } | null
-    analysisLoading?: boolean
-    analysisError?: string | null
-  }>(),
-  {
-    analysisProgress: () => null,
-    streamingReport: () => null,
-    analysisResult: () => null,
-    analysisLoading: false,
-    analysisError: () => null
-  }
-)
+    }
+    node_status?: Record<string, {
+      node_id: string
+      node_name: string
+      has_data_source: boolean
+      data_source: string | null
+      status: string
+      reason: string | null
+      row_count: number
+      column_count: number
+      numeric_column_count: number
+    }>
+  } | null
+  analysisLoading?: boolean
+  analysisError?: string | null
+}>()
 
 defineEmits<{ (e: 'analysis-complete', result: unknown): void }>()
 
@@ -114,7 +120,6 @@ function renderMarkdown(text: string): string {
   let inOrderedList = false
   let html = ''
   for (let line of lines) {
-    const raw = line
     if (line.startsWith('### ')) {
       if (inList) { html += '</ul>'; inList = false }
       if (inOrderedList) { html += '</ol>'; inOrderedList = false }
@@ -284,20 +289,27 @@ watch(
       </div>
 
       <div class="impact-section">
-        <h5>영향도 상위 변수</h5>
-        <div class="impact-bars">
+        <h5>주요 원인 후보</h5>
+        <div v-if="topCauses.length > 0" class="impact-bars">
           <div
-            v-for="([varName, score], i) in topCauses.slice(0, 8)"
-            :key="String(varName)"
+            v-for="cause in topCauses.slice(0, 8)"
+            :key="cause.source"
             class="impact-row"
           >
-            <span class="var-name">{{ String(varName).split(':').pop() || varName }}</span>
-            <div class="bar-wrap">
-              <div class="bar" :style="{ width: Math.min(100, (score as number) * 100) + '%' }"></div>
+            <div class="impact-main">
+              <span class="var-name">{{ cause.name }}</span>
+              <span class="score">{{ Math.round(cause.display_score * 100) }}%</span>
             </div>
-            <span class="score">{{ ((score as number) * 100).toFixed(1) }}%</span>
+            <div class="bar-wrap">
+              <div class="bar" :style="{ width: Math.min(100, cause.display_score * 100) + '%' }"></div>
+            </div>
+            <div class="impact-meta">
+              <span class="grade">{{ cause.grade }}</span>
+              <span class="method-hint">{{ cause.method_hint }}</span>
+            </div>
           </div>
         </div>
+        <p v-else class="impact-empty">우선 검토할 후보가 없습니다.</p>
       </div>
 
       <div class="report-section">
@@ -685,17 +697,24 @@ watch(
 .impact-bars {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
 }
 
 .impact-row {
   display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.impact-main {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
 .impact-row .var-name {
-  flex: 0 0 100px;
+  flex: 1;
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -718,9 +737,28 @@ watch(
 }
 
 .impact-row .score {
-  flex: 0 0 36px;
   font-size: 11px;
   text-align: right;
+  font-weight: 600;
+}
+
+.impact-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--color-text-muted, #888);
+}
+
+.impact-meta .grade {
+  color: var(--color-text, #e2e8f0);
+  font-weight: 600;
+}
+
+.impact-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-muted, #888);
 }
 
 .report-content {
