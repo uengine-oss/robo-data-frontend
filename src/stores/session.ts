@@ -7,6 +7,7 @@ const STORAGE_KEY_API_PROVIDER = 'robo-analyzer-api-provider'
 
 export type Theme = 'dark' | 'light'
 export type ApiProvider = 'openai' | 'anthropic'
+export type GraphSubView = 'schema' | 'uml' | 'graph'
 
 // 로컬스토리지에서 값 로드
 const loadFromStorage = (key: string, defaultValue: string): string => {
@@ -72,6 +73,18 @@ export const useSessionStore = defineStore('session', () => {
     sql: string
   }
   const ontologyTransferData = ref<OntologyTransferData | null>(null)
+
+  // Navigator 사이드 패널 열림 여부
+  const isNavigatorPanelOpen = ref<boolean>(false)
+  const setNavigatorPanelOpen = (open: boolean) => {
+    isNavigatorPanelOpen.value = open
+  }
+
+  // GraphTab 내부 하위 뷰 상태 (스키마/UML/Graph). MainLayout 에서 Navigator 노출 조건 판단에 사용.
+  const graphActiveView = ref<GraphSubView>('schema')
+  const setGraphActiveView = (view: GraphSubView) => {
+    graphActiveView.value = view
+  }
   
   // 테마 변경 시 로컬스토리지에 저장 및 DOM에 적용
   watch(theme, (newTheme) => {
@@ -264,7 +277,11 @@ export const useSessionStore = defineStore('session', () => {
     navigateToSourceWithLine,
     consumeSourceNavigation,
     navigateToOntologyWithSQL,
-    consumeOntologyTransferData
+    consumeOntologyTransferData,
+    isNavigatorPanelOpen,
+    setNavigatorPanelOpen,
+    graphActiveView,
+    setGraphActiveView
   }
 })
 

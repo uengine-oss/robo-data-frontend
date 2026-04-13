@@ -9,7 +9,7 @@ import { useSessionStore } from '@/stores/session'
 import { useProjectStore } from '@/stores/project'
 import { storeToRefs } from 'pinia'
 import SettingsModal from './SettingsModal.vue'
-import { IconSearch, IconBell, IconSettings, IconFolder } from '@/components/icons'
+import { IconSearch, IconBell, IconSettings } from '@/components/icons'
 import { getAppTitle } from '@/config/appSettings'
 
 const sessionStore = useSessionStore()
@@ -19,7 +19,6 @@ const { isProcessing, currentStep } = storeToRefs(projectStore)
 
 const showSettings = ref(false)
 const searchQuery = ref('')
-const nodeLimit = ref(500)
 const appTitle = ref(getAppTitle())
 
 // 타이틀 변경 이벤트 핸들러
@@ -28,31 +27,13 @@ const handleAppTitleChange = (event: Event) => {
   appTitle.value = customEvent.detail
 }
 
-// localStorage에서 값 로드 (안전하게, 마운트 후)
 onMounted(() => {
-  try {
-    const savedNodeLimit = localStorage.getItem('nodeLimit')
-    if (savedNodeLimit) {
-      const parsed = parseInt(savedNodeLimit)
-      if (!isNaN(parsed)) nodeLimit.value = parsed
-    }
-  } catch (e) {
-    console.warn('localStorage 접근 실패:', e)
-  }
-  
-  // 타이틀 변경 이벤트 리스너 등록
   window.addEventListener('appTitleChange', handleAppTitleChange)
 })
 
 onUnmounted(() => {
   window.removeEventListener('appTitleChange', handleAppTitleChange)
 })
-
-const handleNodeLimitChange = (value: number) => {
-  nodeLimit.value = value
-  localStorage.setItem('nodeLimit', String(value))
-  window.dispatchEvent(new CustomEvent('nodeLimitChange', { detail: value }))
-}
 
 const handleUmlDepthChange = (value: number) => {
   localStorage.setItem('umlDepth', String(value))
@@ -202,10 +183,9 @@ const handleSearch = () => {
     </div>
   </header>
   
-  <SettingsModal 
+  <SettingsModal
     :is-open="showSettings"
     @close="showSettings = false"
-    @update:node-limit="handleNodeLimitChange"
     @update:uml-depth="handleUmlDepthChange"
   />
 </template>

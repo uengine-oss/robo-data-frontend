@@ -17,55 +17,32 @@ import SchemaView from '../text2sql/SchemaView.vue'
 import { getClassName, getDirectory, CLASS_LABELS } from '@/utils/classDiagram'
 import type { GraphNode, GraphLink } from '@/types'
 import { useResize } from '@/composables/useResize'
-import { useDrag } from '@/composables/useDrag'
 
 const projectStore = useProjectStore()
 const sessionStore = useSessionStore()
 const schemaCanvasStore = useSchemaCanvasStore()
-const { 
-  graphData, 
-  isProcessing, 
-  currentStep, 
+const {
+  graphData,
+  canvasGraphData,
+  isProcessing,
+  currentStep,
   sourceType,
   consoleMessages,
-  graphEvents,
-  totalPhases,
-  currentPhase,
-  currentPhaseProgress,
-  isPipelinePaused
+  graphEvents
 } = storeToRefs(projectStore)
-
-// 일시정지/재개 함수
-const { pausePipeline, resumePipeline } = projectStore
-
-// 진행 패널 드래그
-const { x: progressX, y: progressY, isDragging: isProgressDragging, startDrag: startProgressDrag } = useDrag({
-  initialX: 0,
-  initialY: 80,
-  boundToWindow: true
-})
-
-// 일시정지/재개 토글
-const togglePause = async () => {
-  if (isPipelinePaused.value) {
-    await resumePipeline()
-  } else {
-    await pausePipeline()
-  }
-}
 
 const MAX_SEARCH_RESULTS = 8
 
-const activeView = ref<'graph' | 'uml' | 'schema'>('schema')
+// activeView 는 session 스토어에 저장하여 MainLayout 에서 Navigator 노출 조건으로 활용한다.
+const activeView = computed({
+  get: () => sessionStore.graphActiveView,
+  set: (v) => sessionStore.setGraphActiveView(v),
+})
 const showNodePanel = ref(false)
 const showConsole = ref(false)
 const showSearch = ref(false)
-const showProgressPanel = ref(true) // 진행 패널 표시 (분석 중일 때)
 const progressPanelCollapsed = ref(false) // 진행 패널 축소 상태
 const labelFilters = ref<string[]>([]) // 레전드 필터 (노드 라벨)
-
-// 통합 패널 탭 (분석 / 콘솔 / 오버뷰)
-const analysisPanelTab = ref<'progress' | 'console' | 'overview'>('progress')
 
 // 분석 패널 모드: 'docked' (왼쪽 고정), 'floating' (플로팅), 'hidden' (완전 숨김)
 // 기본값은 hidden - 인제스천 시작 시에만 자동으로 표시됨
@@ -149,15 +126,6 @@ const { value: panelWidth, isResizing: isPanelResizing, startResize: startPanelR
   fromEnd: true
 })
 
-// 콘솔 리사이즈
-const { value: consoleHeight, isResizing: isConsoleResizing, startResize: startConsoleResize } = useResize({
-  direction: 'vertical',
-  initialValue: 200,
-  min: 100,
-  max: 600,
-  fromEnd: true
-})
-
 const searchQuery = ref('')
 const selectedNode = ref<GraphNode | null>(null)
 const selectedRelationship = ref<GraphLink | null>(null)
@@ -169,55 +137,40 @@ const stylePanelCategory = ref<'node' | 'relationship'>('node')
 const nvlGraphRef = ref<InstanceType<typeof NvlGraph> | null>(null)
 const selectedClasses = ref<Array<{ className: string; directory: string }>>([])
 
-// 설정에서 값 가져오기 (localStorage 또는 기본값)
+// UML 깊이 설정 (UML 뷰 전용)
 const umlDepth = ref(3)
-const nodeLimit = ref(2000)
-
-// localStorage에서 값 로드 (안전하게)
 try {
   const savedUmlDepth = localStorage.getItem('umlDepth')
   if (savedUmlDepth) {
     const parsed = parseInt(savedUmlDepth)
     if (!isNaN(parsed)) umlDepth.value = parsed
   }
-  const savedNodeLimit = localStorage.getItem('nodeLimit')
-  if (savedNodeLimit) {
-    const parsed = parseInt(savedNodeLimit)
-    if (!isNaN(parsed)) nodeLimit.value = parsed
-  }
 } catch (e) {
-  // localStorage 접근 불가 시 기본값 사용
   console.warn('localStorage 접근 실패:', e)
 }
 
-// 설정 변경 이벤트 리스너
 function handleUmlDepthChange(event: Event) {
   const customEvent = event as CustomEvent
   umlDepth.value = customEvent.detail
 }
 
-function handleNodeLimitChange(event: Event) {
-  const customEvent = event as CustomEvent
-  nodeLimit.value = customEvent.detail
-}
-
 onMounted(() => {
   window.addEventListener('umlDepthChange', handleUmlDepthChange)
-  window.addEventListener('nodeLimitChange', handleNodeLimitChange)
-  
+
+  // Graph 탭 진입 시 Navigator 자동 오픈 (VSCode Explorer 스타일)
+  sessionStore.setNavigatorPanelOpen(true)
+
   // 상단 검색에서 전달된 스키마 검색어 처리
   const pendingQuery = sessionStore.consumeSchemaSearch()
   if (pendingQuery) {
     activeView.value = 'schema'
     schemaCanvasStore.searchQuery = pendingQuery
-    // 시멘틱 검색도 트리거
     schemaCanvasStore.performSemanticSearch(pendingQuery)
   }
 })
 
 onUnmounted(() => {
   window.removeEventListener('umlDepthChange', handleUmlDepthChange)
-  window.removeEventListener('nodeLimitChange', handleNodeLimitChange)
 })
 
 const statusType = computed(() => {
@@ -228,14 +181,6 @@ const statusType = computed(() => {
   if (isProcessing.value) return 'processing'
   return 'idle'
 })
-
-// 진행률 계산 — Phase별 독립 0-100%
-const progress = computed(() => currentPhaseProgress.value)
-
-// 완료 여부
-const isCompleted = computed(() =>
-  currentPhase.value >= totalPhases.value - 1 && currentPhaseProgress.value >= 100 && !isProcessing.value
-)
 
 // 그래프 통계
 const graphStats = computed(() => {
@@ -262,49 +207,12 @@ const graphStats = computed(() => {
   }
 })
 
-// 최근 이벤트 (최대 30개)
-const recentEvents = computed(() => {
-  return [...(graphEvents.value || [])].slice(-30)
-})
-
-// 노드 타입별 색상
-function getNodeColor(nodeType: string): string {
-  const colors: Record<string, string> = {
-    'CLASS': '#60a5fa',
-    'METHOD': '#34d399',
-    'INTERFACE': '#a78bfa',
-    'PROCEDURE': '#4ADE80',
-    'FUNCTION': '#22C55E',
-    'Table': '#22d3ee',
-    'Column': '#94a3b8',
-    'UserStory': '#fb923c',
-    'TRIGGER': '#ef4444',
-  }
-  return colors[nodeType] || '#6b7280'
-}
-
-// 관계 타입별 색상  
-function getRelColor(relType: string): string {
-  const colors: Record<string, string> = {
-    'CALLS': '#60a5fa',
-    'EXTENDS': '#a78bfa',
-    'IMPLEMENTS': '#f472b6',
-    'HAS_COLUMN': '#22d3ee',
-    'FK_TO_COLUMN': '#fbbf24',
-    'READS': '#34d399',
-    'WRITES': '#ef4444',
-    'PARENT_OF': '#94a3b8',
-  }
-  return colors[relType] || '#6b7280'
-}
-
-const hasGraph = computed(() => graphData.value?.nodes.length > 0)
+// 캔버스(NvlGraph)에 표시 중인 그래프가 있는지
+const hasGraph = computed(() => canvasGraphData.value.nodes.length > 0)
+// 프로젝트 전체에 로드된 데이터가 있는지 (Navigator에서 탐색 가능한지)
+const hasAnyData = computed(() => (graphData.value?.nodes.length ?? 0) > 0)
 const showUmlTab = computed(() => sourceType.value === 'java' || sourceType.value === 'python')
 const showSchemaTab = computed(() => true) // 스키마 탭은 항상 활성화
-
-const displayedRelationshipsCount = computed(() => 
-  nvlGraphRef.value?.displayedRelationshipCount?.() ?? 0
-)
 
 // 로그가 있을 때 자동으로 콘솔 표시
 watch(consoleMessages, (messages) => {
@@ -328,13 +236,6 @@ const filteredNodes = computed(() => {
   })
 })
 
-function formatTime(timestamp: string): string {
-  if (!timestamp) return ''
-  return new Date(timestamp).toLocaleTimeString('ko-KR', { 
-    hour: '2-digit', minute: '2-digit', second: '2-digit' 
-  })
-}
-
 /** 스타일 패널 상태 초기화 */
 function resetStylePanel(): void {
   selectedNodeType.value = null
@@ -350,17 +251,14 @@ function handleNodeSelect(node: GraphNode | null): void {
 }
 
 /**
- * 검색 결과에서 노드 선택 시 처리 (해당 노드와 연결된 노드만 표시)
+ * 검색 결과에서 노드 선택 시 처리 — 캔버스에 해당 노드 + 1-hop 이웃 표시.
  */
 function handleNodeSearchSelect(node: GraphNode): void {
   selectedNode.value = node
   selectedRelationship.value = null
   resetStylePanel()
   showNodePanel.value = true
-
-  if (nvlGraphRef.value) {
-    nvlGraphRef.value.focusOnNode?.(node.id)
-  }
+  projectStore.expandNodeOnCanvas(node.id)
 }
 
 function handleRelationshipSelect(relationship: GraphLink | null): void {
@@ -472,28 +370,31 @@ function handleClearFilters(): void {
 }
 
 /**
- * 전체 그래프 다시 로드 (필터 초기화)
+ * 캔버스 초기화 (필터 + 표시된 노드 모두 비우기).
  */
 function handleResetGraph(): void {
   selectedNode.value = null
   selectedRelationship.value = null
   labelFilters.value = []
-  nvlGraphRef.value?.showAll?.()
+  projectStore.clearCanvas()
 }
 
-function handleNodeDelete(nodeId: string): void {
-  // Store의 deleteNodeAndRelationships 메서드 사용
-  projectStore.deleteNodeAndRelationships(nodeId)
-  
-  // 선택된 노드가 삭제된 경우 선택 해제
+/**
+ * 캔버스에서 노드 제거 (원본 nodeMap 은 유지).
+ */
+function handleNodeRemoveFromCanvas(nodeId: string): void {
+  projectStore.removeFromCanvas(nodeId)
   if (selectedNode.value?.id === nodeId) {
     selectedNode.value = null
   }
 }
 
-function handleNodeExpand(nodeId: string): void {
-  if (!nvlGraphRef.value) return
-  nvlGraphRef.value.expandNodeChildren(nodeId)
+/**
+ * Navigator 트리에서 노드를 드래그-드롭 → 1-hop 이웃까지 캔버스에 추가.
+ */
+function handleNodeDrop(payload: { nodeId: string }): void {
+  if (!payload?.nodeId) return
+  projectStore.expandNodeOnCanvas(payload.nodeId)
 }
 
 watch(hasGraph, (has, prev) => {
@@ -605,19 +506,14 @@ watch(hasGraph, (has, prev) => {
         
         <!-- 오버뷰 내용 (노드 필터링 - 항상 표시) -->
         <div class="tab-content overview-content">
-          <NodeDetailPanel 
-            :node="undefined"
-            :relationship="undefined"
+          <NodeDetailPanel
+            :node="null"
+            :relationship="null"
             :nodeStats="nvlGraphRef?.nodeStats"
             :relationshipStats="nvlGraphRef?.relationshipStats"
             :totalNodes="graphData?.nodes.length || 0"
             :totalRelationships="graphData?.links.length || 0"
-            :displayedNodes="nvlGraphRef?.nodeCount?.() || graphData?.nodes.length || 0"
-            :displayedRelationships="displayedRelationshipsCount"
-            :hiddenNodes="nvlGraphRef?.hiddenNodeCount?.() ?? 0"
             :isProcessing="isProcessing"
-            :isLimitApplied="nvlGraphRef?.isLimitApplied?.() ?? false"
-            :maxDisplayNodes="nodeLimit"
             :activeFilters="labelFilters"
             :allNodes="graphData?.nodes || []"
             @node-type-select="handleNodeTypeSelect"
@@ -635,28 +531,31 @@ watch(hasGraph, (has, prev) => {
     <!-- 메인 콘텐츠 -->
     <div class="content-area">
       <div class="view-container" v-show="activeView === 'graph'">
-        <template v-if="hasGraph">
-          <NvlGraph 
-            ref="nvlGraphRef"
-            :graphData="graphData!"
-            :selectedNodeId="selectedNode?.id"
-            :selectedRelationshipId="selectedRelationship?.id"
-            :maxNodes="nodeLimit"
-            :labelFilters="labelFilters"
-            @node-select="handleNodeSelect"
-            @relationship-select="handleRelationshipSelect"
-            @node-delete="handleNodeDelete"
-            @node-expand="handleNodeExpand"
-          />
-          
-        </template>
-        <template v-else>
-          <div class="empty-state">
+        <!-- 캔버스는 항상 마운트 — drop 이벤트를 받아야 하므로 v-if 로 제거하지 않음 -->
+        <NvlGraph
+          ref="nvlGraphRef"
+          :graphData="canvasGraphData"
+          :selectedNodeId="selectedNode?.id"
+          :selectedRelationshipId="selectedRelationship?.id"
+          :labelFilters="labelFilters"
+          @node-select="handleNodeSelect"
+          @relationship-select="handleRelationshipSelect"
+          @node-delete="handleNodeRemoveFromCanvas"
+          @node-drop="handleNodeDrop"
+        />
+        <!-- 빈 상태 오버레이 -->
+        <div v-if="!hasGraph" class="empty-state empty-overlay">
+          <template v-if="!hasAnyData">
             <div class="empty-icon">📈</div>
             <h3>그래프 데이터가 없습니다</h3>
             <p>업로드 탭에서 파일을 업로드하고 분석을 실행하세요</p>
-          </div>
-        </template>
+          </template>
+          <template v-else>
+            <div class="empty-icon">🗂️</div>
+            <h3>Navigator에서 노드를 드래그하세요</h3>
+            <p>좌측 Navigator 트리의 노드를 캔버스에 놓으면 1-hop 이웃이 함께 표시됩니다</p>
+          </template>
+        </div>
       </div>
       
       <div class="view-container" v-show="activeView === 'uml'">
@@ -761,19 +660,14 @@ watch(hasGraph, (has, prev) => {
           <button @click="showNodePanel = false">›</button>
         </div>
         <div class="panel-body">
-          <NodeDetailPanel 
+          <NodeDetailPanel
             :node="selectedNode"
             :relationship="selectedRelationship"
             :nodeStats="nvlGraphRef?.nodeStats"
             :relationshipStats="nvlGraphRef?.relationshipStats"
             :totalNodes="graphData?.nodes.length || 0"
             :totalRelationships="graphData?.links.length || 0"
-            :displayedNodes="nvlGraphRef?.nodeCount?.() || graphData?.nodes.length || 0"
-            :displayedRelationships="displayedRelationshipsCount"
-            :hiddenNodes="nvlGraphRef?.hiddenNodeCount?.() ?? 0"
             :isProcessing="isProcessing"
-            :isLimitApplied="nvlGraphRef?.isLimitApplied?.() ?? false"
-            :maxDisplayNodes="nodeLimit"
             :activeFilters="labelFilters"
             :allNodes="graphData?.nodes || []"
             @node-type-select="handleNodeTypeSelect"
@@ -868,24 +762,34 @@ watch(hasGraph, (has, prev) => {
   justify-content: center;
   height: 100%;
   color: var(--color-text-light);
-  
+
   .empty-icon {
     font-size: 48px;
     margin-bottom: 12px;
     opacity: 0.5;
   }
-  
+
   h3 {
     font-size: 16px;
     color: var(--color-text-bright);
     margin-bottom: 6px;
     font-weight: 600;
   }
-  
+
   p {
     font-size: 13px;
     color: var(--color-text-muted);
   }
+}
+
+/** NvlGraph 위에 떠있는 안내 오버레이 (pointer-events: none 으로 drop 이벤트 통과) */
+.empty-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: transparent;
+  text-align: center;
+  padding: 0 24px;
 }
 
 // ============================================================================

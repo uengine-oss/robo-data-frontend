@@ -31,7 +31,11 @@ import {
 import type { Component } from 'vue'
 
 const sessionStore = useSessionStore()
-const { activeTab } = storeToRefs(sessionStore)
+const { activeTab, isNavigatorPanelOpen, graphActiveView } = storeToRefs(sessionStore)
+
+const toggleNavigator = () => {
+  sessionStore.setNavigatorPanelOpen(!isNavigatorPanelOpen.value)
+}
 
 // 메뉴 확장 상태
 const isPhysicalLayerExpanded = ref(true)  // 피지컬 레이어 기본 펼침
@@ -265,6 +269,18 @@ const isStandardMgmtActive = () => {
         </span>
         <span class="nav-label">{{ item.label }}</span>
       </button>
+
+      <!-- Navigator 패널 토글 (GraphTab 의 Graph 하위 뷰일 때만 노출) -->
+      <template v-if="activeTab === 'graph' && graphActiveView === 'graph'">
+        <div class="nav-divider"></div>
+        <button class="nav-item" :class="{ active: isNavigatorPanelOpen }"
+          @click="toggleNavigator" title="Project Navigator">
+          <span class="nav-icon">
+            <IconFolder :size="20" />
+          </span>
+          <span class="nav-label">Navigator</span>
+        </button>
+      </template>
     </div>
   </nav>
 </template>

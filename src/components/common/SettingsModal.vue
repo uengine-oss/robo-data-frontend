@@ -2,11 +2,12 @@
 /**
  * SettingsModal.vue
  * 전역 설정 모달 컴포넌트
- * 
+ *
  * 설정 항목:
- * - 노드 표시 제한 (MAX_DISPLAY_NODES)
+ * - 애플리케이션 타이틀 / 테마
+ * - LLM API Key
  * - UML 다이어그램 깊이
- * - 데이터 삭제
+ * - 데이터 관리
  */
 
 import { ref, computed, watch } from 'vue'
@@ -35,7 +36,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'close': []
-  'update:nodeLimit': [value: number]
   'update:umlDepth': [value: number]
 }>()
 
@@ -52,9 +52,6 @@ const { graphData } = storeToRefs(projectStore)
 // ============================================================================
 // 설정 상태
 // ============================================================================
-
-/** 노드 표시 제한 (임시값) */
-const tempNodeLimit = ref(500)
 
 /** UML 다이어그램 기본 깊이 (임시값) */
 const tempUmlDepth = ref(3)
@@ -117,26 +114,17 @@ function handleDeleteAll() {
 
 /** 저장 및 적용 */
 function handleSaveAndApply() {
-  // localStorage에 저장
-  localStorage.setItem('nodeLimit', String(tempNodeLimit.value))
   localStorage.setItem('umlDepth', String(tempUmlDepth.value))
-  
-  // 테마 저장
-  sessionStore.setTheme(tempTheme.value)
 
-  // API Key 저장
+  sessionStore.setTheme(tempTheme.value)
   sessionStore.setApiKey(tempApiKey.value)
   sessionStore.setApiProvider(tempApiProvider.value)
 
-  // 이벤트 발생
-  emit('update:nodeLimit', tempNodeLimit.value)
   emit('update:umlDepth', tempUmlDepth.value)
-  window.dispatchEvent(new CustomEvent('nodeLimitChange', { detail: tempNodeLimit.value }))
   window.dispatchEvent(new CustomEvent('umlDepthChange', { detail: tempUmlDepth.value }))
-  
-  // 앱 타이틀 저장
+
   setAppTitle(tempAppTitle.value || DEFAULT_APP_TITLE)
-  
+
   hasChanges.value = false
   emit('close')
 }
@@ -146,7 +134,7 @@ function handleSaveAndApply() {
 // ============================================================================
 
 // 값 변경 감지 (저장 버튼 활성화용)
-watch([tempNodeLimit, tempUmlDepth, tempAppTitle, tempTheme, tempApiKey, tempApiProvider], () => {
+watch([tempUmlDepth, tempAppTitle, tempTheme, tempApiKey, tempApiProvider], () => {
   if (props.isOpen) {
     hasChanges.value = true
   }
@@ -154,26 +142,17 @@ watch([tempNodeLimit, tempUmlDepth, tempAppTitle, tempTheme, tempApiKey, tempApi
 
 watch(() => props.isOpen, (isOpen) => {
   if (isOpen) {
-    // 모달 열릴 때 현재 설정값 로드
     activeSection.value = 'general'
     hasChanges.value = false
-    
-    // localStorage에서 현재 값 로드
-    const savedNodeLimit = localStorage.getItem('nodeLimit')
-    if (savedNodeLimit) {
-      tempNodeLimit.value = parseInt(savedNodeLimit)
-    }
+
     const savedUmlDepth = localStorage.getItem('umlDepth')
     if (savedUmlDepth) {
       tempUmlDepth.value = parseInt(savedUmlDepth)
     }
-    // 테마 로드
     if (storeTheme.value) {
       tempTheme.value = storeTheme.value
     }
-    // 앱 타이틀 로드
     tempAppTitle.value = getAppTitle()
-    // API Key 로드
     tempApiKey.value = storeApiKey.value
     tempApiProvider.value = storeApiProvider.value
     showApiKey.value = false
@@ -328,26 +307,6 @@ watch(() => props.isOpen, (isOpen) => {
               <!-- 표시 설정 -->
               <div v-if="activeSection === 'display'" class="settings-section">
                 <h3>표시 설정</h3>
-                
-                <div class="setting-item">
-                  <div class="setting-label">
-                    <span class="label-text">노드 표시 제한</span>
-                    <span class="label-desc">
-                      성능 최적화를 위해 한 번에 표시할 최대 노드 수를 설정합니다.
-                      나머지 노드는 더블클릭으로 확장할 수 있습니다.
-                    </span>
-                  </div>
-                  <div class="setting-control">
-                    <input 
-                      type="number" 
-                      v-model.number="tempNodeLimit" 
-                      min="100" 
-                      max="2000" 
-                      step="100"
-                    />
-                    <span class="unit">개</span>
-                  </div>
-                </div>
 
                 <div class="setting-item">
                   <div class="setting-label">

@@ -8,7 +8,7 @@
  * - 노드/관계 타입별 통계 표시
  */
 
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import type { GraphNode, GraphLink } from '@/types'
 import { getNodeColor } from '@/config/graphStyles'
 
@@ -31,12 +31,7 @@ interface Props {
   relationshipStats?: Map<string, Stats>
   totalNodes?: number
   totalRelationships?: number
-  displayedNodes?: number  // 실제 표시된 노드 수
-  displayedRelationships?: number  // 실제 표시된 관계 수
-  hiddenNodes?: number     // limit으로 숨겨진 노드 수
   isProcessing?: boolean
-  isLimitApplied?: boolean  // limit 적용 여부
-  maxDisplayNodes?: number  // 최대 표시 노드 수
   activeFilters?: string[]  // 활성화된 필터 (노드 라벨)
   allNodes?: GraphNode[]   // 전체 노드 목록 (검색용)
 }
@@ -64,12 +59,7 @@ const LONG_VALUE_THRESHOLD = 50
 const props = withDefaults(defineProps<Props>(), {
   totalNodes: 0,
   totalRelationships: 0,
-  displayedNodes: 0,
-  displayedRelationships: 0,
-  hiddenNodes: 0,
   isProcessing: false,
-  isLimitApplied: false,
-  maxDisplayNodes: 2000,
   activeFilters: () => [],
   allNodes: () => []
 })
@@ -206,11 +196,6 @@ const hasSearchResults = computed(() => {
 const showSearchResults = computed(() => {
   const query = nodeSearchQuery.value.trim()
   return query.length > 0 && isSearchFocused.value
-})
-
-/** limit 적용 여부 */
-const showLimitWarning = computed(() => {
-  return props.isLimitApplied
 })
 
 // ============================================================================
@@ -513,14 +498,14 @@ function getNodeSubInfo(node: GraphNode): string {
               검색 결과가 없습니다
             </div>
           </div>
-          <!-- 전체 보기 버튼 (필터링된 상태에서만 표시) -->
+          <!-- 캔버스 초기화 버튼 (필터 걸려있을 때만 표시) -->
           <button
-            v-if="isLimitApplied || activeFilters.length > 0"
+            v-if="activeFilters.length > 0"
             class="reset-graph-btn"
             @click="emit('reset-graph')"
-            title="전체 그래프 다시 로드"
+            title="캔버스 비우기 및 필터 초기화"
           >
-            🔄 전체 그래프 보기 ({{ totalNodes }}개 노드)
+            🔄 캔버스 초기화
           </button>
         </div>
 
@@ -577,20 +562,10 @@ function getNodeSubInfo(node: GraphNode): string {
           </div>
         </div>
         
-        <!-- 요약 -->
+        <!-- 요약: 전체 프로젝트 데이터 규모 -->
         <div class="display-summary">
           <div class="summary-main">
-            <span>Displaying {{ displayedNodes ?? totalNodes }} nodes, {{ displayedRelationships ?? totalRelationships }} relationships.</span>
-          </div>
-          <div class="limit-warning" v-if="showLimitWarning">
-            <span class="warning-text">
-              More than {{ maxDisplayNodes.toLocaleString() }} nodes were found; only
-              {{ maxDisplayNodes.toLocaleString() }} are visible due to the display limit.
-            </span>
-          </div>
-          <div class="summary-detail" v-if="hiddenNodes > 0 && !isLimitApplied">
-            <span class="hidden-badge">+{{ hiddenNodes }} 숨김</span>
-            <span class="hint">더블클릭으로 확장</span>
+            <span>총 {{ totalNodes }} nodes · {{ totalRelationships }} relationships</span>
           </div>
         </div>
       </div>
@@ -1089,38 +1064,6 @@ function getNodeSubInfo(node: GraphNode): string {
     font-size: 13px;
     font-weight: 400;
     color: var(--color-text);
-  }
-  
-  .limit-warning {
-    margin-top: 8px;
-    font-size: 12px;
-    font-weight: 400;
-    
-    .warning-text {
-      color: var(--color-warning);
-      font-size: 12px;
-      line-height: 1.5;
-    }
-  }
-  
-  .summary-detail {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 8px;
-    font-size: 11px;
-    
-    .hidden-badge {
-      padding: 2px 8px;
-      background: rgba(250, 176, 5, 0.2);
-      color: var(--color-warning);
-      border-radius: 10px;
-      font-weight: 500;
-    }
-    
-    .hint {
-      color: var(--color-text-muted);
-    }
   }
 }
 </style>
