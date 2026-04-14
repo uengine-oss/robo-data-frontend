@@ -181,9 +181,6 @@ export const useProjectStore = defineStore('project', () => {
   
   const nodeMap = ref<Map<string, GraphNode>>(new Map())
   const linkMap = ref<Map<string, GraphLink>>(new Map())
-
-  // 캔버스에 표시할 노드 ID 집합. Navigator에서 드래그한 노드 + 1-hop 이웃만 누적됨.
-  const canvasNodeIds = ref<Set<string>>(new Set())
   
   // ==========================================================================
   // 상태 - 프로세스
@@ -236,22 +233,6 @@ export const useProjectStore = defineStore('project', () => {
     nodes: Array.from(nodeMap.value.values()),
     links: Array.from(linkMap.value.values())
   }))
-
-  // NvlGraph에 전달할 캔버스 전용 그래프 데이터.
-  // Navigator에서 드래그된 노드와 그 1-hop 이웃만 포함.
-  const canvasGraphData = computed<GraphData>(() => {
-    const ids = canvasNodeIds.value
-    if (ids.size === 0) return { nodes: [], links: [] }
-    const nodes: GraphNode[] = []
-    for (const node of nodeMap.value.values()) {
-      if (ids.has(node.id)) nodes.push(node)
-    }
-    const links: GraphLink[] = []
-    for (const link of linkMap.value.values()) {
-      if (ids.has(link.source) && ids.has(link.target)) links.push(link)
-    }
-    return { nodes, links }
-  })
   
   // ==========================================================================
   // Computed - 메타데이터
@@ -306,43 +287,11 @@ export const useProjectStore = defineStore('project', () => {
   }
   
   /**
-   * 그래프 데이터 초기화
+   * 그래프 데이터 초기화. 캔버스 뷰는 canvasStore 에서 clearCanvas 로 별도 처리.
    */
   function clearGraphData(): void {
     nodeMap.value = new Map()
     linkMap.value = new Map()
-    canvasNodeIds.value = new Set()
-  }
-
-  /**
-   * 특정 노드를 캔버스에 추가하고 1-hop 이웃까지 함께 포함 (누적).
-   * Navigator에서 드래그-드롭 시 호출됨.
-   */
-  function expandNodeOnCanvas(nodeId: string): void {
-    const next = new Set(canvasNodeIds.value)
-    next.add(nodeId)
-    for (const link of linkMap.value.values()) {
-      if (link.source === nodeId) next.add(link.target)
-      else if (link.target === nodeId) next.add(link.source)
-    }
-    canvasNodeIds.value = next
-  }
-
-  /**
-   * 캔버스에서 특정 노드 제거 (연결 관계도 자동으로 사라짐 — computed 필터에 의해).
-   */
-  function removeFromCanvas(nodeId: string): void {
-    if (!canvasNodeIds.value.has(nodeId)) return
-    const next = new Set(canvasNodeIds.value)
-    next.delete(nodeId)
-    canvasNodeIds.value = next
-  }
-
-  /**
-   * 캔버스 비우기 (nodeMap/linkMap은 유지).
-   */
-  function clearCanvas(): void {
-    canvasNodeIds.value = new Set()
   }
   
   /**
@@ -364,13 +313,6 @@ export const useProjectStore = defineStore('project', () => {
 
     nodeMap.value = newNodeMap
     linkMap.value = newLinkMap
-
-    // 캔버스 표시에서도 제거
-    if (canvasNodeIds.value.has(nodeId)) {
-      const next = new Set(canvasNodeIds.value)
-      next.delete(nodeId)
-      canvasNodeIds.value = next
-    }
   }
   
   // ==========================================================================
@@ -1150,8 +1092,6 @@ export const useProjectStore = defineStore('project', () => {
     nodeMap,
     linkMap,
     graphData,
-    canvasNodeIds,
-    canvasGraphData,
     isProcessing,
     currentStep,
     totalPhases,
@@ -1208,10 +1148,5 @@ export const useProjectStore = defineStore('project', () => {
     deleteAllData,
     deleteNodeAndRelationships,
     reset,
-
-    // Actions - Canvas view
-    expandNodeOnCanvas,
-    removeFromCanvas,
-    clearCanvas
   }
 })

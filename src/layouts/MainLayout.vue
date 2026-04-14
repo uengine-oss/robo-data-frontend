@@ -3,17 +3,20 @@ import { computed, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import TopToolbar from '@/components/common/TopToolbar.vue'
 import SideNav from '@/components/common/SideNav.vue'
-import NavigatorPanel from '@/components/common/NavigatorPanel.vue'
+import NavigatorPanel from '@/features/graph/components/NavigatorPanel.vue'
 import FloatingProgressPanel from '@/components/common/FloatingProgressPanel.vue'
 import { RouterView } from 'vue-router'
 import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
+import { useNavigatorStore } from '@/features/graph/stores/navigator'
 
 const projectStore = useProjectStore()
 const sessionStore = useSessionStore()
-const { activeTab, graphActiveView } = storeToRefs(sessionStore)
+const navigatorStore = useNavigatorStore()
+const { activeTab } = storeToRefs(sessionStore)
+const { activeView: graphActiveView } = storeToRefs(navigatorStore)
 
-/** Navigator 는 GraphTab 의 "Graph" 하위 뷰에서만 의미가 있으므로 해당 상태에서만 렌더한다. */
+/** Navigator 는 Graph 탭의 "Graph" 하위 뷰에서만 렌더. */
 const showNavigator = computed(
   () => activeTab.value === 'graph' && graphActiveView.value === 'graph'
 )

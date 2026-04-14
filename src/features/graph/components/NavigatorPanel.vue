@@ -7,16 +7,18 @@
  */
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useSessionStore } from '@/stores/session'
 import { useProjectStore } from '@/stores/project'
-import { useNavigatorStore, type NavigatorSection } from '@/stores/navigator'
+import {
+  useNavigatorStore,
+  type NavigatorSection,
+  type NavigatorTreeItem,
+} from '@/features/graph/stores/navigator'
 import NavigatorTreeNode from './NavigatorTreeNode.vue'
 
-const sessionStore = useSessionStore()
 const projectStore = useProjectStore()
 const navigatorStore = useNavigatorStore()
 
-const { isNavigatorPanelOpen } = storeToRefs(sessionStore)
+const { isPanelOpen } = storeToRefs(navigatorStore)
 const { isProcessing, nodeMap } = storeToRefs(projectStore)
 const { moduleTree, tableList, unresolvedList, expandedSections, searchQuery } =
   storeToRefs(navigatorStore)
@@ -26,7 +28,7 @@ const totalNodeCount = computed(() => nodeMap.value.size)
 interface Section {
   id: NavigatorSection
   label: string
-  items: import('@/stores/navigator').NavigatorTreeItem[]
+  items: NavigatorTreeItem[]
 }
 
 const sections = computed<Section[]>(() => [
@@ -74,7 +76,7 @@ onBeforeUnmount(() => {
 
 <template>
   <aside
-    v-show="isNavigatorPanelOpen"
+    v-show="isPanelOpen"
     ref="panelRef"
     class="navigator-panel"
     :style="{ width: `${panelWidth}px` }"
@@ -87,7 +89,7 @@ onBeforeUnmount(() => {
       <div class="nav-actions">
         <span class="count">{{ totalNodeCount }}</span>
         <button class="icon-btn" title="모두 접기" @click="navigatorStore.collapseAll()">⇱</button>
-        <button class="icon-btn close" title="닫기" @click="sessionStore.setNavigatorPanelOpen(false)">✕</button>
+        <button class="icon-btn close" title="닫기" @click="navigatorStore.setPanelOpen(false)">✕</button>
       </div>
     </header>
 

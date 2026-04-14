@@ -3,7 +3,7 @@
  * NvlGraph.vue
  * Neo4j NVL 기반 그래프 시각화 컴포넌트 (1-hop 캔버스 전용).
  *
- * 입력(graphData)는 projectStore.canvasGraphData — 사용자가 Navigator에서 드래그-드롭한
+ * 입력(graphData)는 canvasStore.canvasGraphData — 사용자가 Navigator에서 드래그-드롭한
  * 노드와 그 1-hop 이웃만 포함된 소규모 부분집합이다.
  * 따라서 배치 렌더링/개수 제한/대기 큐 같은 장치는 필요 없으며,
  * props 변경 시 즉시 diff 하여 NVL에 반영한다.
@@ -83,6 +83,7 @@ const emit = defineEmits<{
   'relationship-select': [relationship: GraphLink | null]
   'node-delete': [nodeId: string]
   'node-drop': [payload: { nodeId: string; nodeType?: string; labels?: string[] }]
+  'node-expand': [nodeId: string]
 }>()
 
 // ============================================================================
@@ -305,8 +306,23 @@ function setupInteractions(): void {
   const nvl = nvlInstance.value
   const click = new ClickInteraction(nvl)
 
+  // 더블클릭 탐지 (NVL 은 별도 onNodeDoubleClick 훅이 없으므로 onNodeClick 에서 판정)
+  let lastClickNodeId: string | null = null
+  let lastClickTime = 0
+  const DBL_CLICK_MS = 300
+
   click.updateCallback('onNodeClick', (node: { id: string } | null) => {
     if (!node?.id) return
+    const now = Date.now()
+    if (lastClickNodeId === node.id && now - lastClickTime < DBL_CLICK_MS) {
+      // 더블클릭 — 1-hop 이웃 확장 요청
+      emit('node-expand', node.id)
+      lastClickNodeId = null
+      lastClickTime = 0
+      return
+    }
+    lastClickNodeId = node.id
+    lastClickTime = now
     const graphNode = props.graphData.nodes.find(n => n.id === node.id)
     if (graphNode) emit('node-select', graphNode)
   })

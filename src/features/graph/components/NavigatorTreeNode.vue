@@ -5,8 +5,8 @@
  * 드래그 데이터: application/json { nodeId, nodeType, labels }
  */
 import { computed } from 'vue'
-import { useProjectStore } from '@/stores/project'
-import { useNavigatorStore, type NavigatorTreeItem } from '@/stores/navigator'
+import { useCanvasStore } from '@/features/graph/stores/canvas'
+import { useNavigatorStore, type NavigatorTreeItem } from '@/features/graph/stores/navigator'
 
 interface Props {
   node: NavigatorTreeItem
@@ -14,12 +14,13 @@ interface Props {
 }
 const props = withDefaults(defineProps<Props>(), { depth: 0 })
 
-const projectStore = useProjectStore()
+const canvasStore = useCanvasStore()
 const navigatorStore = useNavigatorStore()
 
 const hasChildren = computed(() => props.node.children.length > 0)
-const isExpanded = computed(() => navigatorStore.expandedNodes.has(props.node.id))
-const isOnCanvas = computed(() => projectStore.canvasNodeIds.has(props.node.id))
+/** 기본 동작: 전체 펼침. navigatorStore.collapsedNodes 에 있으면 접힘. */
+const isExpanded = computed(() => navigatorStore.isNodeExpanded(props.node.id))
+const isOnCanvas = computed(() => canvasStore.canvasNodeIds.has(props.node.id))
 
 function onToggle(e: MouseEvent) {
   e.stopPropagation()
@@ -32,33 +33,47 @@ function onDragStart(e: DragEvent) {
   e.dataTransfer.setData('application/json', JSON.stringify({
     nodeId: props.node.id,
     nodeType: props.node.nodeType,
-    labels: props.node.labels
+    labels: props.node.labels,
   }))
   e.dataTransfer.effectAllowed = 'copy'
 }
 
 function onDoubleClick() {
-  // 더블클릭은 드래그 대체 수단 — 바로 캔버스에 확장
-  projectStore.expandNodeOnCanvas(props.node.id)
+  // Navigator 더블클릭 = 드래그 대체. 그 노드 하나만 캔버스에 추가.
+  canvasStore.addNodeToCanvas(props.node.id)
 }
 
-/** 라벨별 배지 문자 (단일 글자) */
+/**
+ * 배지 문자. labels 를 우선 보고 명시적 매핑.
+ * 함수 서브타입(Query/Command/Validation)은 모두 F 로 통일 — 다양한 문자로 쪼개면
+ * Validation 의 'V' 가 변수처럼 보이는 등 혼동을 유발.
+ */
 const badgeChar = computed(() => {
+  const labels = props.node.labels
+  if (labels.includes('PACKAGE')) return 'P'
+  if (labels.includes('MODULE') || labels.includes('FILE')) return 'M'
+  if (labels.includes('BusinessLogic')) return 'B'
+  if (labels.includes('Table')) return 'T'
+  if (labels.includes('Column')) return 'C'
+  if (labels.includes('FUNCTION')) return 'F'
+  // fallback: nodeType 앞 글자
   const t = props.node.nodeType
-  if (!t) return '?'
-  return t.charAt(0).toUpperCase()
+  return t ? t.charAt(0).toUpperCase() : '?'
 })
 
-/** 라벨별 배지 스타일 클래스 */
+/** 라벨별 배지 스타일 클래스 (labels 배열을 우선 보고, 없으면 nodeType 패턴). */
 const badgeClass = computed(() => {
+  const labels = props.node.labels
+  if (labels.includes('PACKAGE')) return 'badge-package'
+  if (labels.includes('MODULE') || labels.includes('FILE')) return 'badge-module'
+  if (labels.includes('BusinessLogic')) return 'badge-bl'
+  if (labels.includes('Table')) return 'badge-table'
+  if (labels.includes('Column')) return 'badge-column'
+  if (labels.includes('FUNCTION')) return 'badge-function'
   const t = props.node.nodeType
   if (/Class|CLASS/.test(t)) return 'badge-class'
   if (/Interface|INTERFACE/.test(t)) return 'badge-interface'
   if (/Function|Method|FUNCTION/.test(t)) return 'badge-function'
-  if (/Variable|Field|Constant/.test(t)) return 'badge-variable'
-  if (/Table|TABLE/.test(t)) return 'badge-table'
-  if (/Column|COLUMN/.test(t)) return 'badge-column'
-  if (props.node.labels.includes('MODULE')) return 'badge-module'
   return 'badge-default'
 })
 </script>
@@ -147,13 +162,15 @@ const badgeClass = computed(() => {
   flex-shrink: 0;
 }
 
-.badge-module    { background: rgba(66, 99, 235, 0.2);  color: #91a7ff; }
-.badge-class     { background: rgba(240, 48, 99, 0.2);  color: #ffa8a8; }
-.badge-interface { background: rgba(20, 184, 166, 0.2); color: #66d9e8; }
-.badge-function  { background: rgba(250, 176, 5, 0.2);  color: #ffd43b; }
-.badge-variable  { background: rgba(55, 178, 77, 0.2);  color: #8ce99a; }
-.badge-table     { background: rgba(20, 184, 166, 0.2); color: #66d9e8; }
-.badge-column    { background: rgba(16, 152, 173, 0.2); color: #66d9e8; }
+.badge-package   { background: rgba(121, 80, 242, 0.22); color: #b197fc; }
+.badge-module    { background: rgba(66, 99, 235, 0.2);   color: #91a7ff; }
+.badge-class     { background: rgba(240, 48, 99, 0.2);   color: #ffa8a8; }
+.badge-interface { background: rgba(20, 184, 166, 0.2);  color: #66d9e8; }
+.badge-function  { background: rgba(250, 176, 5, 0.2);   color: #ffd43b; }
+.badge-bl        { background: rgba(174, 62, 201, 0.25); color: #e599f7; }
+.badge-variable  { background: rgba(55, 178, 77, 0.2);   color: #8ce99a; }
+.badge-table     { background: rgba(20, 184, 166, 0.25); color: #5eead4; }
+.badge-column    { background: rgba(248, 113, 113, 0.22); color: #fca5a5; }
 .badge-default   { background: rgba(134, 142, 150, 0.2); color: #ced4da; }
 
 .name {

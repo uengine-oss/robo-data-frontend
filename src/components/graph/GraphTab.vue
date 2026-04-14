@@ -8,6 +8,8 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
+import { useCanvasStore } from '@/features/graph/stores/canvas'
+import { useNavigatorStore } from '@/features/graph/stores/navigator'
 import { storeToRefs } from 'pinia'
 import NvlGraph from './NvlGraph.vue'
 import NodeDetailPanel from './NodeDetailPanel.vue'
@@ -17,26 +19,29 @@ import SchemaView from '../text2sql/SchemaView.vue'
 import { getClassName, getDirectory, CLASS_LABELS } from '@/utils/classDiagram'
 import type { GraphNode, GraphLink } from '@/types'
 import { useResize } from '@/composables/useResize'
+import { getNodeColor, getRelationshipColor } from '@/config/graphStyles'
 
 const projectStore = useProjectStore()
 const sessionStore = useSessionStore()
 const schemaCanvasStore = useSchemaCanvasStore()
+const canvasStore = useCanvasStore()
+const navigatorStore = useNavigatorStore()
 const {
   graphData,
-  canvasGraphData,
   isProcessing,
   currentStep,
   sourceType,
   consoleMessages,
-  graphEvents
+  graphEvents,
 } = storeToRefs(projectStore)
+const { canvasGraphData } = storeToRefs(canvasStore)
 
 const MAX_SEARCH_RESULTS = 8
 
-// activeView 는 session 스토어에 저장하여 MainLayout 에서 Navigator 노출 조건으로 활용한다.
+/** activeView 는 navigator 스토어에 저장 — MainLayout/SideNav 가 Navigator 노출 조건으로 참조. */
 const activeView = computed({
-  get: () => sessionStore.graphActiveView,
-  set: (v) => sessionStore.setGraphActiveView(v),
+  get: () => navigatorStore.activeView,
+  set: (v) => navigatorStore.setActiveView(v),
 })
 const showNodePanel = ref(false)
 const showConsole = ref(false)
@@ -158,7 +163,7 @@ onMounted(() => {
   window.addEventListener('umlDepthChange', handleUmlDepthChange)
 
   // Graph 탭 진입 시 Navigator 자동 오픈 (VSCode Explorer 스타일)
-  sessionStore.setNavigatorPanelOpen(true)
+  navigatorStore.setPanelOpen(true)
 
   // 상단 검색에서 전달된 스키마 검색어 처리
   const pendingQuery = sessionStore.consumeSchemaSearch()
@@ -207,6 +212,35 @@ const graphStats = computed(() => {
   }
 })
 
+/**
+ * 오버뷰 패널용 전체 프로젝트 통계 — 라벨 / 관계 타입 별 분포.
+ * NvlGraph.nodeStats 와 동일 형식(Map<label, {count, color}>)이라 NodeDetailPanel 이 그대로 소비 가능.
+ * 캔버스 상태와 무관하게 projectStore.nodeMap/linkMap 기준.
+ */
+const overallNodeStats = computed(() => {
+  const stats = new Map<string, { count: number; color: string }>()
+  for (const node of graphData.value?.nodes ?? []) {
+    for (const label of node.labels || ['Unknown']) {
+      if (label === '_Placeholder') continue
+      const existing = stats.get(label)
+      if (existing) existing.count++
+      else stats.set(label, { count: 1, color: getNodeColor([label]) })
+    }
+  }
+  return stats
+})
+
+const overallRelationshipStats = computed(() => {
+  const stats = new Map<string, { count: number; color: string }>()
+  for (const link of graphData.value?.links ?? []) {
+    const type = link.type || 'UNKNOWN'
+    const existing = stats.get(type)
+    if (existing) existing.count++
+    else stats.set(type, { count: 1, color: getRelationshipColor(type) })
+  }
+  return stats
+})
+
 // 캔버스(NvlGraph)에 표시 중인 그래프가 있는지
 const hasGraph = computed(() => canvasGraphData.value.nodes.length > 0)
 // 프로젝트 전체에 로드된 데이터가 있는지 (Navigator에서 탐색 가능한지)
@@ -251,14 +285,15 @@ function handleNodeSelect(node: GraphNode | null): void {
 }
 
 /**
- * 검색 결과에서 노드 선택 시 처리 — 캔버스에 해당 노드 + 1-hop 이웃 표시.
+ * 검색 결과에서 노드 선택 시 처리 — 캔버스에 해당 노드만 추가.
+ * 이웃까지 보려면 캔버스에서 더블클릭.
  */
 function handleNodeSearchSelect(node: GraphNode): void {
   selectedNode.value = node
   selectedRelationship.value = null
   resetStylePanel()
   showNodePanel.value = true
-  projectStore.expandNodeOnCanvas(node.id)
+  canvasStore.addNodeToCanvas(node.id)
 }
 
 function handleRelationshipSelect(relationship: GraphLink | null): void {
@@ -376,25 +411,34 @@ function handleResetGraph(): void {
   selectedNode.value = null
   selectedRelationship.value = null
   labelFilters.value = []
-  projectStore.clearCanvas()
+  canvasStore.clearCanvas()
 }
 
 /**
  * 캔버스에서 노드 제거 (원본 nodeMap 은 유지).
  */
 function handleNodeRemoveFromCanvas(nodeId: string): void {
-  projectStore.removeFromCanvas(nodeId)
+  canvasStore.removeFromCanvas(nodeId)
   if (selectedNode.value?.id === nodeId) {
     selectedNode.value = null
   }
 }
 
 /**
- * Navigator 트리에서 노드를 드래그-드롭 → 1-hop 이웃까지 캔버스에 추가.
+ * Navigator 트리에서 드래그-드롭 → 캔버스에 그 노드 하나만 추가.
+ * 기본 동작: 단일 노드. 이웃 확장은 캔버스에서 더블클릭해야 함.
  */
 function handleNodeDrop(payload: { nodeId: string }): void {
   if (!payload?.nodeId) return
-  projectStore.expandNodeOnCanvas(payload.nodeId)
+  canvasStore.addNodeToCanvas(payload.nodeId)
+}
+
+/**
+ * 캔버스 노드 더블클릭 → 그 노드의 1-hop 이웃을 캔버스에 추가 (누적).
+ */
+function handleNodeExpand(nodeId: string): void {
+  if (!nodeId) return
+  canvasStore.expandNodeOnCanvas(nodeId)
 }
 
 watch(hasGraph, (has, prev) => {
@@ -504,13 +548,13 @@ watch(hasGraph, (has, prev) => {
           </div>
         </div>
         
-        <!-- 오버뷰 내용 (노드 필터링 - 항상 표시) -->
+        <!-- 오버뷰 — 전체 프로젝트 통계. 캔버스 상태와 무관하게 nodeMap/linkMap 기준. -->
         <div class="tab-content overview-content">
           <NodeDetailPanel
             :node="null"
             :relationship="null"
-            :nodeStats="nvlGraphRef?.nodeStats"
-            :relationshipStats="nvlGraphRef?.relationshipStats"
+            :nodeStats="overallNodeStats"
+            :relationshipStats="overallRelationshipStats"
             :totalNodes="graphData?.nodes.length || 0"
             :totalRelationships="graphData?.links.length || 0"
             :isProcessing="isProcessing"
@@ -542,6 +586,7 @@ watch(hasGraph, (has, prev) => {
           @relationship-select="handleRelationshipSelect"
           @node-delete="handleNodeRemoveFromCanvas"
           @node-drop="handleNodeDrop"
+          @node-expand="handleNodeExpand"
         />
         <!-- 빈 상태 오버레이 -->
         <div v-if="!hasGraph" class="empty-state empty-overlay">
@@ -663,8 +708,8 @@ watch(hasGraph, (has, prev) => {
           <NodeDetailPanel
             :node="selectedNode"
             :relationship="selectedRelationship"
-            :nodeStats="nvlGraphRef?.nodeStats"
-            :relationshipStats="nvlGraphRef?.relationshipStats"
+            :nodeStats="overallNodeStats"
+            :relationshipStats="overallRelationshipStats"
             :totalNodes="graphData?.nodes.length || 0"
             :totalRelationships="graphData?.links.length || 0"
             :isProcessing="isProcessing"

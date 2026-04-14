@@ -9,7 +9,6 @@ import UploadTree from './UploadTree.vue'
 import JsonViewer from './JsonViewer.vue'
 import DataConfirmModal from '@/components/common/DataConfirmModal.vue'
 import type { DataAction } from '@/components/common/DataConfirmModal.vue'
-import PipelineControlPanel from './PipelineControlPanel.vue'
 import { buildUploadTreeFromUploadedFiles, uniqueFilesByRelPath } from '@/utils/upload'
 import { roboApi, type DetectTypesResponse } from '@/services/api'
 import type { FileTypeResult } from '@/services/api'
@@ -659,9 +658,6 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
       @add-files="handleAddFiles"
       @files-updated="handleFilesUpdated"
     />
-    
-    <!-- 파이프라인 제어 패널 -->
-    <PipelineControlPanel :is-visible="isProcessing" />
     
     <!-- 데이터 확인 모달 -->
     <DataConfirmModal

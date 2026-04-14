@@ -30,11 +30,16 @@ import {
 } from '@/components/icons'
 import type { Component } from 'vue'
 
+import { useNavigatorStore } from '@/features/graph/stores/navigator'
+
 const sessionStore = useSessionStore()
-const { activeTab, isNavigatorPanelOpen, graphActiveView } = storeToRefs(sessionStore)
+const navigatorStore = useNavigatorStore()
+const { activeTab } = storeToRefs(sessionStore)
+const { isPanelOpen: isNavigatorPanelOpen, activeView: graphActiveView }
+  = storeToRefs(navigatorStore)
 
 const toggleNavigator = () => {
-  sessionStore.setNavigatorPanelOpen(!isNavigatorPanelOpen.value)
+  navigatorStore.setPanelOpen(!isNavigatorPanelOpen.value)
 }
 
 // 메뉴 확장 상태

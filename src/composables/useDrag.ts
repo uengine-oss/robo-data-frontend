@@ -50,16 +50,17 @@ export function useDrag(options: UseDragOptions = {}): UseDragReturn {
 
   function onMouseMove(e: MouseEvent) {
     if (!isDragging.value) return
-    
+
     let newX = offsetX + (e.clientX - startX)
     let newY = offsetY + (e.clientY - startY)
-    
+
     if (boundToWindow) {
-      // 화면 밖으로 나가지 않도록 제한
-      newX = Math.max(-window.innerWidth + 100, Math.min(0, newX))
-      newY = Math.max(0, Math.min(window.innerHeight - 100, newY))
+      // 화면 안에 최소 100px 은 보이도록 clamp (CSS left/top 기반 좌표).
+      const PAD = 100
+      newX = Math.max(0, Math.min(window.innerWidth - PAD, newX))
+      newY = Math.max(0, Math.min(window.innerHeight - PAD, newY))
     }
-    
+
     x.value = newX
     y.value = newY
   }

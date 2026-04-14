@@ -4,11 +4,12 @@
  * 인제스천 진행 상태를 플로팅 팝업으로 표시
  * 메타데이터 관련 탭 전체에서 보임
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useProjectStore } from '@/stores/project'
 import { useDrag } from '@/composables/useDrag'
 import { IconX, IconChevronDown } from '@/components/icons'
+import type { PipelinePhaseInfo } from '@/services/api'
 
 const projectStore = useProjectStore()
 const {
@@ -17,13 +18,51 @@ const {
   totalPhases,
   currentPhase,
   currentPhaseProgress,
-  currentPhaseName,
   isPipelinePaused,
   graphEvents,
-  consoleMessages
+  consoleMessages,
+  pipelinePhases,
+  pipelineStatus,
 } = storeToRefs(projectStore)
 
 const { pausePipeline, resumePipeline, clearMessages } = projectStore
+
+// phases 메타 로드 + 진행 중 500ms 폴링
+onMounted(async () => {
+  if (pipelinePhases.value.length === 0) {
+    await projectStore.fetchPipelinePhases()
+  }
+})
+let statusPollingId: ReturnType<typeof setInterval> | null = null
+watch(isProcessing, (processing) => {
+  if (processing) {
+    statusPollingId = setInterval(() => projectStore.fetchPipelineStatus(), 500)
+  } else if (statusPollingId) {
+    clearInterval(statusPollingId)
+    statusPollingId = null
+  }
+}, { immediate: true })
+onUnmounted(() => {
+  if (statusPollingId) clearInterval(statusPollingId)
+})
+
+const currentPhaseOrder = computed(() => pipelineStatus.value?.phaseOrder ?? -1)
+
+function phaseStatusClass(phase: PipelinePhaseInfo): string {
+  if (phase.order < currentPhaseOrder.value) return 'done'
+  if (phase.order === currentPhaseOrder.value) {
+    return isPipelinePaused.value ? 'paused' : 'active'
+  }
+  return 'pending'
+}
+
+function phaseStatusIcon(phase: PipelinePhaseInfo): string {
+  if (phase.order < currentPhaseOrder.value) return '✓'
+  if (phase.order === currentPhaseOrder.value) {
+    return isPipelinePaused.value ? '⏸' : '▶'
+  }
+  return '○'
+}
 
 // 드래그 기능
 const { x, y, isDragging, startDrag } = useDrag({
@@ -35,7 +74,7 @@ const { x, y, isDragging, startDrag } = useDrag({
 // 패널 상태
 const isCollapsed = ref(false)
 const isMinimized = ref(false)
-const activeTab = ref<'progress' | 'console'>('progress')
+const activeTab = ref<'phases' | 'progress' | 'console'>('phases')
 
 // 진행률 계산 — Phase별 독립 0-100%
 const progress = computed(() => currentPhaseProgress.value)
@@ -217,7 +256,15 @@ watch(hasRecentError, (hasError) => {
 
         <!-- 탭 -->
         <div class="tabs">
-          <button 
+          <button
+            class="tab-btn"
+            :class="{ active: activeTab === 'phases' }"
+            @click="activeTab = 'phases'"
+          >
+            단계
+            <span class="tab-count">{{ pipelinePhases.length }}</span>
+          </button>
+          <button
             class="tab-btn"
             :class="{ active: activeTab === 'progress' }"
             @click="activeTab = 'progress'"
@@ -225,7 +272,7 @@ watch(hasRecentError, (hasError) => {
             그래프 객체
             <span class="tab-count">{{ graphEvents?.length || 0 }}</span>
           </button>
-          <button 
+          <button
             class="tab-btn"
             :class="{ active: activeTab === 'console' }"
             @click="activeTab = 'console'"
@@ -233,6 +280,25 @@ watch(hasRecentError, (hasError) => {
             콘솔
             <span class="tab-count">{{ consoleMessages.length }}</span>
           </button>
+        </div>
+
+        <!-- 단계 타임라인 -->
+        <div v-show="activeTab === 'phases'" class="phase-timeline">
+          <div
+            v-for="phase in pipelinePhases"
+            :key="phase.phase"
+            class="phase-row"
+            :class="phaseStatusClass(phase)"
+          >
+            <span class="phase-icon">{{ phaseStatusIcon(phase) }}</span>
+            <div class="phase-info">
+              <span class="phase-name">{{ phase.name }}</span>
+              <span class="phase-desc">{{ phase.description }}</span>
+            </div>
+          </div>
+          <div v-if="pipelinePhases.length === 0" class="empty-hint">
+            대기 중
+          </div>
         </div>
 
         <!-- 이벤트 스트림 -->
@@ -699,6 +765,72 @@ watch(hasRecentError, (hasError) => {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* ─────────── 단계 타임라인 ─────────── */
+.phase-timeline {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 6px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.phase-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+.phase-row .phase-icon {
+  width: 18px;
+  flex-shrink: 0;
+  font-weight: 700;
+  text-align: center;
+  font-family: 'JetBrains Mono', monospace;
+}
+.phase-row .phase-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.phase-row .phase-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text, #c1c2c5);
+}
+.phase-row .phase-desc {
+  font-size: 10px;
+  color: var(--color-text-muted, #868e96);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.phase-row.done {
+  opacity: 0.65;
+  .phase-icon { color: #40c057; }
+}
+.phase-row.active {
+  background: rgba(34, 139, 230, 0.12);
+  .phase-icon { color: #74c0fc; }
+  .phase-name { color: #74c0fc; }
+}
+.phase-row.paused {
+  background: rgba(250, 176, 5, 0.1);
+  .phase-icon { color: #ffd43b; }
+}
+.phase-row.pending {
+  opacity: 0.45;
+  .phase-icon { color: #868e96; }
+}
+.empty-hint {
+  padding: 20px;
+  text-align: center;
+  color: var(--color-text-muted, #868e96);
+  font-size: 11px;
 }
 </style>
 
