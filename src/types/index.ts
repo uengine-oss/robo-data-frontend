@@ -33,6 +33,7 @@ export interface BackendRequestMetadata {
   nameCase?: NameCaseOption
   datasourceName?: string | null  // 타겟 데이터 소스 이름
   inferFkRelations?: boolean  // FK 관계 자동 추론 여부 (기본: false)
+  targetFolder?: string  // source/ 아래 강제 배치할 폴더 prefix (폴더 픽커로 안 올린 단일 파일에만 적용)
 }
 
 // ============================================================================
