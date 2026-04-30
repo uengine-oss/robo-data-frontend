@@ -2,7 +2,7 @@
 /**
  * NavigatorPanel.vue
  * 좌측 SideNav 옆에 붙는 고정 사이드 패널.
- * 분석 스트림으로 채워지는 nodeMap 을 소스로 MODULES / TABLES / UNRESOLVED 트리를 렌더.
+ * 분석 스트림으로 채워지는 nodeMap 을 소스로 MODULES / TABLES 트리를 렌더.
  * 노드 드래그 → GraphTab 캔버스에 drop 하면 1-hop 확장 누적.
  */
 import { computed, onBeforeUnmount, ref } from 'vue'
@@ -20,7 +20,7 @@ const navigatorStore = useNavigatorStore()
 
 const { isPanelOpen } = storeToRefs(navigatorStore)
 const { isProcessing, nodeMap } = storeToRefs(projectStore)
-const { moduleTree, tableList, unresolvedList, expandedSections, searchQuery } =
+const { moduleTree, tableList, expandedSections, searchQuery } =
   storeToRefs(navigatorStore)
 
 const totalNodeCount = computed(() => nodeMap.value.size)
@@ -34,7 +34,6 @@ interface Section {
 const sections = computed<Section[]>(() => [
   { id: 'MODULES', label: 'MODULES', items: moduleTree.value },
   { id: 'TABLES', label: 'TABLES', items: tableList.value },
-  { id: 'UNRESOLVED', label: 'UNRESOLVED', items: unresolvedList.value }
 ])
 
 function isSectionOpen(id: NavigatorSection): boolean {
@@ -83,7 +82,7 @@ onBeforeUnmount(() => {
   >
     <header class="nav-header">
       <span class="nav-title">
-        📂 Project Navigator
+        📂 Navigator
         <span v-if="isProcessing" class="spinner" title="분석 진행 중" />
       </span>
       <div class="nav-actions">
@@ -117,8 +116,7 @@ onBeforeUnmount(() => {
         </header>
         <div v-if="isSectionOpen(sec.id)" class="section-body">
           <div v-if="sec.items.length === 0" class="empty-placeholder">
-            <template v-if="isProcessing">분석 중... 곧 채워집니다</template>
-            <template v-else>항목 없음</template>
+            항목 없음
           </div>
           <NavigatorTreeNode
             v-for="item in sec.items"

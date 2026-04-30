@@ -9,6 +9,7 @@
  * 인터랙션:
  *   - addNodeToCanvas(id)      : 드롭/검색선택/트리 더블클릭 — 그 노드만 추가
  *   - expandNodeOnCanvas(id)   : 캔버스 노드 더블클릭 — 1-hop 이웃 확장 (누적)
+ *   - collapseNodeOnCanvas(id) : 컨텍스트 메뉴 접기 — 그 노드와만 연결된 이웃 제거
  *   - removeFromCanvas(id)     : 컨텍스트 메뉴 제거
  *   - clearCanvas()            : 전체 비우기
  */
@@ -63,6 +64,21 @@ export const useCanvasStore = defineStore('canvas', () => {
     canvasNodeIds.value = next
   }
 
+  /**
+   * 노드의 1단계 이웃을 모두 캔버스에서 제거. expand 의 정확한 역연산.
+   * 자기 노드는 남고 이웃 전부 제거 — 자기 노드 자체를 빼려면 removeFromCanvas 사용.
+   */
+  function collapseNodeOnCanvas(nodeId: string): void {
+    if (!canvasNodeIds.value.has(nodeId)) return
+    const ids = canvasNodeIds.value
+    const next = new Set(ids)
+    for (const link of projectStore.linkMap.values()) {
+      if (link.source === nodeId && ids.has(link.target)) next.delete(link.target)
+      else if (link.target === nodeId && ids.has(link.source)) next.delete(link.source)
+    }
+    canvasNodeIds.value = next
+  }
+
   function clearCanvas(): void {
     canvasNodeIds.value = new Set()
   }
@@ -72,6 +88,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     canvasGraphData,
     addNodeToCanvas,
     expandNodeOnCanvas,
+    collapseNodeOnCanvas,
     removeFromCanvas,
     clearCanvas,
   }

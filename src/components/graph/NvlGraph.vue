@@ -82,6 +82,7 @@ const emit = defineEmits<{
   'node-select': [node: GraphNode | null]
   'relationship-select': [relationship: GraphLink | null]
   'node-delete': [nodeId: string]
+  'node-collapse': [nodeId: string]
   'node-drop': [payload: { nodeId: string; nodeType?: string; labels?: string[] }]
   'node-expand': [nodeId: string]
 }>()
@@ -382,6 +383,17 @@ function handleRemoveFromCanvas(event?: Event): void {
   closeContextMenu()
 }
 
+function handleCollapse(event?: Event): void {
+  if (event) {
+    event.stopPropagation()
+    event.preventDefault()
+  }
+  const id = contextMenuNodeId.value
+  if (!id) return
+  emit('node-collapse', id)
+  closeContextMenu()
+}
+
 // ============================================================================
 // Drag & Drop (Navigator → 캔버스)
 // ============================================================================
@@ -540,6 +552,13 @@ defineExpose({
         @click.stop.prevent
         @mousedown.stop.prevent
       >
+        <button
+          class="context-menu-item"
+          @mousedown.stop.prevent="handleCollapse($event)"
+        >
+          <span class="icon">▾</span>
+          <span>이웃 접기</span>
+        </button>
         <button
           class="context-menu-item danger"
           @mousedown.stop.prevent="handleRemoveFromCanvas($event)"

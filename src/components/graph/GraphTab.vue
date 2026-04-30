@@ -441,6 +441,15 @@ function handleNodeExpand(nodeId: string): void {
   canvasStore.expandNodeOnCanvas(nodeId)
 }
 
+/**
+ * 컨텍스트 메뉴 "이웃 접기" → 그 노드와만 연결된 이웃을 캔버스에서 제거.
+ * expand 의 직관적 역연산.
+ */
+function handleNodeCollapse(nodeId: string): void {
+  if (!nodeId) return
+  canvasStore.collapseNodeOnCanvas(nodeId)
+}
+
 watch(hasGraph, (has, prev) => {
   if (has && !prev) showNodePanel.value = true
 })
@@ -585,6 +594,7 @@ watch(hasGraph, (has, prev) => {
           @node-select="handleNodeSelect"
           @relationship-select="handleRelationshipSelect"
           @node-delete="handleNodeRemoveFromCanvas"
+          @node-collapse="handleNodeCollapse"
           @node-drop="handleNodeDrop"
           @node-expand="handleNodeExpand"
         />

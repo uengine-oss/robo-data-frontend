@@ -4,7 +4,7 @@
  * Navigator 사이드 패널의 모든 상태를 관리한다:
  *   - UI 상태        : 패널 열림/닫힘, 현재 Graph 하위 뷰(schema/uml/graph)
  *   - 트리 상태      : 섹션 확장, 노드 확장, 검색어
- *   - 파생 트리 뷰   : MODULES / TABLES / UNRESOLVED (projectStore 기반 computed)
+ *   - 파생 트리 뷰   : MODULES / TABLES (projectStore 기반 computed)
  *
  * projectStore.nodeMap / linkMap 을 단일 진실 소스로 삼으며, 분석 스트림으로 데이터가
  * 쌓이는 동안 Pinia 반응성으로 트리가 자동 갱신된다.
@@ -19,7 +19,7 @@ import type { GraphLink, GraphNode } from '@/types'
 // 타입 정의
 // ═══════════════════════════════════════════════════════════════════════════
 
-export type NavigatorSection = 'MODULES' | 'TABLES' | 'UNRESOLVED'
+export type NavigatorSection = 'MODULES' | 'TABLES'
 export type GraphSubView = 'schema' | 'uml' | 'graph'
 
 export interface NavigatorTreeItem {
@@ -48,9 +48,13 @@ const EXCLUDED_LABELS = new Set([
   'VARIABLE', 'CONSTANT', 'GLOBAL_VARIABLE', 'DEFINE',
 ])
 
-/** 자식으로 확장할 관계 타입. */
+/** 자식으로 확장할 관계 타입.
+ *  같은 의미 (컨테이너 → 자식) 의 다른 이름들 — backend 의 의미 enum 을 그대로 인지.
+ *  HAS_FUNCTION 은 framework 의 module/class → function (프로그래밍 함수),
+ *  HAS_PROCEDURE 는 dbms 의 file → stored procedure/function/trigger 로 의미가 다름. */
 const CHILD_REL_TYPES = new Set([
   'HAS_METHOD', 'HAS_FUNCTION', 'HAS_CLASS', 'HAS_INTERFACE',
+  'HAS_PROCEDURE',        // FILE → PROCEDURE/FUNCTION/TRIGGER (dbms)
   'CONTAINS',
   'HAS_COLUMN',           // Table → Column
   'HAS_BUSINESS_LOGIC',   // Function → BusinessLogic
@@ -274,23 +278,6 @@ function buildTablesTree(
   return roots
 }
 
-/** UNRESOLVED 섹션: EXTERNAL placeholder 평면 목록. */
-function buildUnresolvedList(nodeMap: Map<string, GraphNode>): NavigatorTreeItem[] {
-  const items: NavigatorTreeItem[] = []
-  for (const node of nodeMap.values()) {
-    if (!node.labels.includes('EXTERNAL')) continue
-    items.push({
-      id: node.id,
-      name: pickDisplayName(node),
-      nodeType: pickDisplayLabel(node.labels),
-      labels: node.labels,
-      children: [],
-    })
-  }
-  items.sort((a, b) => a.name.localeCompare(b.name))
-  return items
-}
-
 /** 검색 필터 — 자기 자신이나 자손 중 매칭이 있으면 유지. */
 function filterTree(items: NavigatorTreeItem[], query: string): NavigatorTreeItem[] {
   if (!query) return items
@@ -336,10 +323,6 @@ export const useNavigatorStore = defineStore('navigator', () => {
       buildTablesTree(projectStore.nodeMap, projectStore.linkMap),
       searchQuery.value,
     )
-  )
-
-  const unresolvedList = computed(() =>
-    filterTree(buildUnresolvedList(projectStore.nodeMap), searchQuery.value)
   )
 
   // ── UI 액션 ──
@@ -411,6 +394,5 @@ export const useNavigatorStore = defineStore('navigator', () => {
     // 파생 뷰
     moduleTree,
     tableList,
-    unresolvedList,
   }
 })

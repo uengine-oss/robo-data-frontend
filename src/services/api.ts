@@ -712,7 +712,7 @@ export const roboSchemaApi = {
   ): Promise<RoboSchemaColumnInfo[]> {
     const params = new URLSearchParams()
     if (options?.schema) params.append('schema', options.schema)
-    
+
     const response = await fetch(`${ROBO_BASE_URL}/schema/tables/${tableName}/columns?${params}`)
     
     if (!response.ok) {
@@ -781,7 +781,7 @@ export const roboSchemaApi = {
     const params = new URLSearchParams()
     if (options?.schema) params.append('schema', options.schema)
     if (options?.columnName) params.append('column_name', options.columnName)
-    
+
     const response = await fetch(`${ROBO_BASE_URL}/schema/tables/${encodeURIComponent(tableName)}/references?${params}`)
     
     if (!response.ok) {
