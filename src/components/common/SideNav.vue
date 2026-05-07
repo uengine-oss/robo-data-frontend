@@ -30,7 +30,7 @@ import {
 } from '@/components/icons'
 import type { Component } from 'vue'
 
-import { useNavigatorStore } from '@/features/graph/stores/navigator'
+import { useNavigatorStore } from '@/stores/navigator'
 
 const sessionStore = useSessionStore()
 const navigatorStore = useNavigatorStore()

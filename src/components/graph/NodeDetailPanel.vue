@@ -31,6 +31,8 @@ interface Props {
   relationshipStats?: Map<string, Stats>
   totalNodes?: number
   totalRelationships?: number
+  /** 캔버스에 표시 중인 노드가 있는가 — '캔버스 비우기' 버튼 표시 조건 */
+  hasGraph?: boolean
   isProcessing?: boolean
   activeFilters?: string[]  // 활성화된 필터 (노드 라벨)
   allNodes?: GraphNode[]   // 전체 노드 목록 (검색용)
@@ -59,6 +61,7 @@ const LONG_VALUE_THRESHOLD = 50
 const props = withDefaults(defineProps<Props>(), {
   totalNodes: 0,
   totalRelationships: 0,
+  hasGraph: false,
   isProcessing: false,
   activeFilters: () => [],
   allNodes: () => []
@@ -67,7 +70,6 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   'node-type-select': [nodeType: string, topOffset: number]
   'relationship-type-select': [relType: string, topOffset: number]
-  'style-updated': []
   'label-filter': [label: string]
   'clear-filters': []
   'node-select': [node: GraphNode]
@@ -498,46 +500,46 @@ function getNodeSubInfo(node: GraphNode): string {
               검색 결과가 없습니다
             </div>
           </div>
-          <!-- 캔버스 초기화 버튼 (필터 걸려있을 때만 표시) -->
+          <!-- 캔버스 비우기 버튼 (캔버스에 노드 있을 때만 표시. 필터는 건드리지 않음) -->
           <button
-            v-if="activeFilters.length > 0"
+            v-if="hasGraph"
             class="reset-graph-btn"
             @click="emit('reset-graph')"
-            title="캔버스 비우기 및 필터 초기화"
+            title="캔버스의 노드만 비웁니다 (필터는 유지)"
           >
-            🔄 캔버스 초기화
+            🔄 캔버스 비우기
           </button>
         </div>
 
         <!-- Node labels 섹션 -->
         <div class="stats-section">
           <div class="section-header">
-            <span class="section-title">Node labels</span>
-            <button 
-              v-if="hasActiveFilters()" 
-              class="clear-filter-btn"
-              @click="handleClearFilters"
-              title="필터 초기화"
-            >
-              ✕ 필터 해제
-            </button>
+            <span class="section-title">
+              Node labels
+              <span v-if="hasActiveFilters()" class="filter-count">
+                ({{ activeFilters.length }}/{{ sortedNodeStats.length }} 활성)
+              </span>
+            </span>
+            <span
+              class="help-hint"
+              title="클릭: 필터 토글 (다중 선택 가능) · 우클릭: 색상 변경"
+            >?</span>
           </div>
           <div class="badge-container">
-            <span 
-              class="stat-badge total clickable"
-              :class="{ dimmed: hasActiveFilters() }"
-              @click="handleClearFilters"
-              title="전체 보기"
+            <span
+              class="stat-badge total"
+              :class="{ clickable: hasActiveFilters(), dimmed: !hasActiveFilters() }"
+              @click="hasActiveFilters() && handleClearFilters()"
+              :title="hasActiveFilters() ? `모든 필터 해제 (현재 ${activeFilters.length}개 활성)` : '필터 없음'"
             >* ({{ totalNodes }})</span>
-            <span 
-              v-for="stat in sortedNodeStats" 
+            <span
+              v-for="stat in sortedNodeStats"
               :key="stat.label"
               class="stat-badge clickable"
               :class="{ active: isFilterActive(stat.label), dimmed: hasActiveFilters() && !isFilterActive(stat.label) }"
               :style="{ background: stat.color }"
               @click="handleLabelFilter(stat.label)"
               @contextmenu="handleNodeTypeContextMenu($event, stat.label)"
-              :title="`클릭: 필터링 / 우클릭: 색상 변경`"
             >
               {{ stat.label }} ({{ stat.count }})
             </span>
@@ -962,7 +964,7 @@ function getNodeSubInfo(node: GraphNode): string {
 }
 
 .stats-section {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
   flex-shrink: 0;
 }
 
@@ -974,25 +976,41 @@ function getNodeSubInfo(node: GraphNode): string {
 }
 
 .section-title {
+  display: block;
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text-bright);
+  margin-bottom: 12px;
 }
 
-.clear-filter-btn {
-  padding: 3px 8px;
-  font-size: 10px;
+.section-header .section-title {
+  margin-bottom: 0; // section-header 가 자체 margin 을 가짐
+}
+
+.filter-count {
+  margin-left: 6px;
+  font-size: 11px;
   font-weight: 500;
-  background: rgba(250, 82, 82, 0.15);
-  color: var(--color-error);
-  border: 1px solid rgba(250, 82, 82, 0.3);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  
+  color: var(--color-text-muted);
+}
+
+.help-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: help;
+  user-select: none;
+
   &:hover {
-    background: rgba(250, 82, 82, 0.25);
-    border-color: var(--color-error);
+    background: var(--color-bg);
+    color: var(--color-text);
   }
 }
 
@@ -1044,9 +1062,15 @@ function getNodeSubInfo(node: GraphNode): string {
   
   &.dimmed {
     opacity: 0.4;
-    
+
     &:hover {
       opacity: 0.7;
+    }
+
+    // dimmed 가 clickable 이 아니면 (예: 활성 필터 0인 * 뱃지) 호버/클릭 무반응
+    &:not(.clickable) {
+      cursor: default;
+      pointer-events: none;
     }
   }
 }

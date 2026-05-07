@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import { logger } from '@/utils/logger'
 import { Handle, Position } from '@vue-flow/core'
 import { computed, inject, ref, watch } from 'vue'
 import type { Text2SqlColumnInfo } from '@/types'
 import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
-import { useProjectStore } from '@/stores/project'
+import { useAnalyzerStore } from '@/stores/analyzer'
 import { roboSchemaApi } from '@/services/api'
+import { getDescriptionColor, getDescriptionSourceLabel } from '@/utils/descriptionColor'
 
 interface Behavior {
   name: string
@@ -64,7 +66,7 @@ const onLoadRelated = inject<(tableName: string) => void>('onLoadRelated')
 
 // 캔버스 스토어 (실시간 업데이트 감지용)
 const canvasStore = useSchemaCanvasStore()
-const projectStore = useProjectStore()
+const projectStore = useAnalyzerStore()
 
 // 노드 업데이트 애니메이션 상태
 const isNodeUpdating = ref(false)
@@ -132,34 +134,7 @@ function truncateDescription(desc: string, maxLen = 20): string {
 function isCodeSource(source?: string): boolean {
   return source === 'procedure' || source === 'code'
 }
-
-// 설명 출처에 따른 색상 반환 (범례와 일치)
-// code(코드 분석): 하늘색, ddl: 초록색, user: 주황색
-const descriptionSourceColors: Record<string, string> = {
-  procedure: '#38bdf8',  // 하늘색 (코드 분석)
-  code: '#38bdf8',       // 하늘색 (코드 분석)
-  ddl: '#22c55e',        // 초록색 (DDL에서 추출)
-  user: '#f59e0b',       // 주황색 (사용자 입력)
-}
-
-// 기본 텍스트 색상 (출처가 없을 때)
-const defaultDescColor = '#c1c2c5'
-
-function getDescriptionColor(source?: string): string {
-  if (!source) return defaultDescColor
-  return descriptionSourceColors[source] || defaultDescColor
-}
-
-function getDescriptionSourceLabel(source?: string): string {
-  if (!source) return ''
-  const labels: Record<string, string> = {
-    ddl: 'DDL',
-    procedure: '코드 분석',
-    code: '코드 분석',
-    user: '사용자'
-  }
-  return labels[source] || ''
-}
+// 설명 출처별 색/라벨은 @/utils/descriptionColor 에서 import
 
 // 호버 시 출처 칩 표시 상태
 const isDescriptionHovered = ref(false)
@@ -191,7 +166,7 @@ async function loadProcedureReferences() {
     procedureReferences.value = result.references || []
     frameworkReferences.value = result.framework_references || []
   } catch (error) {
-    console.error('Failed to load procedure references:', error)
+    logger.error('Failed to load procedure references:', error)
     procedureReferences.value = []
     frameworkReferences.value = []
   } finally {
@@ -236,7 +211,7 @@ async function loadColumnReferences(columnName: string) {
     columnReferences.value = result.references || []
     columnFrameworkReferences.value = result.framework_references || []
   } catch (error) {
-    console.error('Failed to load column references:', error)
+    logger.error('Failed to load column references:', error)
     columnReferences.value = []
     columnFrameworkReferences.value = []
   } finally {
@@ -262,25 +237,25 @@ function handleColumnSourceClick(event: MouseEvent, columnName: string) {
 
 // 프로시저 이름 클릭 시 처리 - 우측 소스 코드 패널에 표시
 function handleProcedureClick(procRef: ProcedureReference) {
-  console.log('[handleProcedureClick] 클릭됨:', procRef)
-  console.log('[handleProcedureClick] procedure_name:', procRef.procedure_name)
-  console.log('[handleProcedureClick] file_name:', procRef.file_name)
-  console.log('[handleProcedureClick] file_directory:', procRef.file_directory)
-  console.log('[handleProcedureClick] statement_line:', procRef.statement_line)
+  logger.debug('[handleProcedureClick] 클릭됨:', procRef)
+  logger.debug('[handleProcedureClick] procedure_name:', procRef.procedure_name)
+  logger.debug('[handleProcedureClick] file_name:', procRef.file_name)
+  logger.debug('[handleProcedureClick] file_directory:', procRef.file_directory)
+  logger.debug('[handleProcedureClick] statement_line:', procRef.statement_line)
   
   const lineNumber = procRef.statement_line || procRef.start_line || 1
   
   // 업로드된 파일에서 해당 파일 찾기
   const allFiles = [...projectStore.uploadedFiles, ...projectStore.uploadedDdlFiles]
-  console.log('[handleProcedureClick] 업로드된 파일 수:', allFiles.length)
-  console.log('[handleProcedureClick] 파일 목록:', allFiles.map(f => f.fileName))
+  logger.debug('[handleProcedureClick] 업로드된 파일 수:', allFiles.length)
+  logger.debug('[handleProcedureClick] 파일 목록:', allFiles.map(f => f.fileName))
   
   let foundFile = null
   
   // 1. file_directory로 매칭
   if (procRef.file_directory) {
     const normalizedDir = procRef.file_directory.toLowerCase()
-    console.log('[handleProcedureClick] file_directory로 검색:', normalizedDir)
+    logger.debug('[handleProcedureClick] file_directory로 검색:', normalizedDir)
     foundFile = allFiles.find(f => {
       const filePath = f.fileName.toLowerCase()
       const match = filePath === normalizedDir || 
@@ -288,7 +263,7 @@ function handleProcedureClick(procRef: ProcedureReference) {
              normalizedDir.endsWith(filePath) ||
              filePath.includes(normalizedDir) ||
              normalizedDir.includes(filePath)
-      if (match) console.log('[handleProcedureClick] file_directory 매칭:', f.fileName)
+      if (match) logger.debug('[handleProcedureClick] file_directory 매칭:', f.fileName)
       return match
     })
   }
@@ -296,11 +271,11 @@ function handleProcedureClick(procRef: ProcedureReference) {
   // 2. file_name으로 매칭
   if (!foundFile && procRef.file_name) {
     const normalizedFileName = procRef.file_name.toLowerCase()
-    console.log('[handleProcedureClick] file_name으로 검색:', normalizedFileName)
+    logger.debug('[handleProcedureClick] file_name으로 검색:', normalizedFileName)
     foundFile = allFiles.find(f => {
       const fileName = f.fileName.split('/').pop()?.toLowerCase() || ''
       const match = fileName === normalizedFileName
-      if (match) console.log('[handleProcedureClick] file_name 매칭:', f.fileName)
+      if (match) logger.debug('[handleProcedureClick] file_name 매칭:', f.fileName)
       return match
     })
   }
@@ -308,20 +283,20 @@ function handleProcedureClick(procRef: ProcedureReference) {
   // 3. procedure_name으로 매칭 (fallback)
   if (!foundFile) {
     const normalizedProcName = procRef.procedure_name.toLowerCase()
-    console.log('[handleProcedureClick] procedure_name으로 검색:', normalizedProcName)
+    logger.debug('[handleProcedureClick] procedure_name으로 검색:', normalizedProcName)
     foundFile = allFiles.find(f => {
       const fileName = f.fileName.split('/').pop() || ''
       const fileNameWithoutExt = fileName.replace(/\.[^.]+$/, '').toLowerCase()
       const match = fileNameWithoutExt === normalizedProcName || 
              fileNameWithoutExt.includes(normalizedProcName) ||
              normalizedProcName.includes(fileNameWithoutExt)
-      if (match) console.log('[handleProcedureClick] procedure_name 매칭:', f.fileName)
+      if (match) logger.debug('[handleProcedureClick] procedure_name 매칭:', f.fileName)
       return match
     })
   }
   
-  console.log('[handleProcedureClick] 찾은 파일:', foundFile?.fileName)
-  console.log('[handleProcedureClick] 파일 내용 존재:', !!foundFile?.fileContent)
+  logger.debug('[handleProcedureClick] 찾은 파일:', foundFile?.fileName)
+  logger.debug('[handleProcedureClick] 파일 내용 존재:', !!foundFile?.fileContent)
   
   // 방문 표시 추가
   const refKey = `${procRef.procedure_name}-${procRef.statement_line}`
@@ -329,7 +304,7 @@ function handleProcedureClick(procRef: ProcedureReference) {
   
   if (foundFile && foundFile.fileContent) {
     // 소스 코드 패널 열기
-    console.log('[handleProcedureClick] 소스 패널 열기 호출')
+    logger.debug('[handleProcedureClick] 소스 패널 열기 호출')
     canvasStore.openSourceCodePanel(
       procRef.file_name || foundFile.fileName.split('/').pop() || '',
       procRef.file_directory || foundFile.fileName,
@@ -337,12 +312,12 @@ function handleProcedureClick(procRef: ProcedureReference) {
       lineNumber,
       procRef.procedure_name
     )
-    console.log('[handleProcedureClick] 소스 패널 상태:', canvasStore.sourceCodePanel)
+    logger.debug('[handleProcedureClick] 소스 패널 상태:', canvasStore.sourceCodePanel)
   } else {
-    console.warn(`[handleProcedureClick] 파일을 찾을 수 없음: ${procRef.file_directory || procRef.file_name || procRef.procedure_name}`)
+    logger.warn(`[handleProcedureClick] 파일을 찾을 수 없음: ${procRef.file_directory || procRef.file_name || procRef.procedure_name}`)
     // 파일이 없어도 API 응답 데이터만으로 패널 열기 시도
     if (procRef.file_name || procRef.procedure_name) {
-      console.log('[handleProcedureClick] 파일 없이 패널 열기 시도')
+      logger.debug('[handleProcedureClick] 파일 없이 패널 열기 시도')
       canvasStore.openSourceCodePanel(
         procRef.file_name || procRef.procedure_name || 'Unknown',
         procRef.file_directory || '',

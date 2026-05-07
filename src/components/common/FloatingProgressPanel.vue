@@ -6,12 +6,12 @@
  */
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useProjectStore } from '@/stores/project'
+import { useAnalyzerStore } from '@/stores/analyzer'
 import { useDrag } from '@/composables/useDrag'
 import { IconX, IconChevronDown } from '@/components/icons'
 import type { PipelinePhaseInfo } from '@/services/api'
 
-const projectStore = useProjectStore()
+const projectStore = useAnalyzerStore()
 const {
   isProcessing,
   currentStep,

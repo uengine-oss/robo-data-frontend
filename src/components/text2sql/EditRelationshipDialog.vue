@@ -5,6 +5,7 @@
  * - 관계 생성 (mode='create')
  * - 관계 편집 (mode='edit'): 관계 이름 변경, matchStrategy, cardinality 설정 변경, 관계 삭제
  */
+import { logger } from '@/utils/logger'
 import { ref, computed, onMounted, watch } from 'vue'
 import { Teleport } from 'vue'
 import { IconX, IconCheck, IconLink, IconTrash, IconAlertTriangle } from '@/components/icons'
@@ -75,7 +76,7 @@ async function loadObjectTypes() {
       objectTypes.value = data.objectTypes || []
     }
   } catch (err) {
-    console.error('ObjectType 목록 로드 실패:', err)
+    logger.error('ObjectType 목록 로드 실패:', err)
   } finally {
     isLoadingTypes.value = false
   }
@@ -99,7 +100,7 @@ async function loadSourceColumns() {
       }
     }
   } catch (err) {
-    console.error('소스 컬럼 로드 실패:', err)
+    logger.error('소스 컬럼 로드 실패:', err)
   }
 }
 
@@ -125,7 +126,7 @@ async function loadTargetColumns() {
       }
     }
   } catch (err) {
-    console.error('타겟 컬럼 로드 실패:', err)
+    logger.error('타겟 컬럼 로드 실패:', err)
   } finally {
     isLoadingColumns.value = false
   }

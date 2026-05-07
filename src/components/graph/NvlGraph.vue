@@ -9,7 +9,8 @@
  * props 변경 시 즉시 diff 하여 NVL에 반영한다.
  */
 
-import { ref, onMounted, onUnmounted, watch, shallowRef, nextTick } from 'vue'
+import { logger } from '@/utils/logger'
+import { ref, computed, onMounted, onUnmounted, watch, shallowRef, nextTick } from 'vue'
 import { NVL } from '@neo4j-nvl/base'
 import {
   ClickInteraction,
@@ -85,6 +86,8 @@ const emit = defineEmits<{
   'node-collapse': [nodeId: string]
   'node-drop': [payload: { nodeId: string; nodeType?: string; labels?: string[] }]
   'node-expand': [nodeId: string]
+  'clear-filters': []
+  'open-navigator': []
 }>()
 
 // ============================================================================
@@ -97,6 +100,19 @@ const isInitializing = ref(false)
 
 const nodeStats = ref<Map<string, NodeStat>>(new Map())
 const relationshipStats = ref<Map<string, NodeStat>>(new Map())
+
+/** 현재 필터/렌더 결과로 캔버스에 표시 중인 노드 수 */
+const visibleNodeCount = ref(0)
+
+/**
+ * "필터는 걸려있는데 매치되는 노드가 0건" 상태 — 빈 캔버스에 안내 카드 표시.
+ * 데이터 자체가 비었거나 필터가 없는 경우엔 표시하지 않는다 (각각 다른 상태).
+ */
+const showFilterEmptyOverlay = computed(() =>
+  props.labelFilters.length > 0
+  && props.graphData.nodes.length > 0
+  && visibleNodeCount.value === 0
+)
 
 // 내부 맵 (id → NvlNode/Relationship) — 반응형 불필요
 const nodeMap = new Map<string, NvlNode>()
@@ -221,6 +237,7 @@ async function initNvl(): Promise<void> {
 
   setupInteractions()
   updateStats()
+  visibleNodeCount.value = nodeMap.size
 }
 
 function destroyNvl(): void {
@@ -232,6 +249,7 @@ function destroyNvl(): void {
   nodeMap.clear()
   relationshipMap.clear()
   isInitializing.value = false
+  visibleNodeCount.value = 0
 }
 
 /**
@@ -292,6 +310,7 @@ function syncGraph(): void {
   }
 
   updateStats()
+  visibleNodeCount.value = nodeMap.size
 }
 
 // ============================================================================
@@ -423,7 +442,7 @@ function onDrop(e: DragEvent): void {
       emit('node-drop', payload)
     }
   } catch (err) {
-    console.warn('[NvlGraph] drop payload 파싱 실패:', err)
+    logger.warn('[NvlGraph] drop payload 파싱 실패:', err)
   }
 }
 
@@ -568,6 +587,20 @@ defineExpose({
         </button>
       </div>
     </Transition>
+
+    <!-- 필터 적용 결과 0건 안내 (필터 활성 + 데이터 있음 + 매치 0) -->
+    <Transition name="fade">
+      <div v-if="showFilterEmptyOverlay" class="filter-empty-overlay">
+        <div class="filter-empty-card">
+          <div class="filter-empty-title">필터에 매치되는 노드가 없습니다</div>
+          <div class="filter-empty-hint">현재 캔버스에 활성 필터에 해당하는 노드가 없습니다.</div>
+          <div class="filter-empty-actions">
+            <button class="btn-primary" @click="emit('clear-filters')">필터 해제</button>
+            <button class="btn-secondary" @click="emit('open-navigator')">Navigator 열기</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -598,6 +631,76 @@ defineExpose({
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+// ============================================================================
+// 필터 매치 0건 안내 오버레이
+// ============================================================================
+
+.filter-empty-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.filter-empty-card {
+  pointer-events: auto;
+  background: var(--color-bg-secondary, #1e1f23);
+  border: 1px solid var(--color-border, #373a40);
+  border-radius: 12px;
+  padding: 20px 24px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  max-width: 320px;
+  text-align: center;
+}
+
+.filter-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-bright, #f8fafc);
+  margin-bottom: 6px;
+}
+
+.filter-empty-hint {
+  font-size: 12px;
+  color: var(--color-text-muted, #94a3b8);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.filter-empty-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+
+  button {
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: 6px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s ease;
+  }
+
+  .btn-primary {
+    background: var(--color-accent, #74c0fc);
+    color: white;
+
+    &:hover { filter: brightness(1.08); }
+  }
+
+  .btn-secondary {
+    background: transparent;
+    border-color: var(--color-border, #373a40);
+    color: var(--color-text, #c1c2c5);
+
+    &:hover { background: var(--color-bg-hover, #2c2e33); }
+  }
 }
 
 .context-menu {

@@ -12,7 +12,7 @@
 
 import { ref, computed, watch } from 'vue'
 import { useSessionStore, type ApiProvider } from '@/stores/session'
-import { useProjectStore } from '@/stores/project'
+import { useAnalyzerStore } from '@/stores/analyzer'
 import { storeToRefs } from 'pinia'
 import {
   IconSettings,
@@ -44,7 +44,7 @@ const emit = defineEmits<{
 // ============================================================================
 
 const sessionStore = useSessionStore()
-const projectStore = useProjectStore()
+const projectStore = useAnalyzerStore()
 
 const { theme: storeTheme, apiKey: storeApiKey, apiProvider: storeApiProvider } = storeToRefs(sessionStore)
 const { graphData } = storeToRefs(projectStore)

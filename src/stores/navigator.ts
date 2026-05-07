@@ -12,7 +12,7 @@
 
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { useProjectStore } from '@/stores/project'
+import { useAnalyzerStore } from '@/stores/analyzer'
 import type { GraphLink, GraphNode } from '@/types'
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -296,7 +296,7 @@ function filterTree(items: NavigatorTreeItem[], query: string): NavigatorTreeIte
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const useNavigatorStore = defineStore('navigator', () => {
-  const projectStore = useProjectStore()
+  const projectStore = useAnalyzerStore()
 
   // ── UI 상태 ──
   const isPanelOpen = ref(false)

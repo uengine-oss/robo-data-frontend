@@ -5,17 +5,18 @@
  * 분석 스트림으로 채워지는 nodeMap 을 소스로 MODULES / TABLES 트리를 렌더.
  * 노드 드래그 → GraphTab 캔버스에 drop 하면 1-hop 확장 누적.
  */
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useProjectStore } from '@/stores/project'
+import { useAnalyzerStore } from '@/stores/analyzer'
 import {
   useNavigatorStore,
   type NavigatorSection,
   type NavigatorTreeItem,
-} from '@/features/graph/stores/navigator'
+} from '@/stores/navigator'
+import { useResize } from '@/composables/useResize'
 import NavigatorTreeNode from './NavigatorTreeNode.vue'
 
-const projectStore = useProjectStore()
+const projectStore = useAnalyzerStore()
 const navigatorStore = useNavigatorStore()
 
 const { isPanelOpen } = storeToRefs(navigatorStore)
@@ -40,36 +41,16 @@ function isSectionOpen(id: NavigatorSection): boolean {
   return expandedSections.value.has(id)
 }
 
-// --- 리사이즈 (Panel 좌측 경계가 SideNav 오른쪽이므로 cursorX - panelLeft 로 폭 계산) ---
-const panelWidth = ref(300)
-const MIN_WIDTH = 220
-const MAX_WIDTH = 560
+// --- 리사이즈 ---
+// SideNav 오른쪽에 붙는 패널이므로 panel-left origin 사용 (cursorX - panelRef.left).
 const panelRef = ref<HTMLElement | null>(null)
-const isResizing = ref(false)
-
-function startResize(e: MouseEvent) {
-  isResizing.value = true
-  document.addEventListener('mousemove', onResize)
-  document.addEventListener('mouseup', stopResize)
-  e.preventDefault()
-}
-
-function onResize(e: MouseEvent) {
-  if (!isResizing.value || !panelRef.value) return
-  const left = panelRef.value.getBoundingClientRect().left
-  const w = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, e.clientX - left))
-  panelWidth.value = w
-}
-
-function stopResize() {
-  isResizing.value = false
-  document.removeEventListener('mousemove', onResize)
-  document.removeEventListener('mouseup', stopResize)
-}
-
-onBeforeUnmount(() => {
-  document.removeEventListener('mousemove', onResize)
-  document.removeEventListener('mouseup', stopResize)
+const { value: panelWidth, isResizing, startResize } = useResize({
+  direction: 'horizontal',
+  initialValue: 300,
+  min: 220,
+  max: 560,
+  origin: 'panel-left',
+  panelRef,
 })
 </script>
 

@@ -41,6 +41,7 @@
 </template>
 
 <script setup lang="ts">
+import { logger } from '@/utils/logger'
 import mermaid from 'mermaid'
 import { computed, onMounted, ref, watch } from 'vue'
 import type { Text2SqlTableInfo, Text2SqlColumnInfo } from '@/types'
@@ -104,7 +105,7 @@ async function renderDiagram() {
     const { svg } = await mermaid.render('er-diagram', mermaidCode)
     diagramEl.value.innerHTML = svg
   } catch (err) {
-    console.error('Mermaid render error:', err)
+    logger.error('Mermaid render error:', err)
     diagramEl.value.innerHTML = `<pre style="color: var(--color-error); padding: 1rem;">${err}</pre>`
   }
 }

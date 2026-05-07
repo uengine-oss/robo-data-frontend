@@ -95,6 +95,7 @@
 </template>
 
 <script setup lang="ts">
+import { logger } from '@/utils/logger'
 import mermaid from 'mermaid'
 import { ref, onMounted, watch, nextTick } from 'vue'
 import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
@@ -227,7 +228,7 @@ async function renderDiagram() {
     hasDiagram.value = true
     
   } catch (err) {
-    console.error('Mermaid render error:', err)
+    logger.error('Mermaid render error:', err)
     if (diagramEl.value) {
       diagramEl.value.innerHTML = `
         <div class="error-state">

@@ -74,11 +74,20 @@ export const useSessionStore = defineStore('session', () => {
   const ontologyTransferData = ref<OntologyTransferData | null>(null)
 
   
-  // 테마 변경 시 로컬스토리지에 저장 및 DOM에 적용
+  // 테마 적용 — 영속화 + DOM data-theme. 초기 마운트 포함 항상 실행.
   watch(theme, (newTheme) => {
     saveToStorage(STORAGE_KEY_THEME, newTheme)
     document.documentElement.setAttribute('data-theme', newTheme)
   }, { immediate: true })
+
+  // 테마 전환 fade — 토글 순간만 0.25초 transition 활성화 (눈 피로 방지).
+  // immediate: false 라 초기 마운트에는 적용 X (FOUC 방지).
+  const THEME_FADE_MS = 250
+  watch(theme, () => {
+    const root = document.documentElement
+    root.classList.add('theme-transitioning')
+    setTimeout(() => root.classList.remove('theme-transitioning'), THEME_FADE_MS)
+  })
   
   // 새 세션 생성
   const createNewSession = () => {

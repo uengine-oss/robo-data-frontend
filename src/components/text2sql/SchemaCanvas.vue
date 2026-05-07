@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { copyToClipboard } from '@/utils/clipboard'
+import { logger } from '@/utils/logger'
 import { ref, onMounted, provide, computed, markRaw, watch, nextTick } from 'vue'
 import { VueFlow, useVueFlow, type Connection, type NodeChange } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
@@ -6,6 +8,7 @@ import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import TableNode from './nodes/TableNode.vue'
 import TableDetailPanel from './TableDetailPanel.vue'
+import TextViewer from '@/components/common/TextViewer.vue'
 import CardinalityModal, { type ConnectionInfo, type Cardinality, type MatchStrategy } from './CardinalityModal.vue'
 import EditRelationshipDialog from './EditRelationshipDialog.vue'
 import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
@@ -53,9 +56,9 @@ function scrollToHighlightedLine() {
   const lineElement = sourceCodeContentRef.value.querySelector(`[data-line="${lineNumber}"]`)
   if (lineElement) {
     lineElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    console.log('[scrollToHighlightedLine] 스크롤 완료:', lineNumber)
+    logger.debug('[scrollToHighlightedLine] 스크롤 완료:', lineNumber)
   } else {
-    console.warn('[scrollToHighlightedLine] 라인 엘리먼트를 찾을 수 없음:', lineNumber)
+    logger.warn('[scrollToHighlightedLine] 라인 엘리먼트를 찾을 수 없음:', lineNumber)
   }
 }
 
@@ -117,14 +120,7 @@ function formatCell(value: unknown): string {
   return str.length > 100 ? str.substring(0, 100) + '...' : str
 }
 
-// 클립보드에 복사
-function copyToClipboard(text: string) {
-  navigator.clipboard.writeText(text).then(() => {
-    console.log('SQL 복사됨:', text)
-  }).catch(err => {
-    console.error('클립보드 복사 실패:', err)
-  })
-}
+// 클립보드 복사는 @/utils/clipboard 의 copyToClipboard 사용
 
 // ========== Behavior 실행 모드 관련 ==========
 
@@ -208,9 +204,9 @@ async function executeBehaviorForRow(rowIdx: number) {
     behaviorResultData.value = result
     showBehaviorResultPopup.value = true
     
-    console.log(`[Behavior] Row ${rowIdx} 실행 완료:`, result)
+    logger.debug(`[Behavior] Row ${rowIdx} 실행 완료:`, result)
   } catch (err) {
-    console.error(`[Behavior] Row ${rowIdx} 실행 오류:`, err)
+    logger.error(`[Behavior] Row ${rowIdx} 실행 오류:`, err)
     behaviorResultError.value = err instanceof Error ? err.message : '실행 오류'
     behaviorResultData.value = null
     showBehaviorResultPopup.value = true
@@ -413,7 +409,7 @@ async function handleDrop(event: DragEvent) {
     
     setTimeout(() => fitView({ padding: 0.3 }), 150)
   } catch (error) {
-    console.error('Failed to handle drop:', error)
+    logger.error('Failed to handle drop:', error)
   }
 }
 
@@ -438,7 +434,7 @@ function startDragTable(event: DragEvent, table: Text2SqlTableInfo) {
 
 // 테이블 더블클릭 - 캔버스에 추가
 async function handleTableDoubleClick(table: Text2SqlTableInfo) {
-  console.log('[SchemaCanvas] 🖱️ 테이블 더블클릭:', table.name)
+  logger.debug('[SchemaCanvas] 🖱️ 테이블 더블클릭:', table.name)
   await store.addTableToCanvas(table)
   setTimeout(() => fitView({ padding: 0.3 }), 150)
 }
@@ -539,7 +535,7 @@ function onEdgeDoubleClick(event: { edge: { id: string; label?: string; source: 
   
   // 컬럼 정보가 없으면 에러
   if (!sourceColumn || !targetColumn) {
-    console.warn('[SchemaCanvas] 컬럼 정보를 찾을 수 없습니다:', edge)
+    logger.warn('[SchemaCanvas] 컬럼 정보를 찾을 수 없습니다:', edge)
     return
   }
   
@@ -592,12 +588,12 @@ async function handleRelationshipDeleted() {
         to_column: rel.targetColumn
       })
       
-      console.log('[SchemaCanvas] 관계 삭제 결과:', result)
+      logger.debug('[SchemaCanvas] 관계 삭제 결과:', result)
       
       // 캔버스에서 엣지 제거
       store.edges = store.edges.filter(e => e.id !== rel.id)
     } catch (error) {
-      console.error('[SchemaCanvas] 관계 삭제 실패:', error)
+      logger.error('[SchemaCanvas] 관계 삭제 실패:', error)
       alert('관계 삭제에 실패했습니다: ' + (error instanceof Error ? error.message : String(error)))
     }
   }
@@ -653,8 +649,8 @@ function onConnect(connection: Connection) {
   const fromColumn = extractColumnName(connection.sourceHandle)
   const toColumn = extractColumnName(connection.targetHandle)
   
-  console.log('[onConnect] Raw handles:', { sourceHandle: connection.sourceHandle, targetHandle: connection.targetHandle })
-  console.log('[onConnect] Parsed:', { fromTable, fromSchema, fromColumn, toTable, toSchema, toColumn })
+  logger.debug('[onConnect] Raw handles:', { sourceHandle: connection.sourceHandle, targetHandle: connection.targetHandle })
+  logger.debug('[onConnect] Parsed:', { fromTable, fromSchema, fromColumn, toTable, toSchema, toColumn })
   
   // Store pending connection and show modal
   pendingConnection.value = {
@@ -679,7 +675,7 @@ async function handleCardinalityConfirm(cardinality: Cardinality, description: s
     ? `[${cardinality}] ${description}`
     : `[${cardinality}] ${fromTable}.${fromColumn} → ${toTable}.${toColumn}`
   
-  console.log('[handleCardinalityConfirm] Creating relationship:', {
+  logger.debug('[handleCardinalityConfirm] Creating relationship:', {
     from_table: fromTable,
     from_schema: fromSchema,
     from_column: fromColumn,
@@ -707,7 +703,7 @@ async function handleCardinalityConfirm(cardinality: Cardinality, description: s
     isCardinalityModalOpen.value = false
     pendingConnection.value = null
   } catch (error) {
-    console.error('Failed to create relationship:', error)
+    logger.error('Failed to create relationship:', error)
     alert('릴레이션 생성에 실패했습니다.')
   } finally {
     isConnecting.value = false
@@ -752,7 +748,7 @@ function onConnectEnd(event: MouseEvent) {
       // 마지막 요소(source/target)를 제외하고 테이블명 이후의 부분이 컬럼명
       const sourceColumn = handleParts.slice(1, -1).join('-')
       
-      console.log('[SchemaCanvas] 허공 드롭 감지:', { sourceType, sourceColumn })
+      logger.debug('[SchemaCanvas] 허공 드롭 감지:', { sourceType, sourceColumn })
       emit('empty-drop', { sourceType, sourceColumn })
     }
   }
@@ -986,19 +982,18 @@ async function handleRefresh() {
       
       <!-- Quick Actions -->
       <div class="panel-footer">
-        <button 
+        <button
           v-if="store.tablesNotOnCanvas.length > 0"
-          class="btn btn--secondary btn--sm btn--block"
+          class="btn btn--secondary btn--sm"
           @click="handleAddTopTables"
         >
           상위 10개 테이블 추가
         </button>
-        <button 
+        <button
           v-if="store.allTables.length > 0"
-          class="btn btn--primary btn--sm btn--block"
+          class="btn btn--primary btn--sm"
           :disabled="store.loading"
           @click="handleAddAllTables"
-          style="margin-top: 8px;"
         >
           {{ store.loading ? '로딩 중...' : '📊 전체 테이블 보기' }}
         </button>
@@ -1276,13 +1271,20 @@ async function handleRefresh() {
           </div>
           <template v-for="(line, index) in store.sourceCodePanel.fileContent.split('\n')" :key="index">
             <!-- Statement 시작 라인에 AI 설명 표시 -->
-            <div 
-              v-if="getStatementForLine(index + 1)" 
+            <div
+              v-if="getStatementForLine(index + 1)"
               class="source-ai-comment"
             >
-              <span class="ai-comment-icon">🤖</span>
-              <span class="ai-comment-type">{{ getStatementForLine(index + 1)?.statement_type }}</span>
-              <span class="ai-comment-text">{{ getStatementForLine(index + 1)?.summary || getStatementForLine(index + 1)?.ai_description || '' }}</span>
+              <div class="ai-comment-header">
+                <span class="ai-comment-icon">🤖</span>
+                <span class="ai-comment-type">{{ getStatementForLine(index + 1)?.statement_type }}</span>
+              </div>
+              <TextViewer
+                class="ai-comment-text"
+                :content="getStatementForLine(index + 1)?.summary || getStatementForLine(index + 1)?.ai_description || ''"
+                :max-height="240"
+                compact
+              />
             </div>
             <!-- 코드 라인 -->
             <div 
@@ -2247,8 +2249,27 @@ async function handleRefresh() {
 
 /* Panel Footer */
 .panel-footer {
-  padding: 12px 16px;
+  padding: 12px 12px;
   border-top: 1px solid var(--color-border);
+  display: flex;
+  gap: 6px;
+
+  // 두 버튼이 가로 폭을 균등 분할. 컨테이너 폭(cqw) 기반으로 폰트 자동 축소.
+  .btn {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 6px;
+    font-size: clamp(0.62rem, 2.6cqw, 0.8rem);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+  }
+}
+
+// container query 기준점 — 좌측 패널 폭 기준으로 panel-footer 의 폰트 결정
+.left-panel {
+  container-type: inline-size;
 }
 
 /* Canvas Area */
@@ -2852,17 +2873,21 @@ async function handleRefresh() {
   font-size: 0.85rem;
 }
 
-// AI 설명 주석
+// AI 설명 주석 — 라인 옆에 박힌 카드. 헤더(아이콘 + 타입) + 본문(TextViewer) 세로 배치.
 .source-ai-comment {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px 12px 8px 70px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 10px 70px;
   background: linear-gradient(90deg, rgba(168, 85, 247, 0.08) 0%, rgba(168, 85, 247, 0.02) 100%);
   border-left: 3px solid #a855f7;
   margin: 4px 0;
-  font-size: 0.8rem;
-  line-height: 1.5;
+}
+
+.ai-comment-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .ai-comment-icon {
@@ -2883,7 +2908,6 @@ async function handleRefresh() {
 
 .ai-comment-text {
   color: #c4b5fd;
-  font-style: italic;
 }
 
 .source-line.has-statement {

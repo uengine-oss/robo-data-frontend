@@ -16,11 +16,11 @@
 
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { useProjectStore } from '@/stores/project'
+import { useAnalyzerStore } from '@/stores/analyzer'
 import type { GraphData, GraphLink, GraphNode } from '@/types'
 
 export const useCanvasStore = defineStore('canvas', () => {
-  const projectStore = useProjectStore()
+  const projectStore = useAnalyzerStore()
 
   /** 캔버스에 표시되는 노드 ID 집합. 여기 있는 것만 NvlGraph 에 넘어간다. */
   const canvasNodeIds = ref<Set<string>>(new Set())

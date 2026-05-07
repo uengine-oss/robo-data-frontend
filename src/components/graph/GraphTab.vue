@@ -5,11 +5,12 @@
  */
 
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { useProjectStore } from '@/stores/project'
+import { logger } from '@/utils/logger'
+import { useAnalyzerStore } from '@/stores/analyzer'
 import { useSessionStore } from '@/stores/session'
 import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
-import { useCanvasStore } from '@/features/graph/stores/canvas'
-import { useNavigatorStore } from '@/features/graph/stores/navigator'
+import { useCanvasStore } from '@/stores/graphCanvas'
+import { useNavigatorStore } from '@/stores/navigator'
 import { storeToRefs } from 'pinia'
 import NvlGraph from './NvlGraph.vue'
 import NodeDetailPanel from './NodeDetailPanel.vue'
@@ -19,9 +20,11 @@ import SchemaView from '../text2sql/SchemaView.vue'
 import { getClassName, getDirectory, CLASS_LABELS } from '@/utils/classDiagram'
 import type { GraphNode, GraphLink } from '@/types'
 import { useResize } from '@/composables/useResize'
+import { useDrag } from '@/composables/useDrag'
 import { getNodeColor, getRelationshipColor } from '@/config/graphStyles'
+import { storageVersion } from '@/utils/graphStyleStorage'
 
-const projectStore = useProjectStore()
+const projectStore = useAnalyzerStore()
 const sessionStore = useSessionStore()
 const schemaCanvasStore = useSchemaCanvasStore()
 const canvasStore = useCanvasStore()
@@ -65,34 +68,17 @@ watch(isProcessing, (newVal, oldVal) => {
   }
 })
 
-// 플로팅 모드용 위치
-const floatingX = ref(20)
-const floatingY = ref(80)
-const isDraggingPanel = ref(false)
-const dragOffset = ref({ x: 0, y: 0 })
+// 플로팅 모드용 위치 — useDrag composable 활용. floating 모드 아닐 때 startDrag 호출 차단.
+const {
+  x: floatingX,
+  y: floatingY,
+  isDragging: isDraggingPanel,
+  startDrag: startPanelDragRaw,
+} = useDrag({ initialX: 20, initialY: 80, boundToWindow: true })
 
-// 플로팅 패널 드래그 시작
 const startPanelDrag = (e: MouseEvent) => {
   if (analysisPanelMode.value !== 'floating') return
-  isDraggingPanel.value = true
-  dragOffset.value = {
-    x: e.clientX - floatingX.value,
-    y: e.clientY - floatingY.value
-  }
-  
-  const onMouseMove = (e: MouseEvent) => {
-    floatingX.value = e.clientX - dragOffset.value.x
-    floatingY.value = e.clientY - dragOffset.value.y
-  }
-  
-  const onMouseUp = () => {
-    isDraggingPanel.value = false
-    document.removeEventListener('mousemove', onMouseMove)
-    document.removeEventListener('mouseup', onMouseUp)
-  }
-  
-  document.addEventListener('mousemove', onMouseMove)
-  document.addEventListener('mouseup', onMouseUp)
+  startPanelDragRaw(e)
 }
 
 // 패널 모드 토글
@@ -142,7 +128,8 @@ const stylePanelCategory = ref<'node' | 'relationship'>('node')
 const nvlGraphRef = ref<InstanceType<typeof NvlGraph> | null>(null)
 const selectedClasses = ref<Array<{ className: string; directory: string }>>([])
 
-// UML 깊이 설정 (UML 뷰 전용)
+// UML 깊이 설정 (UML 뷰 전용) — TopToolbar/SettingsModal 이 localStorage 저장 + custom event 발행.
+// 여기서는 마운트 시 한번 읽고 이후 'umlDepthChange' 이벤트로 동기화.
 const umlDepth = ref(3)
 try {
   const savedUmlDepth = localStorage.getItem('umlDepth')
@@ -151,7 +138,7 @@ try {
     if (!isNaN(parsed)) umlDepth.value = parsed
   }
 } catch (e) {
-  console.warn('localStorage 접근 실패:', e)
+  logger.warn('localStorage 접근 실패:', e)
 }
 
 function handleUmlDepthChange(event: Event) {
@@ -214,10 +201,13 @@ const graphStats = computed(() => {
 
 /**
  * 오버뷰 패널용 전체 프로젝트 통계 — 라벨 / 관계 타입 별 분포.
- * NvlGraph.nodeStats 와 동일 형식(Map<label, {count, color}>)이라 NodeDetailPanel 이 그대로 소비 가능.
+ * NodeDetailPanel 이 Map<label, {count, color}> 형식 그대로 소비.
  * 캔버스 상태와 무관하게 projectStore.nodeMap/linkMap 기준.
+ *
+ * graphStyleStorage 의 storageVersion 을 dependency 로 읽어 색 변경 시 자동 재계산.
  */
 const overallNodeStats = computed(() => {
+  void storageVersion.value
   const stats = new Map<string, { count: number; color: string }>()
   for (const node of graphData.value?.nodes ?? []) {
     for (const label of node.labels || ['Unknown']) {
@@ -231,6 +221,7 @@ const overallNodeStats = computed(() => {
 })
 
 const overallRelationshipStats = computed(() => {
+  void storageVersion.value
   const stats = new Map<string, { count: number; color: string }>()
   for (const link of graphData.value?.links ?? []) {
     const type = link.type || 'UNKNOWN'
@@ -246,7 +237,6 @@ const hasGraph = computed(() => canvasGraphData.value.nodes.length > 0)
 // 프로젝트 전체에 로드된 데이터가 있는지 (Navigator에서 탐색 가능한지)
 const hasAnyData = computed(() => (graphData.value?.nodes.length ?? 0) > 0)
 const showUmlTab = computed(() => sourceType.value === 'java' || sourceType.value === 'python')
-const showSchemaTab = computed(() => true) // 스키마 탭은 항상 활성화
 
 // 로그가 있을 때 자동으로 콘솔 표시
 watch(consoleMessages, (messages) => {
@@ -379,39 +369,35 @@ function removeSelectedClass(className: string, directory: string): void {
   )
 }
 
-function handleStyleUpdated(): void {
-  nvlGraphRef.value?.updateAllStyles()
-}
-
 /**
- * 레전드 필터 핸들러 (토글 방식)
+ * 레전드 라벨 토글 — 클릭하면 필터에 추가, 다시 클릭하면 제거.
+ * 다중 선택 (OR) 가능.
  */
 function handleLabelFilter(label: string): void {
-  const index = labelFilters.value.indexOf(label)
-  if (index === -1) {
-    // 필터에 추가
-    labelFilters.value = [...labelFilters.value, label]
-  } else {
-    // 필터에서 제거
-    labelFilters.value = labelFilters.value.filter(l => l !== label)
-  }
+  const set = new Set(labelFilters.value)
+  if (set.has(label)) set.delete(label)
+  else set.add(label)
+  labelFilters.value = [...set]
 }
 
-/**
- * 모든 필터 초기화
- */
+/** 모든 라벨 필터 해제 */
 function handleClearFilters(): void {
   labelFilters.value = []
 }
 
 /**
- * 캔버스 초기화 (필터 + 표시된 노드 모두 비우기).
+ * 캔버스 비우기 — 표시된 노드만 제거. 필터는 유지.
+ * (필터 해제는 별도 동작: '*' 뱃지 또는 0건 오버레이의 '필터 해제' 버튼)
  */
 function handleResetGraph(): void {
   selectedNode.value = null
   selectedRelationship.value = null
-  labelFilters.value = []
   canvasStore.clearCanvas()
+}
+
+/** 0건 오버레이의 'Navigator 열기' 액션 */
+function handleOpenNavigator(): void {
+  navigatorStore.setPanelOpen(true)
 }
 
 /**
@@ -566,12 +552,12 @@ watch(hasGraph, (has, prev) => {
             :relationshipStats="overallRelationshipStats"
             :totalNodes="graphData?.nodes.length || 0"
             :totalRelationships="graphData?.links.length || 0"
+            :hasGraph="hasGraph"
             :isProcessing="isProcessing"
             :activeFilters="labelFilters"
             :allNodes="graphData?.nodes || []"
             @node-type-select="handleNodeTypeSelect"
             @relationship-type-select="handleRelTypeSelect"
-            @style-updated="handleStyleUpdated"
             @label-filter="handleLabelFilter"
             @clear-filters="handleClearFilters"
             @node-select="handleNodeSearchSelect"
@@ -580,7 +566,7 @@ watch(hasGraph, (has, prev) => {
         </div>
       </template>
     </div>
-    
+
     <!-- 메인 콘텐츠 -->
     <div class="content-area">
       <div class="view-container" v-show="activeView === 'graph'">
@@ -597,6 +583,8 @@ watch(hasGraph, (has, prev) => {
           @node-collapse="handleNodeCollapse"
           @node-drop="handleNodeDrop"
           @node-expand="handleNodeExpand"
+          @clear-filters="handleClearFilters"
+          @open-navigator="handleOpenNavigator"
         />
         <!-- 빈 상태 오버레이 -->
         <div v-if="!hasGraph" class="empty-state empty-overlay">
@@ -642,9 +630,8 @@ watch(hasGraph, (has, prev) => {
     <!-- 플로팅: 좌측 상단 컨트롤 -->
     <div class="floating-controls left-top">
       <div class="view-switcher">
-        <button 
-          :class="{ active: activeView === 'schema', disabled: !showSchemaTab }"
-          :disabled="!showSchemaTab"
+        <button
+          :class="{ active: activeView === 'schema' }"
           @click="activeView = 'schema'"
         >
           스키마
@@ -722,12 +709,12 @@ watch(hasGraph, (has, prev) => {
             :relationshipStats="overallRelationshipStats"
             :totalNodes="graphData?.nodes.length || 0"
             :totalRelationships="graphData?.links.length || 0"
+            :hasGraph="hasGraph"
             :isProcessing="isProcessing"
             :activeFilters="labelFilters"
             :allNodes="graphData?.nodes || []"
             @node-type-select="handleNodeTypeSelect"
             @relationship-type-select="handleRelTypeSelect"
-            @style-updated="handleStyleUpdated"
             @label-filter="handleLabelFilter"
             @clear-filters="handleClearFilters"
             @node-select="handleNodeSearchSelect"
@@ -751,7 +738,6 @@ watch(hasGraph, (has, prev) => {
             <GraphStylePanel
               :category="stylePanelCategory"
               :elementType="selectedNodeType || selectedRelType"
-              @style-updated="handleStyleUpdated"
               @close="handleStylePanelClose"
             />
           </div>

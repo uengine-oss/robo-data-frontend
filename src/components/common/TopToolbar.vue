@@ -6,14 +6,14 @@
 
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useSessionStore } from '@/stores/session'
-import { useProjectStore } from '@/stores/project'
+import { useAnalyzerStore } from '@/stores/analyzer'
 import { storeToRefs } from 'pinia'
 import SettingsModal from './SettingsModal.vue'
 import { IconSearch, IconBell, IconSettings } from '@/components/icons'
 import { getAppTitle } from '@/config/appSettings'
 
 const sessionStore = useSessionStore()
-const projectStore = useProjectStore()
+const projectStore = useAnalyzerStore()
 
 const { isProcessing, currentStep } = storeToRefs(projectStore)
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { logger } from '@/utils/logger'
 import { ref } from 'vue'
 import { IconUpload } from '@/components/icons'
 
@@ -78,7 +79,7 @@ const handleDrop = async (e: DragEvent) => {
   })
   
   if (filteredFiles.length > 0) {
-    console.log(`[DropZone] ${files.length}개 중 ${filteredFiles.length}개 파일 (${files.length - filteredFiles.length}개 시스템 파일 제외)`)
+    logger.debug(`[DropZone] ${files.length}개 중 ${filteredFiles.length}개 파일 (${files.length - filteredFiles.length}개 시스템 파일 제외)`)
     emit('files-drop', filteredFiles)
   }
 }

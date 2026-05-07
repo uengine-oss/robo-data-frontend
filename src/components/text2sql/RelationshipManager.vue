@@ -102,6 +102,7 @@
 </template>
 
 <script setup lang="ts">
+import { logger } from '@/utils/logger'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { text2sqlApi } from '@/services/api'
 import { useText2SqlSchemaStore } from '@/stores/text2sql'
@@ -147,7 +148,7 @@ const loadUserRelationships = async () => {
     const response = await text2sqlApi.getUserRelationships()
     userRelationships.value = response.relationships as UserRelationship[]
   } catch (error) {
-    console.error('Failed to load user relationships:', error)
+    logger.error('Failed to load user relationships:', error)
   }
 }
 
@@ -179,7 +180,7 @@ const addRelationship = async () => {
     
     await loadUserRelationships()
   } catch (error) {
-    console.error('Failed to add relationship:', error)
+    logger.error('Failed to add relationship:', error)
     alert('릴레이션 추가에 실패했습니다.')
   }
 }
@@ -199,7 +200,7 @@ const removeRelationship = async (rel: UserRelationship) => {
     
     await loadUserRelationships()
   } catch (error) {
-    console.error('Failed to remove relationship:', error)
+    logger.error('Failed to remove relationship:', error)
     alert('릴레이션 삭제에 실패했습니다.')
   }
 }

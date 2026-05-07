@@ -1,13 +1,18 @@
 /**
  * graphStyleStorage.ts
- * 그래프 요소(노드/관계) 스타일 설정 저장 및 관리 유틸리티
+ * 그래프 요소(노드/관계) 사용자 명시 스타일 영속화 — localStorage 기반.
  *
- * localStorage를 사용하여 타입별 색상 및 크기/두께 설정을 저장하고 불러옵니다.
- * 노드와 관계 모두 동일한 인터페이스를 사용합니다.
+ * Vue 반응성 노출:
+ *   `storageVersion` ref 가 모든 mutation 직후 1 증가한다. consumer 의 computed
+ *   는 이 ref 를 dependency 로 읽어 storage 변경을 감지한다.
  */
 
+import { ref } from 'vue'
+import { logger } from '@/utils/logger'
+import { STORAGE_KEYS } from '@/config/storageKeys'
+
 // ============================================================================
-// 타입 정의
+// 타입
 // ============================================================================
 
 export interface StyleConfig {
@@ -18,103 +23,82 @@ export interface StyleConfig {
 
 export type StyleMap = Record<string, StyleConfig>
 
-/** 스타일 카테고리 */
 export type StyleCategory = 'node' | 'relationship'
 
 // ============================================================================
-// 스토리지 키 매핑
+// 스토리지 키
 // ============================================================================
 
-const STORAGE_KEYS: Record<StyleCategory, string> = {
-  node: 'robo-analyzer-node-styles',
-  relationship: 'robo-analyzer-relationship-styles'
+const CATEGORY_STORAGE_KEY: Record<StyleCategory, string> = {
+  node: STORAGE_KEYS.NODE_STYLES,
+  relationship: STORAGE_KEYS.RELATIONSHIP_STYLES,
 }
 
 // ============================================================================
-// 공통 CRUD 함수
+// 반응성 트리거 — storage 가 변할 때마다 +1
 // ============================================================================
 
-/**
- * localStorage에서 스타일 설정 로드
- */
+export const storageVersion = ref(0)
+
+function bumpVersion(): void {
+  storageVersion.value++
+}
+
+// ============================================================================
+// 사용자 명시 스타일 (color + size) CRUD
+// ============================================================================
+
 export function loadStyles(category: StyleCategory): StyleMap {
   try {
-    const stored = localStorage.getItem(STORAGE_KEYS[category])
-    if (!stored) return {}
-    return JSON.parse(stored) as StyleMap
+    const raw = localStorage.getItem(CATEGORY_STORAGE_KEY[category])
+    return raw ? (JSON.parse(raw) as StyleMap) : {}
   } catch (e) {
-    console.warn(`${category} 스타일 설정 로드 실패:`, e)
+    logger.warn(`[graphStyleStorage] load ${category} 실패:`, e)
     return {}
   }
 }
 
-/**
- * localStorage에 스타일 설정 저장
- */
 export function saveStyles(category: StyleCategory, styles: StyleMap): void {
   try {
-    localStorage.setItem(STORAGE_KEYS[category], JSON.stringify(styles))
+    localStorage.setItem(CATEGORY_STORAGE_KEY[category], JSON.stringify(styles))
+    bumpVersion()
   } catch (e) {
-    console.warn(`${category} 스타일 설정 저장 실패:`, e)
+    logger.warn(`[graphStyleStorage] save ${category} 실패:`, e)
   }
 }
 
-/**
- * 특정 타입의 스타일 설정 가져오기
- */
 export function getStyle(category: StyleCategory, type: string): StyleConfig | null {
-  const styles = loadStyles(category)
-  return styles[type] || null
+  return loadStyles(category)[type] ?? null
 }
 
-/**
- * 특정 타입의 색상 설정
- */
 export function setColor(category: StyleCategory, type: string, color: string): void {
   const styles = loadStyles(category)
-  if (!styles[type]) styles[type] = {}
-  styles[type].color = color
+  styles[type] = { ...styles[type], color }
   saveStyles(category, styles)
 }
 
-/**
- * 특정 타입의 크기/두께 설정
- */
 export function setSize(category: StyleCategory, type: string, size: number): void {
   const styles = loadStyles(category)
-  if (!styles[type]) styles[type] = {}
-  styles[type].size = size
+  styles[type] = { ...styles[type], size }
   saveStyles(category, styles)
 }
 
-/**
- * 특정 타입의 스타일 설정 제거
- */
 export function removeStyle(category: StyleCategory, type: string): void {
   const styles = loadStyles(category)
+  if (!(type in styles)) return
   delete styles[type]
   saveStyles(category, styles)
 }
 
-/**
- * 모든 스타일 설정 초기화
- */
 export function clearStyles(category: StyleCategory): void {
   try {
-    localStorage.removeItem(STORAGE_KEYS[category])
+    localStorage.removeItem(CATEGORY_STORAGE_KEY[category])
+    bumpVersion()
   } catch (e) {
-    console.warn(`${category} 스타일 설정 초기화 실패:`, e)
+    logger.warn(`[graphStyleStorage] clear ${category} 실패:`, e)
   }
 }
 
-// ============================================================================
-// 하위호환 래퍼 (기존 nodeStyleStorage API와 동일한 시그니처)
-// ============================================================================
-
+/** graphStyles.ts 가 색 결정에 사용 */
 export const getNodeStyle = (type: string) => getStyle('node', type)
-export const setNodeColor = (type: string, color: string) => setColor('node', type, color)
-export const setNodeSize = (type: string, size: number) => setSize('node', type, size)
-
 export const getRelationshipStyle = (type: string) => getStyle('relationship', type)
-export const setRelationshipColor = (type: string, color: string) => setColor('relationship', type, color)
-export const setRelationshipSize = (type: string, size: number) => setSize('relationship', type, size)

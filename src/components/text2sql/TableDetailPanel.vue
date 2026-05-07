@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch, inject } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
 import type { Text2SqlColumnInfo } from '@/types'
 import { IconX, IconEdit, IconTrash, IconPlus } from '@/components/icons'
+import { getDescriptionColor, getDescriptionSourceLabel } from '@/utils/descriptionColor'
+import TextViewer from '@/components/common/TextViewer.vue'
 
 const store = useSchemaCanvasStore()
 
@@ -276,31 +278,6 @@ function isColumnUpdating(colName: string): boolean {
   return updatingColumnNames.value.has(colName)
 }
 
-// 설명 출처에 따른 색상 반환 (범례와 일치)
-// procedure: 하늘색, ddl: 초록색, user: 주황색
-const descriptionSourceColors: Record<string, string> = {
-  procedure: '#38bdf8',  // 하늘색 (스토어드 프로시저 분석)
-  ddl: '#22c55e',        // 초록색 (DDL에서 추출)
-  user: '#f59e0b',       // 주황색 (사용자 입력)
-}
-
-// 기본 텍스트 색상 (출처가 없을 때)
-const defaultDescColor = '#c1c2c5'
-
-function getDescriptionColor(source?: string): string {
-  if (!source) return defaultDescColor
-  return descriptionSourceColors[source] || defaultDescColor
-}
-
-function getDescriptionSourceLabel(source?: string): string {
-  if (!source) return ''
-  const labels: Record<string, string> = {
-    ddl: 'DDL',
-    procedure: '분석',
-    user: '사용자'
-  }
-  return labels[source] || ''
-}
 </script>
 
 <template>
@@ -354,15 +331,17 @@ function getDescriptionSourceLabel(source?: string): string {
                 <button class="btn btn--secondary btn--sm" @click="cancelEditDescription">취소</button>
               </div>
             </div>
-            <div 
-              v-else 
-              class="detail-field__display" 
-              :style="{ color: getDescriptionColor(table.description_source) }"
+            <div
+              v-else
+              class="detail-field__display"
               @click="startEditDescription"
             >
-              <span v-if="table.description">{{ table.description }}</span>
-              <span v-else class="placeholder">설명을 추가하려면 클릭하세요</span>
-              <IconEdit :size="14" />
+              <TextViewer
+                :content="table.description"
+                :max-height="180"
+                placeholder="설명을 추가하려면 클릭하세요"
+              />
+              <IconEdit :size="14" class="detail-field__edit-icon" />
             </div>
           </div>
         </section>
@@ -403,17 +382,18 @@ function getDescriptionSourceLabel(source?: string): string {
                 </div>
               </div>
               <div v-else class="column-item__desc" @click="startEditColumn(col.name)">
-                <span 
-                  v-if="col.description_source" 
+                <span
+                  v-if="col.description_source"
                   class="column-item__source-dot"
                   :style="{ background: getDescriptionColor(col.description_source) }"
                   :title="`출처: ${getDescriptionSourceLabel(col.description_source)}`"
                 ></span>
-                <span 
-                  v-if="col.description" 
-                  :style="{ color: getDescriptionColor(col.description_source) }"
-                >{{ col.description }}</span>
-                <span v-else class="placeholder">설명 추가...</span>
+                <TextViewer
+                  :content="col.description"
+                  :max-height="120"
+                  placeholder="설명 추가..."
+                  compact
+                />
               </div>
             </div>
           </div>
@@ -535,9 +515,13 @@ function getDescriptionSourceLabel(source?: string): string {
                 <span class="behavior-item__name">{{ behavior.name }}</span>
                 <span class="behavior-item__type">{{ getBehaviorTypeLabel(behavior.behaviorType) }}</span>
               </div>
-              <div v-if="behavior.description" class="behavior-item__desc">
-                {{ behavior.description }}
-              </div>
+              <TextViewer
+                v-if="behavior.description"
+                class="behavior-item__desc"
+                :content="behavior.description"
+                :max-height="120"
+                compact
+              />
               <div v-if="behavior.inputFields && behavior.inputFields.length > 0" class="behavior-item__fields">
                 입력: {{ behavior.inputFields.join(', ') }}
                 <template v-if="behavior.outputField"> → {{ behavior.outputField }}</template>
@@ -678,29 +662,53 @@ function getDescriptionSourceLabel(source?: string): string {
 }
 
 .detail-field__display {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
+  position: relative;
+  padding: 12px 36px 12px 14px; // 우측에 edit 아이콘 자리
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: border-color 0.15s;
-  font-size: 0.875rem;
+  font-size: 0.9rem;
+  line-height: 1.6;
   color: var(--color-text);
-  
+
   &:hover {
     border-color: var(--color-accent);
   }
-  
-  svg {
-    color: var(--color-text-muted);
-  }
-  
+
   .placeholder {
     color: var(--color-text-muted);
     font-style: italic;
+  }
+}
+
+.detail-field__text {
+  margin: 0;
+  max-height: 180px;          // 너무 길면 자체 스크롤
+  overflow-y: auto;
+  white-space: pre-wrap;     // 줄바꿈/공백 보존
+  word-break: break-word;    // 긴 토큰도 줄바꿈
+  color: var(--color-text);
+
+  // 얇은 스크롤바
+  &::-webkit-scrollbar { width: 6px; }
+  &::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 3px;
+  }
+  &::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
+}
+
+.detail-field__edit-icon {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  color: var(--color-text-muted);
+  opacity: 0.7;
+
+  .detail-field__display:hover & {
+    opacity: 1;
   }
 }
 

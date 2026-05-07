@@ -1,4 +1,4 @@
-import { ref, onMounted, onUnmounted, type Ref } from 'vue'
+import { ref, onUnmounted, type Ref } from 'vue'
 
 export interface UseDragOptions {
   initialX?: number

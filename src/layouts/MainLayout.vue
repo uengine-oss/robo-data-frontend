@@ -3,14 +3,14 @@ import { computed, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import TopToolbar from '@/components/common/TopToolbar.vue'
 import SideNav from '@/components/common/SideNav.vue'
-import NavigatorPanel from '@/features/graph/components/NavigatorPanel.vue'
+import NavigatorPanel from '@/components/graph/NavigatorPanel.vue'
 import FloatingProgressPanel from '@/components/common/FloatingProgressPanel.vue'
 import { RouterView } from 'vue-router'
-import { useProjectStore } from '@/stores/project'
+import { useAnalyzerStore } from '@/stores/analyzer'
 import { useSessionStore } from '@/stores/session'
-import { useNavigatorStore } from '@/features/graph/stores/navigator'
+import { useNavigatorStore } from '@/stores/navigator'
 
-const projectStore = useProjectStore()
+const projectStore = useAnalyzerStore()
 const sessionStore = useSessionStore()
 const navigatorStore = useNavigatorStore()
 const { activeTab } = storeToRefs(sessionStore)

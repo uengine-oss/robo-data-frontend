@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { logger } from '@/utils/logger'
 import { ref, computed, nextTick, watch } from 'vue'
-import { useProjectStore } from '@/stores/project'
+import { useAnalyzerStore } from '@/stores/analyzer'
 import { useSessionStore } from '@/stores/session'
 import { storeToRefs } from 'pinia'
 import DropZone from './DropZone.vue'
@@ -15,7 +16,7 @@ import type { FileTypeResult } from '@/services/api'
 void (0 as unknown as FileTypeResult) // suppress unused warning
 import { IconFolder, IconDatabase, IconFile, IconFolderOpen, IconLightbulb, IconSettings, IconX, IconPlay, IconTrash } from '@/components/icons'
 
-const projectStore = useProjectStore()
+const projectStore = useAnalyzerStore()
 const sessionStore = useSessionStore()
 const { 
   uploadedFiles, 
@@ -30,7 +31,7 @@ const handleRestartPipeline = async () => {
   try {
     await projectStore.restartPipeline()
   } catch (error) {
-    console.error('인제스천 실패:', error)
+    logger.error('인제스천 실패:', error)
   }
 }
 
@@ -154,7 +155,7 @@ const handleFilesDrop = async (files: File[]) => {
     //   }
     // }
   } catch (error) {
-    console.error('[UploadTab] 파일 타입 감지 실패:', error)
+    logger.error('[UploadTab] 파일 타입 감지 실패:', error)
   } finally {
     isDetecting.value = false
   }
@@ -345,7 +346,7 @@ const findFileByPathOrName = (
       if (filePath === normalizedDir || 
           filePath.endsWith(normalizedDir) ||
           normalizedDir.endsWith(filePath)) {
-        console.log(`파일 찾음 (directory 매칭): ${filePath}`)
+        logger.debug(`파일 찾음 (directory 매칭): ${filePath}`)
         return file
       }
     }
@@ -357,7 +358,7 @@ const findFileByPathOrName = (
     for (const file of allFiles) {
       const filePathName = (file.relPath || file.name).split('/').pop()?.toLowerCase() || ''
       if (filePathName === normalizedFileName) {
-        console.log(`파일 찾음 (fileName 매칭): ${file.relPath || file.name}`)
+        logger.debug(`파일 찾음 (fileName 매칭): ${file.relPath || file.name}`)
         return file
       }
     }
@@ -373,13 +374,13 @@ const findFileByPathOrName = (
       if (fileNameWithoutExt === normalizedProcName || 
           fileNameWithoutExt.includes(normalizedProcName) ||
           normalizedProcName.includes(fileNameWithoutExt)) {
-        console.log(`파일 찾음 (procedureName 매칭): ${file.relPath || file.name}`)
+        logger.debug(`파일 찾음 (procedureName 매칭): ${file.relPath || file.name}`)
         return file
       }
     }
   }
   
-  console.warn(`파일을 찾을 수 없음: fileName=${fileName}, directory=${fileDirectory}, procedure=${procedureName}`)
+  logger.warn(`파일을 찾을 수 없음: fileName=${fileName}, directory=${fileDirectory}, procedure=${procedureName}`)
   return null
 }
 
@@ -393,7 +394,7 @@ const openProcedureFile = (
   const fileNode = findFileByPathOrName(fileName, fileDirectory, procedureName)
   
   if (!fileNode || !fileNode.fileContent) {
-    console.warn(`프로시저 파일을 찾을 수 없습니다: ${procedureName}`)
+    logger.warn(`프로시저 파일을 찾을 수 없습니다: ${procedureName}`)
     return false
   }
   

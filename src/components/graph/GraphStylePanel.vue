@@ -8,7 +8,12 @@
  */
 
 import { computed, ref, watch, onMounted } from 'vue'
-import { NODE_COLORS, NODE_SIZES, RELATIONSHIP_COLORS, RELATIONSHIP_WIDTHS } from '@/config/graphStyles'
+import {
+  NODE_SIZES,
+  RELATIONSHIP_WIDTHS,
+  getNodeColor,
+  getRelationshipColor,
+} from '@/config/graphStyles'
 import {
   getStyle,
   setColor,
@@ -31,7 +36,6 @@ interface Props {
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
-  'style-updated': []
   'close': []
 }>()
 
@@ -56,10 +60,10 @@ const REL_WIDTH_OPTIONS = [1, 2, 3, 5]
 // Computed
 // ============================================================================
 
-/** 카테고리에 따른 기본 색상맵 */
-const defaultColorMap = computed(() =>
-  props.category === 'node' ? NODE_COLORS : RELATIONSHIP_COLORS
-)
+/** 라벨/타입의 기본 색 (사용자 커스텀 무시 — 그룹/자동생성 fallback) */
+function resolveDefaultColor(type: string): string {
+  return props.category === 'node' ? getNodeColor([type]) : getRelationshipColor(type)
+}
 
 /** 카테고리에 따른 기본 크기/두께 맵 */
 const defaultSizeMap = computed(() =>
@@ -89,12 +93,9 @@ const selectedSize = ref<number>(0)
 // ============================================================================
 
 const headerColor = computed(() => {
-  if (!props.elementType) return defaultColorMap.value.DEFAULT
+  if (!props.elementType) return '#5AA0E0'
   if (savedStyle.value?.color) return savedStyle.value.color
-  const type = props.elementType
-  return defaultColorMap.value[type]
-    || defaultColorMap.value[type.toUpperCase()]
-    || defaultColorMap.value.DEFAULT
+  return resolveDefaultColor(props.elementType)
 })
 
 // ============================================================================
@@ -115,10 +116,7 @@ function loadCurrentStyle(): void {
   if (style?.color) {
     selectedColor.value = style.color
   } else {
-    const type = props.elementType
-    selectedColor.value = defaultColorMap.value[type]
-      || defaultColorMap.value[type.toUpperCase()]
-      || defaultColorMap.value.DEFAULT
+    selectedColor.value = resolveDefaultColor(props.elementType)
   }
 
   if (style?.size) {
@@ -136,7 +134,6 @@ function handleColorSelect(color: string): void {
   selectedColor.value = color
   setColor(props.category, props.elementType, color)
   savedStyle.value = { ...savedStyle.value, color }
-  emit('style-updated')
 }
 
 function handleSizeSelect(size: number): void {
@@ -144,7 +141,6 @@ function handleSizeSelect(size: number): void {
   selectedSize.value = size
   setSize(props.category, props.elementType, size)
   savedStyle.value = { ...savedStyle.value, size }
-  emit('style-updated')
 }
 
 // ============================================================================
@@ -176,6 +172,19 @@ onMounted(() => loadCurrentStyle())
           @click="handleColorSelect(color)"
           :title="color"
         ></button>
+        <label
+          class="color-swatch custom"
+          :class="{ active: selectedColor && !COLOR_PALETTE.includes(selectedColor) }"
+          :style="{ background: selectedColor && !COLOR_PALETTE.includes(selectedColor) ? selectedColor : undefined }"
+          title="커스텀 색상"
+        >
+          <span v-if="!selectedColor || COLOR_PALETTE.includes(selectedColor)">+</span>
+          <input
+            type="color"
+            :value="selectedColor || '#5AA0E0'"
+            @input="(e) => handleColorSelect((e.target as HTMLInputElement).value)"
+          />
+        </label>
       </div>
     </div>
 
@@ -286,6 +295,31 @@ onMounted(() => loadCurrentStyle())
   &.active {
     border-color: #1e293b;
     box-shadow: 0 0 0 2px white, 0 0 0 4px #1e293b;
+  }
+
+  &.custom {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed #94a3b8;
+    background: #f8fafc;
+    color: #64748b;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+    overflow: hidden;
+    position: relative;
+
+    input[type="color"] {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+    }
   }
 }
 

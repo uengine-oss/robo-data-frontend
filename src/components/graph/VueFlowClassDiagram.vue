@@ -10,6 +10,7 @@
  * - 드래그/줌 인터랙션
  */
 
+import { logger } from '@/utils/logger'
 import { ref, computed, watch, nextTick } from 'vue'
 import { VueFlow, useVueFlow, Handle, Position } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
@@ -239,7 +240,7 @@ async function calculateElkLayout(
     resolveOverlaps(positions, nodeSizes, 180)
     
   } catch (error) {
-    console.error('ELK 레이아웃 오류, 그리드 배치:', error)
+    logger.error('ELK 레이아웃 오류, 그리드 배치:', error)
     
     // 그리드 배치 (fallback)
     const cols = Math.ceil(Math.sqrt(classes.length))
@@ -564,7 +565,7 @@ async function rebuildSafely(): Promise<void> {
   try {
     await buildDiagram()
   } catch (error) {
-    console.error('다이어그램 빌드 오류:', error)
+    logger.error('다이어그램 빌드 오류:', error)
   }
   // 최신 호출만 적용되도록 (race 방지)
   if (myId !== layoutRunId) {

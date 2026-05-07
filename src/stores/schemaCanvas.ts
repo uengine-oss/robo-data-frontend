@@ -7,6 +7,7 @@
  * - 'text2sql': neo4j-text2sql (PostgreSQL 인제스천)
  */
 
+import { logger } from '@/utils/logger'
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { MarkerType } from '@vue-flow/core'
@@ -15,7 +16,7 @@ import { text2sqlApi, roboSchemaApi } from '@/services/api'
 import type { Text2SqlTableInfo, Text2SqlColumnInfo } from '@/types'
 import { useSessionStore } from './session'
 import { useDatasourcesStore } from './datasources'
-import ELK from 'elkjs/lib/elk.bundled.js'
+import { applyElkLayout } from '@/utils/elkLayout'
 
 export type SchemaDataSource = 'robo' | 'text2sql'
 
@@ -218,11 +219,11 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
               }
             }
           } catch (reloadErr) {
-            console.warn('[SchemaCanvas] 관계 다시 로드 실패 (무시):', reloadErr)
+            logger.warn('[SchemaCanvas] 관계 다시 로드 실패 (무시):', reloadErr)
           }
         }
       } catch (err) {
-        console.error('[SchemaCanvas] 관계 정보 업데이트 실패:', err)
+        logger.error('[SchemaCanvas] 관계 정보 업데이트 실패:', err)
       }
     }
   
@@ -378,7 +379,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     const nodeId = `table-${tableName}`
     const now = Date.now()
     
-    console.log(`[Canvas Update] ${updateType}: ${tableName}`, changes)
+    logger.debug(`[Canvas Update] ${updateType}: ${tableName}`, changes)
     
     // 새 테이블 추가 처리
     if (updateType === 'table_added') {
@@ -556,7 +557,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
    */
   function setFullViewMode(enabled: boolean) {
     isFullViewMode.value = enabled
-    console.log(`[Canvas] 전체 테이블 보기 모드: ${enabled ? 'ON' : 'OFF'}`)
+    logger.debug(`[Canvas] 전체 테이블 보기 모드: ${enabled ? 'ON' : 'OFF'}`)
   }
   
   /**
@@ -729,7 +730,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         allTables.value = await text2sqlApi.getTables(datasourceName)
       }
     } catch (error) {
-      console.error('Failed to load tables:', error)
+      logger.error('Failed to load tables:', error)
       allTables.value = []
     } finally {
       loading.value = false
@@ -761,7 +762,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       
       semanticSearchResults.value = results
     } catch (error) {
-      console.error('[SemanticSearch] 실패:', error)
+      logger.error('[SemanticSearch] 실패:', error)
       semanticSearchError.value = error instanceof Error ? error.message : '검색 실패'
       semanticSearchResults.value = []
     } finally {
@@ -841,7 +842,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       tableColumnsCache.value[tableName] = columns
       return columns
     } catch (error) {
-      console.error(`Failed to load columns for ${tableName}:`, error)
+      logger.error(`Failed to load columns for ${tableName}:`, error)
       return []
     }
   }
@@ -871,7 +872,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       userRelationships.value = relationships
       updateEdgesFromRelationships()
     } catch (error) {
-      console.error('Failed to load relationships:', error)
+      logger.error('Failed to load relationships:', error)
       userRelationships.value = []
     }
   }
@@ -889,17 +890,17 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   ) {
     // Check if already on canvas
     if (nodes.value.some(n => n.data?.tableName === table.name)) {
-      console.log(`[SchemaCanvas] 테이블 ${table.name}은 이미 캔버스에 있습니다`)
+      logger.debug(`[SchemaCanvas] 테이블 ${table.name}은 이미 캔버스에 있습니다`)
       return
     }
     
-    console.log(`[SchemaCanvas] 📋 테이블 추가 중: ${table.name} (isPrimary: ${options?.isPrimary ?? true})`)
+    logger.debug(`[SchemaCanvas] 📋 테이블 추가 중: ${table.name} (isPrimary: ${options?.isPrimary ?? true})`)
     
     // Load columns - 직접 전달된 컬럼이 있으면 사용, 없으면 DB에서 로드
     let columns: Text2SqlColumnInfo[]
     if (options?.columns && options.columns.length > 0) {
       columns = options.columns
-      console.log(`[SchemaCanvas] 직접 전달된 컬럼 사용: ${columns.length}개`)
+      logger.debug(`[SchemaCanvas] 직접 전달된 컬럼 사용: ${columns.length}개`)
     } else {
       columns = await loadTableColumns(table.name, table.schema, table.datasource || '')
     }
@@ -929,7 +930,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     }
     
     nodes.value.push(newNode)
-    console.log(`[SchemaCanvas] ✅ 테이블 ${table.name} 추가됨`)
+    logger.debug(`[SchemaCanvas] ✅ 테이블 ${table.name} 추가됨`)
     
     // Update edges for this table
     updateEdgesFromRelationships()
@@ -943,12 +944,12 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   // Load related tables from Neo4j using Cypher query API
   async function loadRelatedTablesFromNeo4j(tableName: string) {
     try {
-      console.log(`[SchemaCanvas] 🔍 Loading related tables for: ${tableName}`)
+      logger.debug(`[SchemaCanvas] 🔍 Loading related tables for: ${tableName}`)
       
       // Neo4j API를 통해 연결된 테이블 조회
       const result = await roboSchemaApi.getRelatedTables(tableName)
       
-      console.log(`[SchemaCanvas] API Response:`, result)
+      logger.debug(`[SchemaCanvas] API Response:`, result)
       
       // FK 관계가 있는 테이블만 필터링 (CO_REFERENCED 제외)
       // CO_REFERENCED는 같은 프로시저에서 참조되는 테이블일 뿐, 실제 FK 관계가 아님
@@ -963,8 +964,8 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         if (rel.to_table !== tableName) fkTableNames.add(rel.to_table)
       })
       
-      console.log(`[SchemaCanvas] FK 관계 테이블: ${Array.from(fkTableNames).join(', ')}`)
-      console.log(`[SchemaCanvas] 제외된 CO_REFERENCED 테이블: ${
+      logger.debug(`[SchemaCanvas] FK 관계 테이블: ${Array.from(fkTableNames).join(', ')}`)
+      logger.debug(`[SchemaCanvas] 제외된 CO_REFERENCED 테이블: ${
         result.tables
           .filter(t => !fkTableNames.has(t.name) && t.name !== tableName)
           .map(t => t.name)
@@ -972,7 +973,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       }`)
       
       if (fkTableNames.size === 0) {
-        console.log(`[SchemaCanvas] ⚠️ No FK-related tables found, trying fallback...`)
+        logger.debug(`[SchemaCanvas] ⚠️ No FK-related tables found, trying fallback...`)
         // Fallback: FK 컬럼명 패턴 기반 추론
         await loadRelatedTablesByFKPattern(tableName)
         return
@@ -1022,7 +1023,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         }
       }
       
-      console.log(`[SchemaCanvas] ✅ Loaded ${addedCount} FK-related tables (${fkRelationships.length} FK relationships) for ${tableName}`)
+      logger.debug(`[SchemaCanvas] ✅ Loaded ${addedCount} FK-related tables (${fkRelationships.length} FK relationships) for ${tableName}`)
       
       // 엣지 업데이트 및 레이아웃 적용
       updateEdgesFromRelationships()
@@ -1031,7 +1032,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         await applyAutoLayout()
       }
     } catch (error) {
-      console.error('[SchemaCanvas] Failed to load related tables via API:', error)
+      logger.error('[SchemaCanvas] Failed to load related tables via API:', error)
       // Fallback: FK 패턴 기반
       await loadRelatedTablesByFKPattern(tableName)
     }
@@ -1183,7 +1184,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
             }
           }
         } catch (e) {
-          console.warn('[SchemaCanvas] ObjectType description 업데이트 실패:', e)
+          logger.warn('[SchemaCanvas] ObjectType description 업데이트 실패:', e)
         }
       }
       
@@ -1241,9 +1242,9 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         fileDirectory
       )
       sourceCodePanel.value.statements = result.statements
-      console.log('[openSourceCodePanel] Statement 설명 로드:', result.statements.length, '개')
+      logger.debug('[openSourceCodePanel] Statement 설명 로드:', result.statements.length, '개')
     } catch (error) {
-      console.error('[openSourceCodePanel] Statement 설명 로드 실패:', error)
+      logger.error('[openSourceCodePanel] Statement 설명 로드 실패:', error)
       sourceCodePanel.value.statements = []
     } finally {
       sourceCodePanel.value.isLoadingStatements = false
@@ -1845,7 +1846,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       }
       await loadUserRelationships()
     } catch (error) {
-      console.error('Failed to add relationship:', error)
+      logger.error('Failed to add relationship:', error)
       throw error
     }
   }
@@ -1891,7 +1892,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       }
       await loadUserRelationships()
     } catch (error) {
-      console.error('Failed to add relationship:', error)
+      logger.error('Failed to add relationship:', error)
       throw error
     }
   }
@@ -1907,11 +1908,11 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         to_schema: relationship.to_schema
       }
       
-      console.log('[schemaCanvas.removeRelationship] 삭제 요청:', params)
+      logger.debug('[schemaCanvas.removeRelationship] 삭제 요청:', params)
       
       if (dataSource.value === 'robo') {
         const result = await roboSchemaApi.deleteRelationship(params)
-        console.log('[schemaCanvas.removeRelationship] 삭제 결과:', result)
+        logger.debug('[schemaCanvas.removeRelationship] 삭제 결과:', result)
         
         // 삭제된 개수가 0이면 에러
         if (result.deleted === 0) {
@@ -1924,7 +1925,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       await loadUserRelationships()
       return { success: true }
     } catch (error) {
-      console.error('Failed to remove relationship:', error)
+      logger.error('Failed to remove relationship:', error)
       throw error
     }
   }
@@ -1949,7 +1950,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         node.data.description = description
       }
     } catch (error) {
-      console.error('Failed to update table description:', error)
+      logger.error('Failed to update table description:', error)
       throw error
     }
   }
@@ -1989,7 +1990,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         }
       }
     } catch (error) {
-      console.error('Failed to update column description:', error)
+      logger.error('Failed to update column description:', error)
       throw error
     }
   }
@@ -2065,54 +2066,9 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     await loadRelatedTablesFromNeo4j(tableName)
   }
   
-  // ELK 레이아웃 엔진
-  const elk = new ELK()
-  
-  // 자동 레이아웃 적용
+  /** 자동 레이아웃 — ELK layered 알고리즘 (구현은 @/utils/elkLayout) */
   async function applyAutoLayout() {
-    if (nodes.value.length === 0) return
-    
-    try {
-      // ELK 그래프 구성
-      const elkGraph = {
-        id: 'root',
-        layoutOptions: {
-          'elk.algorithm': 'layered',
-          'elk.direction': 'RIGHT',
-          'elk.spacing.nodeNode': '80',
-          'elk.layered.spacing.nodeNodeBetweenLayers': '100',
-          'elk.layered.spacing.edgeNodeBetweenLayers': '50',
-          'elk.padding': '[top=50,left=50,bottom=50,right=50]'
-        },
-        children: nodes.value.map(node => ({
-          id: node.id,
-          width: 280,  // 노드 너비
-          height: 200  // 노드 높이 (평균)
-        })),
-        edges: edges.value.map(edge => ({
-          id: edge.id,
-          sources: [edge.source],
-          targets: [edge.target]
-        }))
-      }
-      
-      // 레이아웃 계산
-      const layoutedGraph = await elk.layout(elkGraph)
-      
-      // 노드 위치 업데이트
-      if (layoutedGraph.children) {
-        for (const elkNode of layoutedGraph.children) {
-          const node = nodes.value.find(n => n.id === elkNode.id)
-          if (node && elkNode.x !== undefined && elkNode.y !== undefined) {
-            node.position = { x: elkNode.x, y: elkNode.y }
-          }
-        }
-      }
-      
-      console.log('[SchemaCanvas] Auto layout applied')
-    } catch (error) {
-      console.error('[SchemaCanvas] Failed to apply layout:', error)
-    }
+    await applyElkLayout(nodes.value, edges.value)
   }
   
   // Set data source
