@@ -10,7 +10,8 @@
 
 import { computed, ref } from 'vue'
 import type { GraphNode, GraphLink } from '@/types'
-import { getNodeColor } from '@/config/graphStyles'
+import { getNodeColor } from '@/config/graphStyles'  // 통계용 — sortedNodeStats/Rel 색
+import NodeDetailContent from './node-detail/NodeDetailContent.vue'
 
 // 검색 결과 최대 개수
 const MAX_SEARCH_RESULTS = 10
@@ -95,18 +96,6 @@ const isSearchFocused = ref(false)
 // Computed - 노드 정보
 // ============================================================================
 
-
-/** 노드의 라벨 표시 */
-const nodeKind = computed(() => {
-  if (!props.node) return ''
-  return props.node.labels?.join(' / ') || 'Unknown'
-})
-
-/** 노드의 색상 계산 (labels 배열 기반, fallback으로 kind) */
-const nodeColor = computed(() => {
-  if (!props.node) return '#3b82f6'
-  return getNodeColor(props.node.labels || ['Unknown'])
-})
 
 /** 속성 목록 (노드용) */
 const nodeProperties = computed<PropertyItem[]>(() => {
@@ -358,52 +347,9 @@ function getNodeSubInfo(node: GraphNode): string {
 
 <template>
   <div class="panel-content">
-    <!-- ========== 노드 선택 시: 노드 속성 표시 ========== -->
+    <!-- ========== 노드 선택 시: 노드 종류별 친화적 카드 ========== -->
     <template v-if="node">
-      <!-- 노드 타입 표시 (kind 기반) -->
-      <div class="type-header">
-        <span
-          class="type-badge"
-          :style="{ background: nodeColor }"
-        >
-          {{ nodeKind }}
-        </span>
-      </div>
-      
-      <!-- Properties 테이블 -->
-      <div class="props-table-wrapper">
-        <table class="props-table">
-          <thead>
-            <tr>
-              <th class="col-key">속성</th>
-              <th class="col-value">값</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="properties.length === 0">
-              <td colspan="2" class="cell-empty">속성이 없습니다</td>
-            </tr>
-            <tr v-for="prop in properties" :key="prop.key">
-              <td class="cell-key">{{ prop.key }}</td>
-              <td class="cell-value">
-                <div 
-                  class="value-container" 
-                  :class="{ expanded: expandedKeys.has(prop.key) }"
-                >
-                  <div class="value-content">{{ prop.value }}</div>
-                </div>
-                <button 
-                  v-if="isLongValue(prop.value)" 
-                  class="show-toggle"
-                  @click="toggleExpand(prop.key)"
-                >
-                  {{ expandedKeys.has(prop.key) ? '접기' : '전체 보기' }}
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <NodeDetailContent :node="node" />
     </template>
     
     <!-- ========== 관계 선택 시: 관계 속성 표시 (노드가 없을 때만) ========== -->

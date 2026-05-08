@@ -165,6 +165,17 @@ onUnmounted(() => {
   window.removeEventListener('umlDepthChange', handleUmlDepthChange)
 })
 
+// Navigator 트리 단일 클릭 → 디테일 패널에 즉시 표시.
+// nodeMap 에서 lookup, 없으면 무시 (동기화 race 시 무해).
+watch(
+  () => navigatorStore.selectedNodeId,
+  (nodeId) => {
+    if (!nodeId) return
+    const node = projectStore.nodeMap.get(nodeId)
+    if (node) handleNodeSelect(node)
+  },
+)
+
 const statusType = computed(() => {
   if (!currentStep.value) return 'idle'
   const step = currentStep.value.toLowerCase()

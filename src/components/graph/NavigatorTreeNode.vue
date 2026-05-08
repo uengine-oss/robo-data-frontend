@@ -21,11 +21,18 @@ const hasChildren = computed(() => props.node.children.length > 0)
 /** 기본 동작: 전체 펼침. navigatorStore.collapsedNodes 에 있으면 접힘. */
 const isExpanded = computed(() => navigatorStore.isNodeExpanded(props.node.id))
 const isOnCanvas = computed(() => canvasStore.canvasNodeIds.has(props.node.id))
+const isSelected = computed(() => navigatorStore.selectedNodeId === props.node.id)
 
 function onToggle(e: MouseEvent) {
   e.stopPropagation()
   if (!hasChildren.value) return
   navigatorStore.toggleNode(props.node.id)
+}
+
+function onSelect() {
+  // Navigator 단일 클릭 = 디테일 패널에 노드 정보 표시.
+  // 캔버스 동작 X (드래그/더블클릭 별개).
+  navigatorStore.selectNode(props.node.id)
 }
 
 function onDragStart(e: DragEvent) {
@@ -82,9 +89,10 @@ const badgeClass = computed(() => {
   <div class="nav-tree-node">
     <div
       class="nav-tree-label"
-      :class="{ 'on-canvas': isOnCanvas }"
+      :class="{ 'on-canvas': isOnCanvas, 'selected': isSelected }"
       :style="{ paddingLeft: `${8 + depth * 14}px` }"
       draggable="true"
+      @click="onSelect"
       @dragstart="onDragStart"
       @dblclick="onDoubleClick"
       :title="node.id"
@@ -138,6 +146,15 @@ const badgeClass = computed(() => {
       color: var(--color-success, #40c057);
       font-size: 10px;
       margin-left: 4px;
+    }
+  }
+
+  &.selected {
+    background: var(--color-accent, #228be6);
+    color: var(--color-text-bright, #fff);
+
+    &:hover {
+      background: var(--color-accent-hover, #1c7ed6);
     }
   }
 }

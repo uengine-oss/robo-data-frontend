@@ -310,6 +310,10 @@ export const useNavigatorStore = defineStore('navigator', () => {
   const collapsedNodes = ref<Set<string>>(new Set())
   const searchQuery = ref('')
 
+  // ── 선택 상태 ──
+  // Navigator 단일 클릭 시 세팅 — GraphTab 이 watch 해서 노드 디테일 패널에 즉시 표시.
+  const selectedNodeId = ref<string | null>(null)
+
   // ── 파생 트리 ──
   const moduleTree = computed(() =>
     filterTree(
@@ -376,6 +380,11 @@ export const useNavigatorStore = defineStore('navigator', () => {
     collapsedNodes.value = new Set()
   }
 
+  /** Navigator 트리 노드 단일 클릭 — 디테일 패널에 즉시 표시. */
+  function selectNode(nodeId: string | null): void {
+    selectedNodeId.value = nodeId
+  }
+
   return {
     // UI
     isPanelOpen,
@@ -391,6 +400,9 @@ export const useNavigatorStore = defineStore('navigator', () => {
     isNodeExpanded,
     collapseAll,
     expandAll,
+    // 선택 상태
+    selectedNodeId,
+    selectNode,
     // 파생 뷰
     moduleTree,
     tableList,
