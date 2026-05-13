@@ -3,6 +3,8 @@ import { ref, watch } from 'vue'
 
 const STORAGE_KEY_THEME = 'robo-analyzer-theme'
 const STORAGE_KEY_API_KEY = 'robo-analyzer-api-key'
+const STORAGE_KEY_API_BASE = 'robo-analyzer-api-base'
+const STORAGE_KEY_LLM_MODEL = 'robo-analyzer-llm-model'
 const STORAGE_KEY_API_PROVIDER = 'robo-analyzer-api-provider'
 
 export type Theme = 'dark' | 'light'
@@ -25,11 +27,11 @@ export const useSessionStore = defineStore('session', () => {
     (loadFromStorage(STORAGE_KEY_THEME, 'dark') as Theme)
   )
 
-  // LLM API Key - 로컬스토리지에서 로드
+  // LLM 설정 - 로컬스토리지에서 로드 (빈 값이면 서버 .env 사용)
   const apiKey = ref<string>(loadFromStorage(STORAGE_KEY_API_KEY, ''))
-  const apiProvider = ref<ApiProvider>(
-    (loadFromStorage(STORAGE_KEY_API_PROVIDER, 'openai') as ApiProvider)
-  )
+  const apiProvider = ref<ApiProvider>(loadFromStorage(STORAGE_KEY_API_PROVIDER, 'openai') as ApiProvider)
+  const apiBase = ref<string>(loadFromStorage(STORAGE_KEY_API_BASE, ''))
+  const llmModel = ref<string>(loadFromStorage(STORAGE_KEY_LLM_MODEL, ''))
   
   // 현재 활성 탭 - 새로고침 시 항상 업로드 탭으로 시작
   const activeTab = ref<string>('upload')
@@ -214,31 +216,36 @@ export const useSessionStore = defineStore('session', () => {
     theme.value = theme.value === 'dark' ? 'light' : 'dark'
   }
   
-  // API Key 설정
+  // LLM 설정
   const setApiKey = (key: string) => {
     apiKey.value = key
     saveToStorage(STORAGE_KEY_API_KEY, key)
   }
 
-  // API Provider 설정
+  const setApiBase = (url: string) => {
+    apiBase.value = url
+    saveToStorage(STORAGE_KEY_API_BASE, url)
+  }
+
   const setApiProvider = (provider: ApiProvider) => {
     apiProvider.value = provider
     saveToStorage(STORAGE_KEY_API_PROVIDER, provider)
   }
 
-  // 헤더 생성 (API Key 포함)
+  const setLlmModel = (model: string) => {
+    llmModel.value = model
+    saveToStorage(STORAGE_KEY_LLM_MODEL, model)
+  }
+
+  // 헤더 생성 (LLM 설정 포함 — 빈 값은 전송하지 않아 서버 .env 폴백)
   const getHeaders = (): Record<string, string> => {
     const headers: Record<string, string> = {
       'Accept-Language': 'ko'
     }
 
-    if (apiKey.value) {
-      if (apiProvider.value === 'anthropic') {
-        headers['Anthropic-Api-Key'] = apiKey.value
-      } else {
-        headers['OpenAI-Api-Key'] = apiKey.value
-      }
-    }
+    if (apiKey.value) headers['X-LLM-Api-Key'] = apiKey.value
+    if (apiBase.value) headers['X-LLM-Api-Base'] = apiBase.value
+    if (llmModel.value) headers['X-LLM-Model'] = llmModel.value
 
     return headers
   }
@@ -248,6 +255,8 @@ export const useSessionStore = defineStore('session', () => {
     theme,
     apiKey,
     apiProvider,
+    apiBase,
+    llmModel,
     olapTransferData,
     watchAgentTransferData,
     pendingSchemaSearch,
@@ -260,6 +269,8 @@ export const useSessionStore = defineStore('session', () => {
     toggleTheme,
     setApiKey,
     setApiProvider,
+    setApiBase,
+    setLlmModel,
     setActiveTab,
     goHome,
     getHeaders,

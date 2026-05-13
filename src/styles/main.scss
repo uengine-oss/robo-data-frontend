@@ -26,7 +26,11 @@
   --color-accent: #228be6;
   --color-accent-hover: #1c7ed6;
   --color-accent-secondary: #7c3aed;
-  
+
+  /* Navigator 트리 선택 — 단색 채우기 대신 낮은 불투명도로 대비 완화 */
+  --nav-tree-selected-bg: rgba(147, 197, 253, 0.14);
+  --nav-tree-selected-hover: rgba(147, 197, 253, 0.22);
+
   --color-success: #40c057;
   --color-warning: #fab005;
   --color-error: #fa5252;
@@ -136,7 +140,10 @@
   --color-accent: #2563eb;
   --color-accent-hover: #1d4ed8;
   --color-accent-secondary: #7c3aed;
-  
+
+  --nav-tree-selected-bg: rgba(37, 99, 235, 0.08);
+  --nav-tree-selected-hover: rgba(37, 99, 235, 0.13);
+
   --color-success: #059669;
   --color-warning: #d97706;
   --color-error: #dc2626;

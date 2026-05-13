@@ -21,6 +21,8 @@ import {
 import type { GraphData, GraphNode, GraphLink, NvlNode, NvlRelationship } from '@/types'
 import type { PartialNode, PartialRelationship } from '@neo4j-nvl/base'
 import { getNodeColor, getRelationshipColor, getRelationshipWidth, getNodeSize } from '@/config/graphStyles'
+import { useNavigatorStore } from '@/stores/navigator'
+import { storeToRefs } from 'pinia'
 
 // ============================================================================
 // 타입 정의
@@ -84,11 +86,19 @@ const emit = defineEmits<{
   'relationship-select': [relationship: GraphLink | null]
   'node-delete': [nodeId: string]
   'node-collapse': [nodeId: string]
+  'node-isolate-label': [nodeId: string]
   'node-drop': [payload: { nodeId: string; nodeType?: string; labels?: string[] }]
   'node-expand': [nodeId: string]
   'clear-filters': []
   'open-navigator': []
 }>()
+
+// ============================================================================
+// 논리명/물리명 토글 (navigator store 공유)
+// ============================================================================
+
+const navigatorStore = useNavigatorStore()
+const { showLogicalNames } = storeToRefs(navigatorStore)
 
 // ============================================================================
 // 상태
@@ -131,13 +141,18 @@ const contextMenuRef = ref<HTMLElement | null>(null)
 // 데이터 변환
 // ============================================================================
 
+function resolveCaption(node: GraphNode): string {
+  if (showLogicalNames.value) {
+    const ln = node.properties?.logical_name as string
+    if (ln) return ln
+  }
+  return (node.properties?.name as string) || node.labels?.[node.labels.length - 1] || node.id
+}
+
 function toNvlNode(node: GraphNode, isSelected = false): NvlNode {
-  const caption = (node.properties?.name as string)
-    || node.labels?.[node.labels.length - 1]
-    || node.id
   return {
     id: node.id,
-    caption,
+    caption: resolveCaption(node),
     color: getNodeColor(node.labels),
     size: getNodeSize(node.labels),
     selected: isSelected,
@@ -149,7 +164,8 @@ function toNvlNode(node: GraphNode, isSelected = false): NvlNode {
 }
 
 function toNvlRelationship(link: GraphLink, isSelected = false): NvlRelationship {
-  return {
+  const isVirtual = link.properties?.virtual === true
+  const base: NvlRelationship = {
     id: link.id,
     from: link.source,
     to: link.target,
@@ -159,12 +175,19 @@ function toNvlRelationship(link: GraphLink, isSelected = false): NvlRelationship
     selected: isSelected,
     properties: link.properties
   }
+  if (isVirtual) {
+    // 가상 링크: 점선 스타일 힌트. NVL 이 옵션을 무시해도 색/두께로 구분됨.
+    ;(base as any).style = 'dashed'
+    ;(base as any).dashed = true
+  }
+  return base
 }
 
 function matchesLabelFilter(node: GraphNode): boolean {
   if (!props.labelFilters || props.labelFilters.length === 0) return true
   const labels = node.labels || ['Unknown']
-  return labels.some(label => props.labelFilters!.includes(label))
+  const targets = props.labelFilters.map(l => l.toUpperCase())
+  return labels.some(label => targets.includes(label.toUpperCase()))
 }
 
 // ============================================================================
@@ -413,6 +436,17 @@ function handleCollapse(event?: Event): void {
   closeContextMenu()
 }
 
+function handleIsolateLabel(event?: Event): void {
+  if (event) {
+    event.stopPropagation()
+    event.preventDefault()
+  }
+  const id = contextMenuNodeId.value
+  if (!id) return
+  emit('node-isolate-label', id)
+  closeContextMenu()
+}
+
 // ============================================================================
 // Drag & Drop (Navigator → 캔버스)
 // ============================================================================
@@ -537,6 +571,18 @@ watch([() => props.selectedNodeId, () => props.selectedRelationshipId], ([newNod
   }
 })
 
+watch(showLogicalNames, () => {
+  if (!nvlInstance.value) return
+  const updates: PartialNode[] = []
+  for (const node of props.graphData.nodes) {
+    if (!nodeMap.has(node.id)) continue
+    updates.push({ id: node.id, caption: resolveCaption(node) })
+  }
+  if (updates.length > 0) {
+    nvlInstance.value.updateElementsInGraph(updates, [])
+  }
+})
+
 // ============================================================================
 // Public API
 // ============================================================================
@@ -577,6 +623,14 @@ defineExpose({
         >
           <span class="icon">▾</span>
           <span>이웃 접기</span>
+        </button>
+        <button
+          class="context-menu-item"
+          @mousedown.stop.prevent="handleIsolateLabel($event)"
+          title="이 노드와 같은 라벨인 노드만 남기고 나머지는 캔버스에서 제거"
+        >
+          <span class="icon">⌖</span>
+          <span>같은 라벨만 남기기</span>
         </button>
         <button
           class="context-menu-item danger"

@@ -150,11 +150,11 @@ const badgeClass = computed(() => {
   }
 
   &.selected {
-    background: var(--color-accent, #228be6);
-    color: var(--color-text-bright, #fff);
+    background: var(--nav-tree-selected-bg);
+    color: var(--color-text);
 
     &:hover {
-      background: var(--color-accent-hover, #1c7ed6);
+      background: var(--nav-tree-selected-hover);
     }
   }
 }

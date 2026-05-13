@@ -55,9 +55,18 @@ export const UML_RELS: ReadonlySet<string> = new Set([
   'COMPOSITION', 'AGGREGATION', 'ASSOCIATION',
 ])
 
-/** UI 에서 제외 — 트리 구조용 내부 관계. */
+/**
+ * UI 에서 제외할 관계 타입.
+ * - 트리/그룹화 내부용 (PARENT_OF, BELONGS_TO*)
+ * - 정렬·추적용으로 그래프를 어지럽게 만드는 흐름 메타 (NEXT, BRANCH)
+ * - 메타 문서/규칙성 (HAS_RULE/EXAMPLE/QUESTION) — 대응 노드도 숨김.
+ * - 의미가 모호하거나 양이 많아 시각화 노이즈인 보조 링크 (REFERENCES, AFFECTS_TABLE)
+ */
 export const EXCLUDED_RELS: ReadonlySet<string> = new Set([
-  'PARENT_OF', 'NEXT', 'BELONGS_TO', 'BELONGS_TO_PACKAGE',
+  'PARENT_OF', 'BELONGS_TO', 'BELONGS_TO_PACKAGE',
+  'NEXT', 'BRANCH',
+  'REFERENCES', 'AFFECTS_TABLE',
+  'HAS_RULE', 'HAS_EXAMPLE', 'HAS_QUESTION',
 ])
 
 // ─────────────────────────────────────────────────────────────────────────

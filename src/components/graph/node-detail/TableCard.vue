@@ -113,7 +113,8 @@ const fks = computed(() =>
         </div>
         <TextViewer
           :content="activeTab === 'ddl' ? ddlDescription : codeDescription"
-          :max-height="180"
+          :max-height="220"
+          format="auto"
         />
       </section>
 
@@ -159,9 +160,10 @@ const fks = computed(() =>
 
 <style lang="scss" scoped>
 .desc-section, .col-section, .fk-section {
-  padding: 10px 12px;
-  background: var(--color-bg-secondary);
-  border-radius: 6px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--color-bg-secondary) 60%, var(--color-bg));
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
 }
 
 .section-title {
@@ -179,18 +181,26 @@ const fks = computed(() =>
 }
 
 .tab-btn {
-  padding: 4px 10px;
+  padding: 4px 12px;
   font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   border: 1px solid var(--color-border);
-  border-radius: 4px;
-  background: none;
+  border-radius: 999px;
+  background: var(--color-bg);
   color: var(--color-text-muted);
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    color: var(--color-text);
+    border-color: var(--color-text-muted);
+  }
 
   &.active {
-    background: var(--color-accent);
+    background: var(--color-bg);
     color: var(--color-text-bright);
-    border-color: var(--color-accent);
+    border-color: var(--color-text-muted);
   }
 }
 

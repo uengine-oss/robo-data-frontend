@@ -38,6 +38,7 @@ const {
   graphEvents,
 } = storeToRefs(projectStore)
 const { canvasGraphData } = storeToRefs(canvasStore)
+const { showLogicalNames } = storeToRefs(navigatorStore)
 
 const MAX_SEARCH_RESULTS = 8
 
@@ -391,6 +392,30 @@ function handleLabelFilter(label: string): void {
   labelFilters.value = [...set]
 }
 
+/**
+ * "모듈간 상호작용 보기" 프리셋: 화면에서 MODULE 과 TABLE 만 보여주고
+ * 둘 사이를 잇는 가상 링크(VIRTUAL_USES) 를 합성해 그려준다.
+ *
+ * 실제 데이터는 MODULE -[HAS_FUNCTION]-> FUNCTION -[READS/WRITES/...]-> TABLE 형태지만,
+ * 가상 링크 합성은 canvasStore.canvasGraphData (computed) 에서 처리하므로
+ * 여기서는 presetMode 만 토글한다. DB 에는 아무 영향 없음.
+ *
+ * 다시 누르면 프리셋 해제 + 캔버스 비움.
+ */
+const { presetMode: canvasPresetMode } = storeToRefs(canvasStore)
+
+const isInteractionPresetActive = computed(() => canvasPresetMode.value === 'module-interaction')
+
+function toggleInteractionPreset(): void {
+  if (isInteractionPresetActive.value) {
+    canvasStore.setPreset(null)
+    labelFilters.value = []
+    return
+  }
+  labelFilters.value = []
+  canvasStore.setPreset('module-interaction')
+}
+
 /** 모든 라벨 필터 해제 */
 function handleClearFilters(): void {
   labelFilters.value = []
@@ -447,6 +472,15 @@ function handleNodeCollapse(nodeId: string): void {
   canvasStore.collapseNodeOnCanvas(nodeId)
 }
 
+/**
+ * 컨텍스트 메뉴 "같은 라벨만 남기기" → 우클릭 노드의 라벨과 같은 노드만 캔버스에 유지.
+ * 결과적으로 같은 라벨 사이의 관계만 남게 된다.
+ */
+function handleNodeIsolateLabel(nodeId: string): void {
+  if (!nodeId) return
+  canvasStore.isolateLabel(nodeId)
+}
+
 watch(hasGraph, (has, prev) => {
   if (has && !prev) showNodePanel.value = true
 })
@@ -456,16 +490,6 @@ watch(hasGraph, (has, prev) => {
 
 <template>
   <div class="graph-tab">
-    <!-- 패널 열기 버튼 (숨김 상태일 때) -->
-    <button 
-      v-if="activeView !== 'schema' && analysisPanelMode === 'hidden'"
-      class="panel-show-btn"
-      @click="togglePanelVisibility"
-      title="분석 패널 열기"
-    >
-      <span class="btn-icon">📊</span>
-      <span class="btn-label">분석</span>
-    </button>
     
     <!-- 왼쪽 통합 분석 패널 (Graph/UML 모드에서만 표시) -->
     <div 
@@ -592,6 +616,7 @@ watch(hasGraph, (has, prev) => {
           @relationship-select="handleRelationshipSelect"
           @node-delete="handleNodeRemoveFromCanvas"
           @node-collapse="handleNodeCollapse"
+          @node-isolate-label="handleNodeIsolateLabel"
           @node-drop="handleNodeDrop"
           @node-expand="handleNodeExpand"
           @clear-filters="handleClearFilters"
@@ -661,7 +686,31 @@ watch(hasGraph, (has, prev) => {
           Graph
         </button>
       </div>
-      
+
+      <!-- 논리명 / 물리명 토글: 그래프·UML 뷰에서만 의미. Navigator·NvlGraph 캡션 동기화. -->
+      <label
+        v-if="activeView === 'graph' || activeView === 'uml'"
+        class="name-toggle"
+        :title="showLogicalNames ? '논리명 표시 중 — 클릭하면 물리명' : '물리명 표시 중 — 클릭하면 논리명'"
+        @click.prevent="navigatorStore.toggleLogicalNames()"
+      >
+        <span class="toggle-track" :class="{ active: showLogicalNames }">
+          <span class="toggle-thumb" />
+        </span>
+        <span class="toggle-text">{{ showLogicalNames ? '논리명' : '물리명' }}</span>
+      </label>
+
+      <!-- 모듈간 상호작용 보기: 누르면 모듈+함수+테이블 라벨만 표시 (다시 누르면 해제) -->
+      <button
+        v-if="activeView === 'graph'"
+        class="interaction-preset-btn"
+        :class="{ active: isInteractionPresetActive }"
+        title="모듈간 상호작용 보기 — 모듈/함수/테이블 만 표시 (다시 누르면 해제)"
+        @click="toggleInteractionPreset"
+      >
+        🔗 모듈간 상호작용
+      </button>
+
       <template v-if="activeView === 'uml'">
         <button class="control-btn" @click="showSearch = !showSearch" title="클래스 명 검색">
           🔍
@@ -920,6 +969,101 @@ watch(hasGraph, (has, prev) => {
     background: var(--color-bg-tertiary);
     border-color: var(--color-text-muted);
     color: var(--color-text);
+  }
+}
+
+// ============================================================================
+// "모듈간 상호작용 보기" 단일 프리셋 버튼 — 누르면 MODULE+FUNCTION+TABLE 라벨만 표시
+// ============================================================================
+
+.interaction-preset-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: var(--shadow-md);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: var(--color-bg-tertiary);
+    border-color: var(--color-text-muted);
+  }
+
+  &.active {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: #fff;
+  }
+}
+
+// ============================================================================
+// 논리명 / 물리명 토글 — view-switcher 와 시각적으로 짝맞춤
+// ============================================================================
+
+.name-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  user-select: none;
+  box-shadow: var(--shadow-md);
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background: var(--color-bg-tertiary);
+    border-color: var(--color-text-muted);
+  }
+
+  .toggle-track {
+    position: relative;
+    width: 28px;
+    height: 16px;
+    border-radius: 8px;
+    background: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border);
+    transition: background 0.18s ease, border-color 0.18s ease;
+  }
+
+  .toggle-thumb {
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--color-text-light);
+    transition: transform 0.18s ease, background 0.18s ease;
+  }
+
+  .toggle-track.active {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+
+    .toggle-thumb {
+      transform: translateX(12px);
+      background: #fff;
+    }
+  }
+
+  .toggle-text {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-bright);
+    letter-spacing: 0.2px;
   }
 }
 
@@ -1304,36 +1448,6 @@ watch(hasGraph, (has, prev) => {
 // ============================================================================
 // 왼쪽 통합 분석 패널
 // ============================================================================
-
-// 패널 열기 버튼 (숨김 상태일 때)
-.panel-show-btn {
-  position: absolute;
-  left: 8px;
-  top: 8px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  color: var(--color-text);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  box-shadow: var(--shadow-md);
-  z-index: 100;
-  transition: all 0.15s ease;
-  
-  &:hover {
-    background: var(--color-bg-tertiary);
-    box-shadow: var(--shadow-lg);
-  }
-  
-  .btn-icon {
-    font-size: 14px;
-  }
-}
 
 .analysis-panel {
   position: relative;

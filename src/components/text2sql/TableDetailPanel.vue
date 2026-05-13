@@ -663,14 +663,14 @@ function isColumnUpdating(colName: string): boolean {
 
 .detail-field__display {
   position: relative;
-  padding: 12px 36px 12px 14px; // 우측에 edit 아이콘 자리
+  padding: 10px 32px 10px 12px;
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: border-color 0.15s;
-  font-size: 0.9rem;
-  line-height: 1.6;
+  font-size: 0.82rem;
+  line-height: 1.5;
   color: var(--color-text);
 
   &:hover {
@@ -681,21 +681,27 @@ function isColumnUpdating(colName: string): boolean {
     color: var(--color-text-muted);
     font-style: italic;
   }
+
+  :deep(.text-viewer__body) {
+    white-space: normal;
+    line-height: 1.5;
+  }
 }
 
 .detail-field__text {
   margin: 0;
-  max-height: 180px;          // 너무 길면 자체 스크롤
+  max-height: 180px;
   overflow-y: auto;
-  white-space: pre-wrap;     // 줄바꿈/공백 보존
-  word-break: break-word;    // 긴 토큰도 줄바꿈
+  white-space: normal;
+  word-break: break-word;
   color: var(--color-text);
+  font-size: 0.82rem;
+  line-height: 1.5;
 
-  // 얇은 스크롤바
-  &::-webkit-scrollbar { width: 6px; }
+  &::-webkit-scrollbar { width: 4px; }
   &::-webkit-scrollbar-thumb {
     background: var(--color-border);
-    border-radius: 3px;
+    border-radius: 2px;
   }
   &::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
 }
@@ -749,7 +755,7 @@ function isColumnUpdating(colName: string): boolean {
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  padding: 10px 12px;
+  padding: 8px 10px;
   transition: border-color 0.15s;
   
   &:hover {
@@ -806,13 +812,14 @@ function isColumnUpdating(colName: string): boolean {
 
 .column-item__desc {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 6px;
-  padding: 6px 8px;
+  align-items: flex-start;
+  gap: 5px;
+  margin-top: 4px;
+  padding: 4px 8px;
   background: var(--color-bg-secondary);
   border-radius: var(--radius-sm);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
   color: var(--color-text-light);
   cursor: pointer;
   
@@ -823,6 +830,11 @@ function isColumnUpdating(colName: string): boolean {
   .placeholder {
     font-style: italic;
     color: var(--color-text-muted);
+  }
+
+  :deep(.text-viewer__body) {
+    white-space: normal;
+    line-height: 1.4;
   }
 }
 
@@ -926,14 +938,21 @@ function isColumnUpdating(colName: string): boolean {
 .relationship-item__info {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 0.8rem;
+  gap: 6px;
+  font-size: 0.75rem;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
 }
 
 .relationship-item__from,
 .relationship-item__to {
   color: var(--color-accent-light);
   font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: monospace;
 }
 
 .relationship-item__arrow {

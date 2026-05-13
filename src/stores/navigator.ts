@@ -31,6 +31,12 @@ export interface NavigatorTreeItem {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// 논리명/물리명 표시 전환 (모듈 레벨 — store + 헬퍼 함수 모두 접근)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const showLogicalNames = ref(false)
+
+// ═══════════════════════════════════════════════════════════════════════════
 // 트리 빌드 헬퍼 (순수 함수)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -46,6 +52,7 @@ const ROLE_LABELS = new Set([
 /** 트리에서 제외할 라벨 — 변수/상수는 트리에 안 보인다. */
 const EXCLUDED_LABELS = new Set([
   'VARIABLE', 'CONSTANT', 'GLOBAL_VARIABLE', 'DEFINE',
+  'Rule', 'Example', 'Question',
 ])
 
 /** 자식으로 확장할 관계 타입.
@@ -83,11 +90,14 @@ function pickDisplayLabel(labels: string[]): string {
 
 function pickDisplayName(node: GraphNode): string {
   const p = node.properties
-  // BL 은 sequence prefix 추가하여 흐름 파악 용이하게
   if (node.labels.includes('BusinessLogic')) {
     const seq = p['sequence']
     const title = String(p['title'] ?? p['name'] ?? node.id)
     return seq != null ? `[${seq}] ${title}` : title
+  }
+  if (showLogicalNames.value) {
+    const ln = p['logical_name']
+    if (ln) return String(ln)
   }
   return String(
     p['name'] ?? p['fqn'] ?? p['procedure_name']
@@ -179,7 +189,11 @@ function buildChildIndexes(linkMap: Map<string, GraphLink>) {
 
 /**
  * MODULES 섹션: PACKAGE 계층 → MODULE → FUNCTION/CLASS → BusinessLogic.
- * PACKAGE 는 BELONGS_TO_PACKAGE 관계를 역방향으로 따라가 계층을 만든다.
+ *
+ * 견고성 원칙 (스트리밍 도중에도 0건이 되지 않도록):
+ * 1. MODULE 라벨이 있는 모든 노드를 우선 트리에 등장시킨다.
+ * 2. PACKAGE 계층은 부수적 — 형성되면 MODULE 을 그 안에 흡수, 안 되면 평면으로.
+ * 3. 'root' 패키지 식별 실패해도 MODULE 자체는 항상 노출 (스트림 초기에도 카운트 > 0).
  */
 function buildModulesTree(
   nodeMap: Map<string, GraphNode>,
@@ -187,12 +201,12 @@ function buildModulesTree(
 ): NavigatorTreeItem[] {
   const { childIndex, relIndex } = buildChildIndexes(linkMap)
 
-  // child -BELONGS_TO_PACKAGE-> parent(PACKAGE) 인덱스
+  // BELONGS_TO_PACKAGE: source = 자식, target = 부모(PACKAGE)
   const belongsTo = new Map<string, string[]>()   // parentPkgId → [childId]
-  const ownsPackage = new Set<string>()            // BELONGS_TO_PACKAGE 의 source (자식)
+  const parentOf = new Map<string, string>()       // childId → parentPkgId
   for (const link of linkMap.values()) {
     if (link.type !== 'BELONGS_TO_PACKAGE') continue
-    ownsPackage.add(link.source)
+    parentOf.set(link.source, link.target)
     const list = belongsTo.get(link.target) ?? []
     list.push(link.source)
     belongsTo.set(link.target, list)
@@ -217,11 +231,13 @@ function buildModulesTree(
         if (pt) children.push(pt)
       } else if (child.labels.includes('MODULE')) {
         const mt = buildSubtree(childId, nodeMap, childIndex, relIndex, 0, new Set(visited))
-        if (mt) children.push(mt)
+        if (mt) {
+          visited.add(childId)
+          children.push(mt)
+        }
       }
     }
     children.sort((a, b) => {
-      // PACKAGE 를 먼저, 그 다음 MODULE
       const ap = a.labels.includes('PACKAGE') ? 0 : 1
       const bp = b.labels.includes('PACKAGE') ? 0 : 1
       return ap !== bp ? ap - bp : a.name.localeCompare(b.name)
@@ -236,26 +252,28 @@ function buildModulesTree(
     }
   }
 
-  // root 패키지의 직접 자식인 PACKAGE 를 최상위 루트로
   const roots: NavigatorTreeItem[] = []
+
+  // [A] PACKAGE 계층 — root 부모를 가진 최상위 패키지부터 (있으면)
   for (const pkg of nodeMap.values()) {
     if (!pkg.labels.includes('PACKAGE')) continue
-    const parents = [...(linkMap.values())]
-      .filter(l => l.type === 'BELONGS_TO_PACKAGE' && l.source === pkg.id)
-      .map(l => nodeMap.get(l.target))
-    const hasRootParent = parents.some(p => p && pickDisplayName(p) === 'root')
-    if (hasRootParent) {
-      const tree = buildPkgTree(pkg.id, 0)
-      if (tree) roots.push(tree)
-    }
+    const parentPkgId = parentOf.get(pkg.id)
+    const parent = parentPkgId ? nodeMap.get(parentPkgId) : null
+    const isTopLevel = !parent || pickDisplayName(parent) === 'root' || !parent.labels.includes('PACKAGE')
+    if (!isTopLevel) continue
+    const tree = buildPkgTree(pkg.id, 0)
+    if (tree) roots.push(tree)
   }
 
-  // 패키지에 속하지 않는 MODULE 도 루트로 추가
+  // [B] 위에서 흡수 안 된 MODULE 은 전부 평면 루트로 노출 (스트림 초기에도 카운트 > 0).
   for (const node of nodeMap.values()) {
     if (!node.labels.includes('MODULE')) continue
-    if (ownsPackage.has(node.id)) continue     // 이미 PACKAGE 트리 안에 있음
+    if (visited.has(node.id)) continue           // 이미 PACKAGE 트리에 들어감
     const tree = buildSubtree(node.id, nodeMap, childIndex, relIndex, 0, new Set(visited))
-    if (tree) roots.push(tree)
+    if (tree) {
+      visited.add(node.id)
+      roots.push(tree)
+    }
   }
 
   roots.sort((a, b) => a.name.localeCompare(b.name))
@@ -385,12 +403,19 @@ export const useNavigatorStore = defineStore('navigator', () => {
     selectedNodeId.value = nodeId
   }
 
+  function toggleLogicalNames(): void {
+    showLogicalNames.value = !showLogicalNames.value
+  }
+
   return {
     // UI
     isPanelOpen,
     activeView,
     setPanelOpen,
     setActiveView,
+    // 논리명/물리명 토글
+    showLogicalNames,
+    toggleLogicalNames,
     // 트리 상태
     expandedSections,
     collapsedNodes,

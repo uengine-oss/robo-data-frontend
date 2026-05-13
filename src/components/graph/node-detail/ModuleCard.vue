@@ -2,21 +2,13 @@
 /**
  * ModuleCard.vue
  * MODULE 라벨 노드 — 메서드 품는 컨테이너 (CLASS/INTERFACE/ENUM/RECORD/Go STRUCT 등).
- *
- * 표시:
- *   - 헤더 (sub-label = CLASS/INTERFACE/ENUM 등)
- *   - summary (한 줄 핵심 + 설명)
- *   - 멤버 함수 (HAS_FUNCTION)
- *   - 멤버 필드 (HAS_VARIABLE)
- *   - UML 관계 (EXTENDS/IMPLEMENTS 등)
- *
- * 자식 0건이면 해당 섹션 자동 숨김.
  */
 
 import { computed } from 'vue'
 import type { GraphNode } from '@/types'
 import { useAnalyzerStore } from '@/stores/analyzer'
 import { getRelationshipGroups, getAttachedByType } from '@/utils/nodeRelationships'
+import { technicalNodeName, logicalNodeName } from '@/utils/graphDisplay'
 import NodeDetailBase from './NodeDetailBase.vue'
 
 interface Props {
@@ -27,6 +19,11 @@ const props = defineProps<Props>()
 const projectStore = useAnalyzerStore()
 
 const subLabel = computed(() => (props.node.properties?.type as string) || 'MODULE')
+
+const displayName = computed(() => (props.node.properties?.logical_name as string) || '')
+const intent = computed(() => (props.node.properties?.intent as string) || '')
+const comment = computed(() => (props.node.properties?.comment as string) || '')
+const annotations = computed(() => (props.node.properties?.annotations as string) || '')
 
 const subInfo = computed(() => {
   const p = props.node.properties || {}
@@ -47,31 +44,21 @@ const groups = computed(() =>
 interface MemberLink {
   id: string
   name: string
-  summary?: string
+  logical: string
 }
 
-function resolveNode(id: string): { name: string; summary: string } {
+function resolveNode(id: string): { name: string; logical: string } {
   const n = projectStore.nodeMap.get(id)
-  const p = n?.properties || {}
-  const name =
-    (p.name as string) ||
-    (p.fqn as string)?.split('.').pop() ||
-    id
-  const summary = (p.summary as string) || ''
-  return { name, summary }
+  return {
+    name: technicalNodeName(n) || id,
+    logical: logicalNodeName(n),
+  }
 }
 
 const methods = computed<MemberLink[]>(() =>
   getAttachedByType(groups.value, 'HAS_FUNCTION').map(l => {
     const r = resolveNode(l.target)
-    return { id: l.target, name: r.name, summary: r.summary }
-  }),
-)
-
-const fields = computed<MemberLink[]>(() =>
-  getAttachedByType(groups.value, 'HAS_VARIABLE').map(l => {
-    const r = resolveNode(l.target)
-    return { id: l.target, name: r.name, summary: r.summary }
+    return { id: l.target, name: r.name, logical: r.logical }
   }),
 )
 
@@ -91,57 +78,105 @@ const umlEdges = computed(() =>
     :label-badge="subLabel"
     :sub-info="subInfo"
   >
+    <template #sub-header v-if="displayName">
+      <div class="module-display-name">{{ displayName }}</div>
+    </template>
+
     <template #body>
-      <!-- 멤버 메서드 -->
-      <section v-if="methods.length > 0" class="member-section">
-        <h4 class="section-title">🔧 메서드 ({{ methods.length }})</h4>
-        <ul class="member-list">
-          <li v-for="m in methods" :key="m.id" :title="m.summary || m.id">
-            <span class="member-name">{{ m.name }}</span>
-            <span v-if="m.summary" class="member-summary">{{ m.summary }}</span>
-          </li>
-        </ul>
+      <section v-if="intent" class="detail-card">
+        <span class="detail-card__label">의도</span>
+        <div class="detail-card__body detail-card__body--tight">
+          <p class="module-prose">{{ intent }}</p>
+        </div>
       </section>
 
-      <!-- 멤버 필드 -->
-      <section v-if="fields.length > 0" class="member-section">
-        <h4 class="section-title">📋 필드 ({{ fields.length }})</h4>
-        <ul class="member-list">
-          <li v-for="f in fields" :key="f.id" :title="f.summary || f.id">
-            <span class="member-name">{{ f.name }}</span>
-            <span v-if="f.summary" class="member-summary">{{ f.summary }}</span>
-          </li>
-        </ul>
+      <section v-if="annotations || comment" class="detail-card">
+        <span class="detail-card__label">메타</span>
+        <div class="detail-card__body detail-card__body--tight module-meta">
+          <div v-if="annotations" class="meta-row">
+            <span class="meta-key">annotations</span>
+            <span class="meta-val">{{ annotations }}</span>
+          </div>
+          <div v-if="comment" class="meta-row">
+            <span class="meta-key">comment</span>
+            <span class="meta-val">{{ comment }}</span>
+          </div>
+        </div>
       </section>
 
-      <!-- UML 관계 -->
-      <section v-if="umlEdges.length > 0" class="member-section">
-        <h4 class="section-title">🧩 클래스 관계</h4>
-        <ul class="uml-list">
-          <li v-for="(e, i) in umlEdges" :key="i">
-            <span class="uml-type">{{ e.type }}</span>
-            <span class="uml-dir">{{ e.direction === 'out' ? '→' : '←' }}</span>
-            <span class="uml-name">{{ e.name }}</span>
-          </li>
-        </ul>
+      <section v-if="methods.length > 0" class="detail-card">
+        <span class="detail-card__label">함수 · {{ methods.length }}</span>
+        <div class="detail-card__body detail-card__body--tight">
+          <ul class="member-list">
+            <li v-for="m in methods" :key="m.id" :title="m.logical ? `${m.name} (${m.logical})` : m.name">
+              <span class="member-name">{{ m.name }}</span>
+              <span v-if="m.logical" class="member-logical">({{ m.logical }})</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section v-if="umlEdges.length > 0" class="detail-card">
+        <span class="detail-card__label">클래스 관계 · {{ umlEdges.length }}</span>
+        <div class="detail-card__body detail-card__body--tight">
+          <ul class="uml-list">
+            <li v-for="(e, i) in umlEdges" :key="i">
+              <span class="uml-type">{{ e.type }}</span>
+              <span class="uml-dir">{{ e.direction === 'out' ? '→' : '←' }}</span>
+              <span class="uml-name">{{ e.name }}</span>
+            </li>
+          </ul>
+        </div>
       </section>
     </template>
   </NodeDetailBase>
 </template>
 
 <style lang="scss" scoped>
-.member-section {
-  padding: 10px 12px;
-  background: var(--color-bg-secondary);
-  border-radius: 6px;
+.module-display-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-accent-secondary, #a5b4fc);
+  font-style: italic;
 }
 
-.section-title {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  margin: 0 0 8px;
-  letter-spacing: 0.5px;
+.module-prose {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+.module-meta .meta-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 0.72rem;
+  padding: 4px 0;
+
+  &:first-child {
+    padding-top: 0;
+  }
+
+  &:last-child {
+    padding-bottom: 0;
+  }
+
+  .meta-key {
+    color: var(--color-text-muted);
+    font-weight: 700;
+    flex-shrink: 0;
+    font-size: 0.65rem;
+    letter-spacing: 0.04em;
+  }
+
+  .meta-val {
+    color: var(--color-text);
+    font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.68rem;
+    word-break: break-word;
+    min-width: 0;
+  }
 }
 
 .member-list {
@@ -154,27 +189,38 @@ const umlEdges = computed(() =>
 
   li {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 4px 8px;
-    border-radius: 4px;
+    align-items: baseline;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--color-border-light, var(--color-border));
     background: var(--color-bg-tertiary);
-    font-size: 0.8rem;
+    font-size: 0.74rem;
+    min-width: 0;
 
     &:hover {
-      background: var(--color-bg-hover);
+      border-color: var(--color-text-muted);
     }
   }
 
   .member-name {
     color: var(--color-text-bright);
     font-weight: 600;
+    font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.72rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
   }
 
-  .member-summary {
+  .member-logical {
     color: var(--color-text-muted);
-    font-size: 0.7rem;
-    line-height: 1.4;
+    font-size: 0.66rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
 }
 
@@ -184,31 +230,40 @@ const umlEdges = computed(() =>
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 
   li {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 0.75rem;
-    padding: 3px 6px;
+    gap: 8px;
+    font-size: 0.74rem;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: var(--color-bg-tertiary);
+    border: 1px solid var(--color-border-light, var(--color-border));
   }
 
   .uml-type {
-    font-size: 0.65rem;
-    padding: 1px 6px;
-    border-radius: 3px;
-    background: rgba(99, 102, 241, 0.15);
-    color: #a5b4fc;
+    font-size: 0.62rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(99, 102, 241, 0.14);
+    color: var(--color-accent-secondary, #a5b4fc);
     font-weight: 700;
+    letter-spacing: 0.03em;
   }
 
   .uml-dir {
     color: var(--color-text-muted);
+    flex-shrink: 0;
   }
 
   .uml-name {
-    color: var(--color-text);
+    color: var(--color-text-bright);
+    font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.7rem;
+    min-width: 0;
+    word-break: break-word;
   }
 }
 </style>

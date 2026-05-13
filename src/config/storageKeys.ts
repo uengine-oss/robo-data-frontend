@@ -17,7 +17,8 @@ export const STORAGE_KEYS = {
   PROJECT_STATE: 'robo-analyzer-project-state',
   THEME: 'robo-analyzer-theme',
   API_KEY: 'robo-analyzer-api-key',
-  API_PROVIDER: 'robo-analyzer-api-provider',
+  API_BASE: 'robo-analyzer-api-base',
+  LLM_MODEL: 'robo-analyzer-llm-model',
 
   // 앱 설정
   APP_TITLE: 'appTitle',

@@ -2,7 +2,6 @@
 /**
  * SqlStatementCard.vue
  * DBMS DML (SELECT/INSERT/UPDATE/DELETE/MERGE/UNION 등) + Framework SQL_STATEMENT.
- * 입력 테이블 + 출력 테이블 + code (전체 토글).
  */
 
 import { computed, ref } from 'vue'
@@ -55,62 +54,62 @@ const outputs = computed(() =>
 <template>
   <NodeDetailBase :node="node" icon="🔍" :label-badge="subLabel" :sub-info="subInfo">
     <template #body>
-      <section v-if="inputs.length > 0" class="data-section">
-        <h4 class="section-title">📥 입력 ({{ inputs.length }})</h4>
-        <ul class="data-list">
-          <li v-for="t in inputs" :key="t.id">
-            <span class="rel-tag">{{ t.type }}</span>
-            <span class="data-name">{{ t.name }}</span>
-          </li>
-        </ul>
+      <section v-if="inputs.length > 0" class="detail-card">
+        <span class="detail-card__label">입력 · {{ inputs.length }}</span>
+        <div class="detail-card__body detail-card__body--tight">
+          <ul class="sql-data-list">
+            <li v-for="t in inputs" :key="t.id">
+              <span class="rel-tag">{{ t.type }}</span>
+              <span class="data-name">{{ t.name }}</span>
+            </li>
+          </ul>
+        </div>
       </section>
 
-      <section v-if="outputs.length > 0" class="data-section">
-        <h4 class="section-title">📤 출력 ({{ outputs.length }})</h4>
-        <ul class="data-list">
-          <li v-for="t in outputs" :key="t.id"><span class="data-name">{{ t.name }}</span></li>
-        </ul>
+      <section v-if="outputs.length > 0" class="detail-card">
+        <span class="detail-card__label">출력 · {{ outputs.length }}</span>
+        <div class="detail-card__body detail-card__body--tight">
+          <ul class="sql-data-list">
+            <li v-for="t in outputs" :key="t.id"><span class="data-name">{{ t.name }}</span></li>
+          </ul>
+        </div>
       </section>
 
-      <section v-if="code" class="code-section">
-        <h4 class="section-title">
-          📄 코드
-          <button class="toggle-btn" @click="showFullCode = !showFullCode">
+      <section v-if="code" class="detail-card">
+        <span class="detail-card__label sql-code-label">
+          <span>원문 SQL</span>
+          <button type="button" class="toggle-btn" @click="showFullCode = !showFullCode">
             {{ showFullCode ? '접기' : '전체보기' }}
           </button>
-        </h4>
-        <pre class="code-block" :class="{ collapsed: !showFullCode }">{{ code }}</pre>
+        </span>
+        <div class="detail-card__body detail-card__body--flush">
+          <div class="detail-scroll" :class="{ 'detail-scroll--collapsed-sql': !showFullCode }">
+            <pre>{{ code }}</pre>
+          </div>
+        </div>
       </section>
     </template>
   </NodeDetailBase>
 </template>
 
 <style lang="scss" scoped>
-.data-section, .code-section {
-  padding: 10px 12px;
-  background: var(--color-bg-secondary);
-  border-radius: 6px;
-}
-
-.section-title {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  margin: 0 0 8px;
-  display: flex;
+.sql-code-label {
+  display: flex !important;
   align-items: center;
   gap: 8px;
 }
 
 .toggle-btn {
-  font-size: 0.65rem;
-  padding: 2px 8px;
+  margin-left: auto;
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
   border: 1px solid var(--color-border);
-  border-radius: 3px;
-  background: none;
+  background: var(--color-bg-secondary);
   color: var(--color-text-muted);
   cursor: pointer;
-  margin-left: auto;
+  transition: border-color 0.12s, color 0.12s;
 
   &:hover {
     border-color: var(--color-accent);
@@ -118,50 +117,38 @@ const outputs = computed(() =>
   }
 }
 
-.data-list {
+.sql-data-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 6px;
 
   li {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 3px 6px;
-    font-size: 0.75rem;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border-light, var(--color-border));
+    background: var(--color-bg-tertiary);
+    font-size: 0.74rem;
   }
 }
 
 .rel-tag {
-  font-size: 0.65rem;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: var(--color-bg-tertiary);
+  font-size: 0.62rem;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--color-bg-secondary);
   color: var(--color-text-muted);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .data-name {
-  color: var(--color-text);
-  font-family: monospace;
-}
-
-.code-block {
-  font-family: monospace;
+  color: var(--color-text-bright);
+  font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
   font-size: 0.7rem;
-  color: var(--color-text);
-  background: var(--color-bg);
-  padding: 8px;
-  border-radius: 4px;
-  margin: 0;
-  overflow: auto;
-  white-space: pre;
-
-  &.collapsed {
-    max-height: 120px;
-  }
 }
 </style>

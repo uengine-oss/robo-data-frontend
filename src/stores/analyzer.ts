@@ -168,20 +168,50 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const nodeMap = ref<Map<string, GraphNode>>(new Map())
   const linkMap = ref<Map<string, GraphLink>>(new Map())
 
-  const graphData = computed<GraphData>(() => ({
-    nodes: Array.from(nodeMap.value.values()),
-    links: Array.from(linkMap.value.values()),
-  }))
-
   /**
    * 임시: 비즈니스 로직 메타 라벨은 화면에 표시하지 않음.
    * 풀려면 이 set 을 비우고 재인제스션하면 됨.
    */
   const HIDDEN_NODE_LABELS = new Set(['Rule', 'Example', 'Question'])
 
+  /**
+   * 화면에 노출하지 않는 관계 타입.
+   * - 메타·문서성 링크 (HAS_RULE/EXAMPLE/QUESTION) : 대응 노드 자체도 숨김.
+   * - 정렬/추적용 링크 (NEXT, BRANCH) : 호출 흐름이 아니라서 그래프를 어지럽게 함.
+   * - 코드 참조 보조 링크 (REFERENCES, AFFECTS_TABLE) : 의미가 모호하고 양이 많음.
+   * 풀려면 이 set 만 비우면 됨. 데이터는 그대로 두고 표시만 차단.
+   */
+  const HIDDEN_LINK_TYPES = new Set([
+    'NEXT',
+    'REFERENCES',
+    'HAS_RULE',
+    'HAS_EXAMPLE',
+    'HAS_QUESTION',
+    'AFFECTS_TABLE',
+    'BRANCH',
+  ])
+
   function isHiddenNode(node: GraphNode): boolean {
     return (node.labels || []).some(l => HIDDEN_NODE_LABELS.has(l))
   }
+
+  function isHiddenLink(link: GraphLink, nodes: Map<string, GraphNode>): boolean {
+    if (HIDDEN_LINK_TYPES.has(link.type)) return true
+    const src = nodes.get(link.source)
+    if (src && isHiddenNode(src)) return true
+    const tgt = nodes.get(link.target)
+    if (tgt && isHiddenNode(tgt)) return true
+    return false
+  }
+
+  const graphData = computed<GraphData>(() => {
+    const nodes = Array.from(nodeMap.value.values()).filter(n => !isHiddenNode(n))
+    const visibleIds = new Set(nodes.map(n => n.id))
+    const links = Array.from(linkMap.value.values()).filter(
+      l => !HIDDEN_LINK_TYPES.has(l.type) && visibleIds.has(l.source) && visibleIds.has(l.target)
+    )
+    return { nodes, links }
+  })
 
   function updateGraphData(nodes: Neo4jNode[], relationships: Neo4jRelationship[]): void {
     const newNodeMap = new Map(nodeMap.value)
@@ -189,13 +219,15 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
     for (const node of nodes) {
       const converted = convertNeo4jNode(node)
-      if (isHiddenNode(converted)) continue
       newNodeMap.set(converted.id, converted)
     }
 
+    // 노드보다 관계가 먼저 도착하는 경우 (다른 batch · 다른 phase) 에도
+    // 일단 link 는 등록. 노드는 이후 batch 에서 들어오면 자동으로 연결됨.
+    // hidden 타입 / hidden 노드 끝점인 관계는 데이터에 적재하지 않는다.
     for (const rel of relationships) {
       const converted = convertNeo4jRelationship(rel)
-      if (!newNodeMap.has(converted.source) || !newNodeMap.has(converted.target)) continue
+      if (isHiddenLink(converted, newNodeMap)) continue
       newLinkMap.set(converted.id, converted)
     }
 
@@ -360,8 +392,13 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
       analyzeMeta.value,
       sessionStore.getHeaders(),
       (event) => {
+        if ((event.type as string) === 'system_log') return
         if (event.content) {
           addMessage(event.type === 'error' ? 'error' : 'message', event.content)
+        }
+        const graph = event.graph
+        if (graph?.Nodes || graph?.Relationships) {
+          updateGraphData(graph.Nodes || [], graph.Relationships || [])
         }
       }
     )
@@ -371,7 +408,6 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   async function doAnalyze(): Promise<void> {
     currentStep.value = '[3단계] 🧠 AI 분석 진행 중...'
-    clearGraphData()
     clearGraphEvents()
     dynamicSteps.value = []
     addMessage('message', '🔍 분석 시작...')
@@ -522,9 +558,13 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     addMessage('message', '✅ 분석 완료')
     currentPhaseProgress.value = 100
 
+    // 스트리밍으로 누적된 그래프를 그대로 유지 — clearGraphData 하면 분석 중 보여주던 노드가
+    // 깜빡임. 최종 정합성 확보를 위해 백엔드에서 한 번 더 fetch 하되, swap 패턴 (가져온 뒤 합치기) 으로.
     try {
-      clearGraphData()
-      await loadExistingGraphData()
+      const result = await roboApi.getGraphData(sessionStore.getHeaders())
+      if (result.Nodes && result.Nodes.length > 0) {
+        updateGraphData(result.Nodes, result.Relationships || [])
+      }
     } catch (e) {
       logger.warn('분석 후 Neo4j 데이터 재로드 실패:', e)
     }

@@ -9,6 +9,7 @@ import { computed } from 'vue'
 import type { GraphNode } from '@/types'
 import { useAnalyzerStore } from '@/stores/analyzer'
 import { getRelationshipGroups, getAttachedByType } from '@/utils/nodeRelationships'
+import { technicalNodeName, logicalNodeName } from '@/utils/graphDisplay'
 import NodeDetailBase from './NodeDetailBase.vue'
 
 interface Props { node: GraphNode }
@@ -39,13 +40,12 @@ const groups = computed(() =>
   getRelationshipGroups(props.node.id, projectStore.linkMap.values()),
 )
 
-function resolveChild(id: string): { id: string; name: string; summary: string } {
+function resolveChild(id: string): { id: string; name: string; logical: string } {
   const n = projectStore.nodeMap.get(id)
-  const p = n?.properties || {}
   return {
     id,
-    name: (p.name as string) || id,
-    summary: (p.summary as string) || '',
+    name: technicalNodeName(n) || id,
+    logical: logicalNodeName(n),
   }
 }
 
@@ -54,10 +54,6 @@ const functions = computed(() => {
   const proc = getAttachedByType(groups.value, 'HAS_PROCEDURE')
   return [...fn, ...proc].map(l => resolveChild(l.target))
 })
-
-const variables = computed(() =>
-  getAttachedByType(groups.value, 'HAS_VARIABLE').map(l => resolveChild(l.target)),
-)
 </script>
 
 <template>
@@ -69,18 +65,9 @@ const variables = computed(() =>
       <section v-if="functions.length > 0" class="member-section">
         <h4 class="section-title">🔧 함수 ({{ functions.length }})</h4>
         <ul class="member-list">
-          <li v-for="f in functions" :key="f.id" :title="f.summary">
+          <li v-for="f in functions" :key="f.id" :title="f.logical ? `${f.name} (${f.logical})` : f.name">
             <span class="member-name">{{ f.name }}</span>
-            <span v-if="f.summary" class="member-summary">{{ f.summary }}</span>
-          </li>
-        </ul>
-      </section>
-
-      <section v-if="variables.length > 0" class="member-section">
-        <h4 class="section-title">📋 변수 ({{ variables.length }})</h4>
-        <ul class="member-list">
-          <li v-for="v in variables" :key="v.id">
-            <span class="member-name">{{ v.name }}</span>
+            <span v-if="f.logical" class="member-logical">({{ f.logical }})</span>
           </li>
         </ul>
       </section>
@@ -115,27 +102,37 @@ const variables = computed(() =>
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 
   li {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    align-items: baseline;
+    gap: 6px;
     padding: 4px 8px;
     border-radius: 4px;
     background: var(--color-bg-tertiary);
-    font-size: 0.8rem;
+    font-size: 0.74rem;
+    min-width: 0;
   }
 
   .member-name {
     color: var(--color-text-bright);
     font-weight: 600;
+    font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.72rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
   }
 
-  .member-summary {
+  .member-logical {
     color: var(--color-text-muted);
-    font-size: 0.7rem;
-    line-height: 1.4;
+    font-size: 0.66rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
 }
 </style>

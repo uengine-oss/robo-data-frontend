@@ -30,14 +30,18 @@ const subInfo = computed(() => {
 
 <template>
   <NodeDetailBase :node="node" icon="📜" :label-badge="subLabel" :sub-info="subInfo">
-    <template #sub-header>
+    <template #sub-header v-if="chunkType || configKey">
       <div v-if="chunkType" class="chunk-meta">청크 타입: <code>{{ chunkType }}</code></div>
       <div v-if="configKey" class="chunk-meta">키 경로: <code>{{ configKey }}</code></div>
     </template>
     <template #body>
-      <section v-if="codeText" class="code-section">
-        <h4 class="section-title">📄 내용</h4>
-        <pre class="code-block">{{ codeText }}</pre>
+      <section v-if="codeText" class="detail-card">
+        <span class="detail-card__label">내용</span>
+        <div class="detail-card__body detail-card__body--flush">
+          <div class="detail-scroll">
+            <pre>{{ codeText }}</pre>
+          </div>
+        </div>
       </section>
     </template>
   </NodeDetailBase>
@@ -47,37 +51,15 @@ const subInfo = computed(() => {
 .chunk-meta {
   font-size: 0.75rem;
   color: var(--color-text-muted);
-  margin-top: 4px;
+
+  &:not(:first-child) {
+    margin-top: 6px;
+  }
 
   code {
     color: var(--color-accent);
-    font-family: monospace;
+    font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.7rem;
   }
-}
-
-.code-section {
-  padding: 10px 12px;
-  background: var(--color-bg-secondary);
-  border-radius: 6px;
-}
-
-.section-title {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  margin: 0 0 8px;
-}
-
-.code-block {
-  font-family: monospace;
-  font-size: 0.7rem;
-  color: var(--color-text);
-  background: var(--color-bg);
-  padding: 8px;
-  border-radius: 4px;
-  margin: 0;
-  overflow: auto;
-  white-space: pre-wrap;
-  max-height: 300px;
 }
 </style>

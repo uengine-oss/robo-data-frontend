@@ -209,6 +209,7 @@ export const RELATIONSHIP_COLORS: Record<string, string> = {
   DECLARES: '#9CA3AB',
   HAS_AC: '#9CA3AB',
   HAS_USER_STORY: '#9CA3AB',
+  VIRTUAL_USES: '#8B5CF6',
   DEFAULT: '#9CA3AB'
 }
 
@@ -220,6 +221,7 @@ export const RELATIONSHIP_COLORS: Record<string, string> = {
  * 관계 타입별 두께 (기본값)
  */
 export const RELATIONSHIP_WIDTHS: Record<string, number> = {
+  VIRTUAL_USES: 3,
   DEFAULT: 2
 }
 
@@ -257,16 +259,16 @@ import { getNodeStyle, getRelationshipStyle } from '@/utils/graphStyleStorage'
  * 노드 라벨에 따른 색상 반환
  * 사용자 설정 > Table 우선 > 라벨 매칭 > 기본값 순서로 반환
  */
-// Primary 라벨 (일반적) — 우선순위가 낮은 라벨
-const PRIMARY_LABELS = new Set(['MODULE', 'FUNCTION', 'VARIABLE', 'CONSTANT', 'FIELD'])
+// 역할 라벨 (Primary) — 노드 색의 기준이 되는 큰 카테고리.
+// 같은 역할 (FUNCTION 등) 이면 stereotype/서브라벨 무관하게 동일 색 — 사용자 가독성 우선.
+const PRIMARY_LABELS = new Set(['MODULE', 'FUNCTION', 'TABLE', 'VARIABLE', 'CONSTANT', 'FIELD'])
 
 export function getNodeColor(labels: string[]): string {
-  // 1. 사용자 커스텀 설정 확인 (가장 구체적인 라벨부터)
+  // 1. 사용자 커스텀 설정 확인 — 역할(Primary) 라벨 우선, 서브라벨은 fallback
   try {
-    // 서브라벨(구체적) 먼저, 프라이머리라벨(일반적) 나중에
     const sorted = [...labels].sort((a, b) => {
-      const aIsPrimary = PRIMARY_LABELS.has(a.toUpperCase()) ? 1 : 0
-      const bIsPrimary = PRIMARY_LABELS.has(b.toUpperCase()) ? 1 : 0
+      const aIsPrimary = PRIMARY_LABELS.has(a.toUpperCase()) ? 0 : 1
+      const bIsPrimary = PRIMARY_LABELS.has(b.toUpperCase()) ? 0 : 1
       return aIsPrimary - bIsPrimary
     })
     for (const label of sorted) {
@@ -276,23 +278,20 @@ export function getNodeColor(labels: string[]): string {
       if (upperStyle?.color) return upperStyle.color
     }
   } catch (e) {
-    // graphStyleStorage가 없으면 기본 로직 사용
+    // graphStyleStorage 없으면 기본 로직
   }
 
-  // 2. Table 우선 처리
-  if (labels.includes('Table')) {
-    return NODE_COLORS.Table
-  }
-
-  // 3. 서브라벨(구체적) 우선 매칭
-  // 예: ['MODULE', 'CLASS', 'Service'] → Service > CLASS > MODULE 순
+  // 2. 역할(Primary) 라벨 매칭 — 같은 역할이면 항상 같은 색
   for (const label of labels) {
-    if (PRIMARY_LABELS.has(label.toUpperCase())) continue
+    const up = label.toUpperCase()
+    if (!PRIMARY_LABELS.has(up)) continue
     if (NODE_COLORS[label]) return NODE_COLORS[label]
-    if (NODE_COLORS[label.toUpperCase()]) return NODE_COLORS[label.toUpperCase()]
+    if (NODE_COLORS[up]) return NODE_COLORS[up]
+    // Table 은 PascalCase 키만 있음 — 명시 매핑
+    if (up === 'TABLE') return NODE_COLORS.Table
   }
 
-  // 4. 프라이머리 라벨 매칭
+  // 3. 서브라벨 fallback — 역할이 없을 때만 stereotype/구체 라벨로 색 결정
   for (const label of labels) {
     if (NODE_COLORS[label]) return NODE_COLORS[label]
     if (NODE_COLORS[label.toUpperCase()]) return NODE_COLORS[label.toUpperCase()]
@@ -337,8 +336,8 @@ export function getNodeSize(labels: string[]): number {
   // 1. 사용자 커스텀 설정 확인 (서브라벨 우선)
   try {
     const sorted = [...labels].sort((a, b) => {
-      const aIsPrimary = PRIMARY_LABELS.has(a.toUpperCase()) ? 1 : 0
-      const bIsPrimary = PRIMARY_LABELS.has(b.toUpperCase()) ? 1 : 0
+      const aIsPrimary = PRIMARY_LABELS.has(a.toUpperCase()) ? 0 : 1
+      const bIsPrimary = PRIMARY_LABELS.has(b.toUpperCase()) ? 0 : 1
       return aIsPrimary - bIsPrimary
     })
     for (const label of sorted) {
@@ -348,17 +347,19 @@ export function getNodeSize(labels: string[]): number {
       if (upperStyle?.size) return upperStyle.size
     }
   } catch (e) {
-    // graphStyleStorage가 없으면 기본 로직 사용
+    // graphStyleStorage 없으면 기본 로직
   }
 
-  // 2. 서브라벨 우선 매칭
+  // 2. 역할(Primary) 라벨 매칭 — 같은 역할이면 같은 크기
   for (const label of labels) {
-    if (PRIMARY_LABELS.has(label.toUpperCase())) continue
+    const up = label.toUpperCase()
+    if (!PRIMARY_LABELS.has(up)) continue
     if (NODE_SIZES[label]) return NODE_SIZES[label]
-    if (NODE_SIZES[label.toUpperCase()]) return NODE_SIZES[label.toUpperCase()]
+    if (NODE_SIZES[up]) return NODE_SIZES[up]
+    if (up === 'TABLE') return NODE_SIZES.Table
   }
 
-  // 3. 프라이머리 라벨 매칭
+  // 3. 서브라벨 fallback
   for (const label of labels) {
     if (NODE_SIZES[label]) return NODE_SIZES[label]
     if (NODE_SIZES[label.toUpperCase()]) return NODE_SIZES[label.toUpperCase()]

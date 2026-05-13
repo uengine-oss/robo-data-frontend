@@ -1,23 +1,23 @@
 <script setup lang="ts">
 /**
- * FunctionCard.vue
- * FUNCTION / PROCEDURE / TRIGGER 노드 (Framework FUNCTION + DBMS PROCEDURE/FUNCTION/TRIGGER).
- *
- * 표시: 시그니처 + Actor + summary + 호출/입출력 관계.
+ * FunctionCard.vue — FUNCTION / PROCEDURE / TRIGGER 디테일.
+ * 순서: 식별(시그니처는 식별 카드 안 컴팩트) → 개요 → 역할 → 원문 코드 → 연결.
  */
 
 import { computed } from 'vue'
 import type { GraphNode } from '@/types'
-import { useAnalyzerStore } from '@/stores/analyzer'
-import { getRelationshipGroups } from '@/utils/nodeRelationships'
+import {
+  technicalNodeName,
+  logicalNodeName,
+  stripCStyleComments,
+} from '@/utils/graphDisplay'
 import NodeDetailBase from './NodeDetailBase.vue'
+import TextViewer from '@/components/common/TextViewer.vue'
 
 interface Props {
   node: GraphNode
 }
 const props = defineProps<Props>()
-
-const projectStore = useAnalyzerStore()
 
 const subLabel = computed(() => {
   const sub = props.node.properties?.type as string | undefined
@@ -25,14 +25,13 @@ const subLabel = computed(() => {
   return props.node.labels?.[0] || 'FUNCTION'
 })
 
-const signature = computed(() => {
-  const p = props.node.properties || {}
-  return (p.signature as string) || ''
-})
+const headerTech = computed(() => technicalNodeName(props.node))
+const headerLogical = computed(() => logicalNodeName(props.node))
 
-const params = computed(() => (props.node.properties?.params as string) || (props.node.properties?.parameters as string) || '')
-const returnType = computed(() => (props.node.properties?.return_type as string) || '')
 const actor = computed(() => (props.node.properties?.actor as string) || '')
+const codeText = computed(() => (props.node.properties?.code_text as string) || '')
+const moduleName = computed(() => (props.node.properties?.module_name as string) || '')
+const codeForViewer = computed(() => stripCStyleComments(codeText.value))
 
 const subInfo = computed(() => {
   const p = props.node.properties || {}
@@ -41,28 +40,9 @@ const subInfo = computed(() => {
   const startLine = p.start_line as number | undefined
   const endLine = p.end_line as number | undefined
   const lines = startLine && endLine ? `라인 ${startLine}~${endLine}` : ''
-  return [fileName, lines].filter(Boolean).join(' · ')
+  const parts = [moduleName.value, fileName, lines].filter(Boolean)
+  return parts.join(' · ')
 })
-
-const groups = computed(() =>
-  getRelationshipGroups(props.node.id, projectStore.linkMap.values()),
-)
-
-function resolveName(id: string): string {
-  const n = projectStore.nodeMap.get(id)
-  const p = n?.properties || {}
-  return (p.name as string) || (p.fqn as string)?.split('.').pop() || id
-}
-
-const inputTables = computed(() =>
-  groups.value.inputs.map(l => ({ id: l.target, name: resolveName(l.target), type: l.type })),
-)
-const outputTables = computed(() =>
-  groups.value.outputs.map(l => ({ id: l.target, name: resolveName(l.target) })),
-)
-const calls = computed(() =>
-  groups.value.calls.map(l => ({ id: l.target, name: resolveName(l.target), type: l.type })),
-)
 </script>
 
 <template>
@@ -71,105 +51,34 @@ const calls = computed(() =>
     icon="🔧"
     :label-badge="subLabel"
     :sub-info="subInfo"
+    :header-title="headerTech"
+    :header-logical="headerLogical"
   >
-    <template #sub-header>
-      <div v-if="signature" class="signature-line">{{ signature }}</div>
-      <div v-else-if="params || returnType" class="signature-line">
-        ({{ params }}){{ returnType ? ` → ${returnType}` : '' }}
-      </div>
-      <div v-if="actor" class="actor-line">👤 {{ actor }}</div>
-    </template>
-
     <template #body>
-      <section v-if="inputTables.length > 0" class="data-section">
-        <h4 class="section-title">📥 입력 ({{ inputTables.length }})</h4>
-        <ul class="data-list">
-          <li v-for="t in inputTables" :key="t.id">
-            <span class="rel-tag">{{ t.type }}</span>
-            <span class="data-name">{{ t.name }}</span>
-          </li>
-        </ul>
+      <section v-if="actor" class="detail-card">
+        <span class="detail-card__label">역할</span>
+        <div class="detail-card__body detail-card__body--tight">
+          <p class="fn-actor">{{ actor }}</p>
+        </div>
       </section>
 
-      <section v-if="outputTables.length > 0" class="data-section">
-        <h4 class="section-title">📤 출력 ({{ outputTables.length }})</h4>
-        <ul class="data-list">
-          <li v-for="t in outputTables" :key="t.id">
-            <span class="data-name">{{ t.name }}</span>
-          </li>
-        </ul>
-      </section>
-
-      <section v-if="calls.length > 0" class="data-section">
-        <h4 class="section-title">📞 호출 ({{ calls.length }})</h4>
-        <ul class="data-list">
-          <li v-for="c in calls" :key="c.id">
-            <span class="rel-tag">{{ c.type }}</span>
-            <span class="data-name">{{ c.name }}</span>
-          </li>
-        </ul>
+      <section v-if="codeText" class="detail-card">
+        <span class="detail-card__label">원문 코드</span>
+        <div class="detail-card__body detail-card__body--flush">
+          <div class="detail-scroll">
+            <TextViewer :content="codeForViewer" compact />
+          </div>
+        </div>
       </section>
     </template>
   </NodeDetailBase>
 </template>
 
 <style lang="scss" scoped>
-.signature-line {
-  font-family: monospace;
-  font-size: 0.75rem;
-  color: var(--color-text);
-  margin-top: 6px;
-  word-break: break-all;
-}
-
-.actor-line {
-  font-size: 0.75rem;
-  color: var(--color-accent-secondary, #a5b4fc);
-  margin-top: 4px;
-}
-
-.data-section {
-  padding: 10px 12px;
-  background: var(--color-bg-secondary);
-  border-radius: 6px;
-}
-
-.section-title {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  margin: 0 0 8px;
-  letter-spacing: 0.5px;
-}
-
-.data-list {
-  list-style: none;
+.fn-actor {
   margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-
-  li {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 6px;
-    font-size: 0.75rem;
-  }
-}
-
-.rel-tag {
-  font-size: 0.65rem;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-muted);
-  font-weight: 600;
-}
-
-.data-name {
-  color: var(--color-text);
-  font-family: monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--color-text-light);
 }
 </style>

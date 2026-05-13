@@ -40,15 +40,25 @@ export default defineConfig({
       '/api/gateway': {
         target: 'http://localhost:9000',
         changeOrigin: true,
-        // rewrite 제거 - Spring Gateway가 /api/gateway 접두사 포함 경로를 처리
-        // SSE 스트리밍 지원
+        // NDJSON / SSE 스트리밍 통과 — 버퍼링 비활성화
+        selfHandleResponse: false,
         configure: (proxy) => {
+          const STREAM_PATTERNS = ['/stream', '/react', '/analyze', '/parsing', '/pipeline']
+          const isStreamReq = (url?: string) =>
+            !!url && STREAM_PATTERNS.some(p => url.includes(p))
+
           proxy.on('proxyReq', (proxyReq, req) => {
-            // 스트리밍 요청: 버퍼 없이 전달 (causal-analysis/stream, /stream/, /react)
-            if (req.url?.includes('/stream') || req.url?.includes('/react')) {
+            if (isStreamReq(req.url)) {
               proxyReq.setHeader('Accept', 'application/x-ndjson, text/event-stream')
               proxyReq.setHeader('Cache-Control', 'no-cache')
               proxyReq.setHeader('Connection', 'keep-alive')
+            }
+          })
+          proxy.on('proxyRes', (proxyRes, req) => {
+            if (isStreamReq(req.url)) {
+              proxyRes.headers['cache-control'] = 'no-cache, no-transform'
+              proxyRes.headers['x-accel-buffering'] = 'no'
+              delete proxyRes.headers['content-length']
             }
           })
         },

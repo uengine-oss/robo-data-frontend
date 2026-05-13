@@ -837,9 +837,18 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         columns = await text2sqlApi.getTableColumns(resolvedDatasource, tableName, resolvedSchema || 'public')
       }
       
-      tableColumnsCache.value[cacheKey] = columns
-      // Backward compatibility for legacy lookups by tableName
-      tableColumnsCache.value[tableName] = columns
+      // 빈 결과는 캐시하지 않음 — backend schema 매칭 실패 등 일시적 0건이
+      // 캐시되면 이후 재조회해도 영원히 0개가 되어버려서 우측 패널에 "컬럼 (0)"
+      // 으로 굳어버리는 문제 방지.
+      if (columns.length > 0) {
+        tableColumnsCache.value[cacheKey] = columns
+        // Backward compatibility for legacy lookups by tableName
+        tableColumnsCache.value[tableName] = columns
+      } else {
+        logger.warn(
+          `[SchemaCanvas] loadTableColumns: 0 columns for ${tableName} (schema=${resolvedSchema}, ds=${resolvedDatasource}) — 캐시 안 함`,
+        )
+      }
       return columns
     } catch (error) {
       logger.error(`Failed to load columns for ${tableName}:`, error)
@@ -1188,17 +1197,26 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         }
       }
       
-      // 상세 패널에서 컬럼 0개로 보이는 경우를 방지하기 위해 지연 로딩 보강
+      // 상세 패널에서 컬럼 0개로 보이는 경우를 방지하기 위해 지연 로딩 보강.
+      // 1차: 노드에 저장된 schema/datasource 로 시도
+      // 2차: schema 를 비워 backend 의 이름/fqn 매칭 fallback 으로 시도
       if ((selectedTableColumns.value?.length || 0) === 0) {
-        const loadedColumns = await loadTableColumns(
+        let loadedColumns = await loadTableColumns(
           node.data.tableName,
-          node.data.schema || 'public',
-          node.data.datasource || ''
+          node.data.schema || '',
+          node.data.datasource || '',
         )
+        if (loadedColumns.length === 0) {
+          loadedColumns = await loadTableColumns(node.data.tableName, '', '')
+        }
         if (loadedColumns.length > 0) {
           node.data.columns = loadedColumns
           node.data.columnCount = loadedColumns.length
           selectedTableColumns.value = loadedColumns
+        } else {
+          logger.warn(
+            `[SchemaCanvas] selectNode: 컬럼 0개 — table=${node.data.tableName}, schema=${node.data.schema}`,
+          )
         }
       }
       isDetailPanelOpen.value = true

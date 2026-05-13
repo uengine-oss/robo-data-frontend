@@ -1,46 +1,39 @@
 <script setup lang="ts">
 /**
- * NodeDetailBase.vue
- * 노드 디테일 패널 — 모든 노드 종류 공통 베이스.
+ * NodeDetailBase.vue — 노드 디테일 공통 골격
  *
- * 슬롯 구성:
- *   - sub-header: 헤더 옆 sub-label / 메타 (CLASS / STRUCT / 라인 등)
- *   - body:       노드 종류별 본문 섹션 (자식 컴포넌트가 채움)
- *
- * 자동 표시 (props):
- *   - 한 줄 핵심 (summary 첫 문장)
- *   - 나머지 설명 (summary 후속 단락)
- *   - 의미 그룹별 관계 합산 (입력/출력/호출/부착/FK)
- *
- * null-safe — 비어있는 섹션은 자동 숨김.
+ * 읽는 순서: 식별(이름·타입·소속) → 개요(요약) → 본문 슬롯(코드 등) → 연결(그래프 관계)
  */
 
-import { computed } from 'vue'
+import { computed, nextTick, ref, useSlots, watch } from 'vue'
 import type { GraphNode } from '@/types'
-import { getNodeColor } from '@/config/graphStyles'
 import { getRelationshipGroups } from '@/utils/nodeRelationships'
 import { useAnalyzerStore } from '@/stores/analyzer'
 import TextViewer from '@/components/common/TextViewer.vue'
+import { relationshipRowParts } from '@/utils/graphDisplay'
 
 interface Props {
   node: GraphNode
-  /** 헤더 아이콘 (이모지) */
   icon?: string
-  /** 라벨 표시 (CLASS / STRUCT / FUNCTION 등) */
   labelBadge?: string
-  /** 헤더 보조 정보 줄 (스키마/패키지/파일 등) */
   subInfo?: string
+  headerTitle?: string
+  headerLogical?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   icon: '📦',
   labelBadge: '',
   subInfo: '',
+  headerTitle: '',
+  headerLogical: '',
 })
 
 const projectStore = useAnalyzerStore()
+const slots = useSlots()
+const hasSubHeader = computed(() => Boolean(slots['sub-header']?.()))
+const hasIdentityExtra = computed(() => Boolean(slots['identity-extra']?.()))
 
-// ─── 헤더 ───────────────────────────────────────────────────────────────
 const nodeName = computed(() => {
   const props_ = props.node.properties || {}
   return (
@@ -50,9 +43,14 @@ const nodeName = computed(() => {
   )
 })
 
-const headerColor = computed(() => getNodeColor(props.node.labels || []))
+const displayHeaderTitle = computed(() =>
+  (props.headerTitle && props.headerTitle.trim()) ? props.headerTitle.trim() : nodeName.value,
+)
 
-// ─── summary 분리 (첫 문장 = 핵심 / 나머지 = 설명) ────────────────────────
+const trimmedLogical = computed(() =>
+  (props.headerLogical && props.headerLogical.trim()) ? props.headerLogical.trim() : '',
+)
+
 const summaryRaw = computed(() => {
   const s = props.node.properties?.summary
   return typeof s === 'string' ? s : ''
@@ -61,7 +59,6 @@ const summaryRaw = computed(() => {
 const summaryHeadline = computed(() => {
   const s = summaryRaw.value.trim()
   if (!s) return ''
-  // 첫 단락 (빈 줄 전까지) 의 첫 문장
   const firstPara = s.split(/\n\s*\n/)[0] || s
   const sentenceMatch = firstPara.match(/^[^.!?。]+[.!?。]?/)
   return (sentenceMatch ? sentenceMatch[0] : firstPara).trim()
@@ -71,68 +68,208 @@ const summaryDetail = computed(() => {
   const s = summaryRaw.value.trim()
   if (!s) return ''
   const headline = summaryHeadline.value
-  const rest = s.slice(headline.length).trim()
-  return rest
+  return s.slice(headline.length).trim()
 })
 
-// ─── 의미 그룹별 관계 합산 ──────────────────────────────────────────────
-const relGroups = computed(() =>
-  getRelationshipGroups(props.node.id, projectStore.linkMap.values()),
+interface RelTargetRow {
+  linkId: string
+  edge: string
+  peerTech: string
+  peerCaption: string
+}
+
+interface RelSummaryItem {
+  label: string
+  count: number
+  hint: string
+  targets: RelTargetRow[]
+}
+
+const relSummary = computed<RelSummaryItem[]>(() => {
+  const g = getRelationshipGroups(props.node.id, projectStore.linkMap.values())
+  const nodeId = props.node.id
+  const peer = (id: string) => projectStore.nodeMap.get(id)
+
+  const tableTargets: RelTargetRow[] = [
+    ...g.inputs.map(l => ({
+      linkId: l.id,
+      ...relationshipRowParts(l, peer(l.target)),
+    })),
+    ...g.outputs.map(l => ({
+      linkId: l.id,
+      ...relationshipRowParts(l, peer(l.target)),
+    })),
+  ]
+
+  return [
+    ...(tableTargets.length > 0
+      ? [{
+        label: '테이블 상호작용',
+        count: tableTargets.length,
+        hint: 'READS·WRITES 등 테이블 접근',
+        targets: tableTargets,
+      }]
+      : []),
+    {
+      label: '호출',
+      count: g.calls.length,
+      hint: '부르는 함수/모듈',
+      targets: g.calls.map(l => ({
+        linkId: l.id,
+        ...relationshipRowParts(l, peer(l.target)),
+      })),
+    },
+    {
+      label: '구성',
+      count: g.attached.length,
+      hint: '하위 항목 (컬럼·함수 등)',
+      targets: g.attached.map(l => ({
+        linkId: l.id,
+        ...relationshipRowParts(l, peer(l.target)),
+      })),
+    },
+    {
+      label: 'FK',
+      count: g.fk.length,
+      hint: '외래키 관계',
+      targets: g.fk.map(l => {
+        const otherId = l.source === nodeId ? l.target : l.source
+        return {
+          linkId: l.id,
+          ...relationshipRowParts(l, peer(otherId)),
+        }
+      }),
+    },
+    {
+      label: 'UML',
+      count: g.uml.length,
+      hint: '클래스 관계',
+      targets: g.uml.map(l => {
+        const otherId = l.source === nodeId ? l.target : l.source
+        return {
+          linkId: l.id,
+          ...relationshipRowParts(l, peer(otherId)),
+        }
+      }),
+    },
+  ].filter(item => item.count > 0)
+})
+
+const expandedRelGroup = ref<string | null>(null)
+
+watch(
+  () => props.node?.id,
+  async () => {
+    expandedRelGroup.value = null
+    await nextTick()
+    const items = relSummary.value
+    if (items.length === 0) return
+    const preferred =
+      items.find(i => i.label === '테이블 상호작용')
+      ?? items.find(i => i.label === '호출')
+      ?? items[0]
+    expandedRelGroup.value = preferred.label
+  },
+  { immediate: true },
 )
 
-const relSummary = computed(() => {
-  const g = relGroups.value
-  return [
-    { label: '입력', count: g.inputs.length, hint: '읽는 테이블/리소스' },
-    { label: '출력', count: g.outputs.length, hint: '쓰는 테이블' },
-    { label: '호출', count: g.calls.length, hint: '부르는 함수/모듈' },
-    { label: '부착', count: g.attached.length, hint: '자식 노드' },
-    { label: 'FK', count: g.fk.length, hint: '외래키 관계' },
-    { label: 'UML', count: g.uml.length, hint: '클래스 관계' },
-  ].filter(item => item.count > 0)
+function toggleRelGroup(label: string): void {
+  expandedRelGroup.value = expandedRelGroup.value === label ? null : label
+}
+
+const relStripToneClass = computed(() => {
+  const g = expandedRelGroup.value
+  if (!g) return ''
+  if (g === '테이블 상호작용') return 'detail-rel-strip--tone-table'
+  if (g === '호출') return 'detail-rel-strip--tone-call'
+  return 'detail-rel-strip--tone-generic'
 })
 </script>
 
 <template>
   <div class="node-detail-base">
-    <!-- 헤더 -->
-    <header class="detail-header" :style="{ borderLeftColor: headerColor }">
-      <div class="header-row">
-        <span class="header-icon">{{ icon }}</span>
-        <span class="header-name">{{ nodeName }}</span>
-        <span v-if="labelBadge" class="header-badge">{{ labelBadge }}</span>
+    <!-- 1) 식별: 타입 · 이름 · 소속 -->
+    <header class="detail-card">
+      <span class="detail-card__label">식별</span>
+      <div class="identity-head">
+        <span class="identity-icon">{{ icon }}</span>
+        <div class="identity-main">
+          <div class="identity-title-row">
+            <span class="identity-name" :class="{ 'identity-name--composite': trimmedLogical }">
+              <span class="identity-tech">{{ displayHeaderTitle }}</span>
+              <template v-if="trimmedLogical">
+                <span class="identity-paren">&nbsp;(</span>
+                <span class="identity-logical">{{ trimmedLogical }}</span>
+                <span class="identity-paren">)</span>
+              </template>
+            </span>
+            <span v-if="labelBadge" class="identity-badge">{{ labelBadge }}</span>
+          </div>
+          <div v-if="subInfo" class="detail-locate">
+            <span class="detail-locate__k">소속</span>
+            <span class="detail-locate__v">{{ subInfo }}</span>
+          </div>
+          <div v-if="hasIdentityExtra" class="detail-identity-extra">
+            <slot name="identity-extra" />
+          </div>
+        </div>
       </div>
-      <div v-if="subInfo" class="header-sub">{{ subInfo }}</div>
-      <slot name="sub-header" />
+      <div v-if="hasSubHeader" class="detail-sub-header">
+        <slot name="sub-header" />
+      </div>
     </header>
 
-    <!-- 한 줄 핵심 + 설명 -->
-    <section v-if="summaryHeadline" class="detail-summary">
-      <p class="summary-headline">{{ summaryHeadline }}</p>
-      <TextViewer
-        v-if="summaryDetail"
-        class="summary-detail"
-        :content="summaryDetail"
-        :max-height="200"
-        compact
-      />
+    <!-- 2) 개요 -->
+    <section v-if="summaryHeadline" class="detail-card">
+      <span class="detail-card__label">개요</span>
+      <div class="detail-card__body detail-card__body--prose">
+        <p class="summary-headline">{{ summaryHeadline }}</p>
+        <TextViewer
+          v-if="summaryDetail"
+          class="summary-detail"
+          :content="summaryDetail"
+          :max-height="220"
+          format="auto"
+          compact
+        />
+      </div>
     </section>
 
-    <!-- 본문 (자식 컴포넌트가 채움) -->
+    <!-- 3) 본문 (코드·시그니처 등 — 카드는 자식에서 동일 패턴) -->
     <slot name="body" />
 
-    <!-- 관계 합산 (의미 그룹별) -->
-    <section v-if="relSummary.length > 0" class="detail-relations">
-      <h4 class="section-title">🔗 관계</h4>
-      <div class="rel-grid">
+    <!-- 4) 연결 -->
+    <section v-if="relSummary.length > 0" class="detail-card">
+      <span class="detail-card__label">연결</span>
+      <div class="detail-rel-strip" :class="relStripToneClass">
+        <div class="rel-chip-grid">
+          <button
+            v-for="item in relSummary"
+            :key="item.label"
+            type="button"
+            class="rel-chip"
+            :class="{ active: expandedRelGroup === item.label }"
+            :title="item.hint"
+            @click="toggleRelGroup(item.label)"
+          >
+            <span>{{ item.label }}</span>
+            <span class="rel-chip-count">{{ item.count }}</span>
+          </button>
+        </div>
         <div
           v-for="item in relSummary"
-          :key="item.label"
-          class="rel-chip"
-          :title="item.hint"
+          :key="'list-' + item.label"
+          v-show="expandedRelGroup === item.label"
+          class="detail-rel-rows"
         >
-          <span class="rel-label">{{ item.label }}</span>
-          <span class="rel-count">{{ item.count }}</span>
+          <div v-for="t in item.targets" :key="t.linkId" class="detail-rel-row">
+            <span class="detail-rel-row__edge">{{ t.edge }}</span>
+            <span class="detail-rel-row__arrow" aria-hidden="true">→</span>
+            <span class="detail-rel-row__peer">
+              <span class="detail-rel-row__tech">{{ t.peerTech }}</span>
+              <span v-if="t.peerCaption" class="detail-rel-row__cap">({{ t.peerCaption }})</span>
+            </span>
+          </div>
         </div>
       </div>
     </section>
@@ -140,114 +277,103 @@ const relSummary = computed(() => {
 </template>
 
 <style lang="scss" scoped>
-.node-detail-base {
+.identity-head {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 12px;
+  gap: 10px;
+  padding: 10px 12px 0;
+  align-items: flex-start;
 }
 
-.detail-header {
-  border-left: 3px solid;
-  padding: 8px 12px;
-  background: var(--color-bg-secondary);
-  border-radius: 6px;
+.identity-icon {
+  font-size: 1.15rem;
+  line-height: 1.3;
+  flex-shrink: 0;
 }
 
-.header-row {
+.identity-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.identity-title-row {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 8px;
 }
 
-.header-icon {
-  font-size: 1.1rem;
-}
-
-.header-name {
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: var(--color-text-bright);
+.identity-name {
   flex: 1;
-  word-break: break-all;
+  min-width: 0;
+  font-size: 0.86rem;
+  font-weight: 600;
+  line-height: 1.42;
+  word-break: break-word;
+  color: var(--color-text-bright);
 }
 
-.header-badge {
-  font-size: 0.65rem;
+.identity-name .identity-tech {
+  font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.identity-name--composite .identity-tech {
+  font-size: 0.8rem;
+}
+
+.identity-paren {
+  color: var(--color-text-muted);
+  font-weight: 500;
+  font-size: 0.74rem;
+}
+
+.identity-logical {
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: var(--color-text-light);
+}
+
+.identity-main .detail-locate {
+  padding-left: 0;
+  padding-right: 0;
+  padding-bottom: 8px;
+  margin-top: 6px;
+}
+
+.identity-badge {
+  flex-shrink: 0;
+  font-size: 0.62rem;
   font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
   background: var(--color-bg-tertiary);
   color: var(--color-text-muted);
-  letter-spacing: 0.5px;
-}
-
-.header-sub {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  margin-top: 2px;
-}
-
-.detail-summary {
-  padding: 10px 12px;
-  background: var(--color-bg-secondary);
-  border-radius: 6px;
-  border-left: 3px solid var(--color-accent);
+  letter-spacing: 0.04em;
 }
 
 .summary-headline {
-  font-size: 0.9rem;
+  margin: 0 0 8px;
+  font-size: 0.84rem;
   font-weight: 600;
+  line-height: 1.45;
   color: var(--color-text-bright);
-  margin: 0;
-  line-height: 1.5;
 }
 
 .summary-detail {
-  margin-top: 8px;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
   color: var(--color-text);
+}
+
+.detail-card__body--prose :deep(.text-viewer.is-compact) {
+  font-size: 0.78rem;
   line-height: 1.5;
 }
+</style>
 
-.detail-relations {
-  padding: 10px 12px;
-  background: var(--color-bg-secondary);
-  border-radius: 6px;
-}
-
-.section-title {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  margin: 0 0 8px;
-  letter-spacing: 0.5px;
-}
-
-.rel-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.rel-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 12px;
-  background: var(--color-bg-tertiary);
-  font-size: 0.75rem;
-  cursor: help;
-
-  .rel-label {
-    color: var(--color-text-muted);
-    font-weight: 600;
-  }
-
-  .rel-count {
-    color: var(--color-text-bright);
-    font-weight: 700;
-  }
-}
+<style lang="scss">
+@use './nodeDetailPanel.shared.scss';
 </style>
