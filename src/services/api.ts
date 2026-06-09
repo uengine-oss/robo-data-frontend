@@ -604,7 +604,7 @@ export const roboApi = {
     action: 'pause' | 'resume' | 'stop',
     headers: Headers
   ): Promise<PipelineControlResponse> {
-    const response = await fetch(`${ROBO_BASE_URL}/pipeline/control`, {
+    const response = await fetch(`${ROBO_BASE_URL}/analyze/control`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify({ action })
