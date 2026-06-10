@@ -653,6 +653,16 @@ export const roboSchemaApi = {
       file_name?: string  // 파일명
       file_directory?: string  // 파일 경로
     }>
+    framework_references?: Array<{
+      source_name: string
+      source_type: string   // "FUNCTION" | "MODULE"
+      access_type: string   // "READS" | "WRITES" | "REFER_TO"
+      start_line?: number
+      file_name?: string
+      file_path?: string
+      file_directory?: string
+      module_name?: string
+    }>
   }> {
     const params = new URLSearchParams()
     if (options?.schema) params.append('schema', options.schema)

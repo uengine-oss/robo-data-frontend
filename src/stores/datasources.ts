@@ -60,7 +60,7 @@ export interface DataSource {
 
 export interface HealthCheckResult {
   name: string
-  status: 'healthy' | 'disconnected' | 'unknown' | 'not_found' | 'checking'
+  status: 'healthy' | 'partial' | 'disconnected' | 'unknown' | 'not_found' | 'checking'
   message: string
   db_connected: boolean
   mindsdb_connected: boolean

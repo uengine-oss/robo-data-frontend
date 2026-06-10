@@ -22,12 +22,13 @@ interface TableNodeData {
   schema: string
   datasource?: string  // 데이터소스명 (예: robo_postgres)
   description?: string
-  description_source?: 'ddl' | 'procedure' | 'code' | 'user' | ''  // 설명 출처
+  description_source?: 'ddl' | 'code' | 'user' | ''  // 설명 출처 (전략 무관 항상 3종)
   columns: Text2SqlColumnInfo[]
   columnCount: number
   isPrimary?: boolean  // 직접 선택/드래그한 테이블인지 여부
   isObjectType?: boolean  // ObjectType인지 여부
   behaviors?: Behavior[]  // Behavior 목록
+  query?: string  // ObjectType 인스턴스 검색 쿼리 (behavior 실행용)
 }
 
 // 프로시저 참조 정보 타입
@@ -489,8 +490,6 @@ function handleQueryData(e: Event) {
   )
 }
 
-// Behavior 클릭 핸들러
-const onBehaviorClick = inject<(objectTypeName: string, behavior: Behavior) => void>('onBehaviorClick')
 // Behavior 편집 핸들러 (더블클릭)
 const onBehaviorEdit = inject<(objectTypeName: string, columns: string[], behavior: Behavior) => void>('onBehaviorEdit')
 // Behavior 실행 핸들러
@@ -498,10 +497,6 @@ const onBehaviorRun = inject<(objectTypeName: string, behavior: Behavior, query:
 
 // Behavior hover 상태
 const hoveredBehavior = ref<string | null>(null)
-
-function handleBehaviorClick(behavior: Behavior) {
-  onBehaviorClick?.(props.data.tableName, behavior)
-}
 
 function handleBehaviorDoubleClick(behavior: Behavior) {
   // 컬럼 이름 목록 추출

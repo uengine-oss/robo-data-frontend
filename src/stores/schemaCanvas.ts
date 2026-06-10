@@ -25,7 +25,7 @@ export interface TableNodeData {
   schema: string
   datasource?: string  // 데이터소스명 (예: robo_postgres)
   description?: string
-  description_source?: 'ddl' | 'procedure' | 'code' | 'user' | ''  // 설명 출처
+  description_source?: 'ddl' | 'code' | 'user' | ''  // 설명 출처 (전략 무관 항상 3종)
   columns: Text2SqlColumnInfo[]
   columnCount: number
   isPrimary?: boolean  // 직접 선택/드래그한 테이블인지 여부
@@ -43,6 +43,13 @@ export interface RelationshipData {
   description?: string
   relationship_type: string
   name?: string  // 관계 이름 (Neo4j FK_TO_TABLE relation의 name 속성)
+}
+
+// FK·설명 출처는 전략 무관 항상 3종(ddl/code/user). 레거시 'procedure'는 code 로 통합한다.
+function normalizeSource(raw: unknown): 'ddl' | 'code' | 'user' | undefined {
+  if (raw === 'procedure' || raw === 'code') return 'code'
+  if (raw === 'ddl' || raw === 'user') return raw
+  return undefined
 }
 
 export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
@@ -92,7 +99,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       from_table: string
       to_table: string
       type: string
-      source?: 'ddl' | 'procedure' | 'user'  // FK 관계 출처
+      source?: 'ddl' | 'code' | 'user'  // FK 관계 출처 (전략 무관 항상 3종)
       column_pairs: Array<{ source: string; target: string; name?: string }>  // 각 컬럼 페어별 관계 이름
       name?: string  // 관계 이름 (전체 관계에 대한 이름)
     }
@@ -212,7 +219,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
                     from_table: rel.from_table,
                     to_table: rel.to_table,
                     type: rel.type,
-                    source: rel.source,
+                    source: normalizeSource(rel.source),
                     column_pairs: rel.column_pairs || []
                   })
                 }
@@ -324,9 +331,8 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   } as Record<string, boolean>)
   
   // FK 표시 토글 함수
-  function toggleFkVisibility(source: 'ddl' | 'procedure' | 'code' | 'user') {
-    // 'procedure'는 'code'와 동일 그룹으로 토글
-    const key = source === 'procedure' ? 'code' : source
+  function toggleFkVisibility(source: 'ddl' | 'code' | 'user') {
+    const key = source
     if (!(key in fkVisibility.value)) {
       fkVisibility.value[key] = true
     }
@@ -652,9 +658,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
             schema: t.table_schema,  // Backend returns table_schema
             datasource: t.datasource || '',  // 데이터소스명 추가
             description: t.description || '',
-            description_source: (rawSource && (rawSource === 'ddl' || rawSource === 'procedure' || rawSource === 'code' || rawSource === 'user' || rawSource === ''))
-              ? rawSource
-              : undefined,  // 설명 출처
+            description_source: rawSource === '' ? '' : normalizeSource(rawSource),  // 출처 정규화(procedure→code)
             analyzed_description: t.analyzed_description,
             column_count: t.column_count
           }
@@ -773,9 +777,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
             dtype: c.dtype,
             nullable: c.nullable,
             description: c.description || '',
-            description_source: (rawSource && (rawSource === 'ddl' || rawSource === 'procedure' || rawSource === 'code' || rawSource === 'user' || rawSource === ''))
-              ? rawSource
-              : undefined,  // 설명 출처
+            description_source: rawSource === '' ? '' : normalizeSource(rawSource),  // 출처 정규화(procedure→code)
             analyzed_description: c.analyzed_description
           }
         })
@@ -878,7 +880,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         schema: table.schema || 'public',
         datasource: table.datasource || '',  // 데이터소스명 (멀티 데이터소스 지원)
         description: table.description || undefined,
-        description_source: table.description_source || undefined,
+        description_source: normalizeSource(table.description_source),
         columns: columns,
         columnCount: table.column_count || columns.length,
         isPrimary: isPrimary,  // 직접 선택한 테이블 표시
@@ -975,7 +977,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
             from_table: rel.from_table,
             to_table: rel.to_table,
             type: rel.type,
-            source: rel.source,  // ddl, code, user
+            source: normalizeSource(rel.source),  // 항상 3종(procedure→code)
             column_pairs: rel.column_pairs || []
           })
         }
@@ -1731,12 +1733,11 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     // source 속성에 따라 스타일 구분:
     // - 'ddl': 실선, 초록색
     // - 'user': 실선, 주황색
-    // - 'code': 점선, 하늘색/푸른색 (레거시 'procedure' 포함)
+    // - 'code': 점선, 하늘색/푸른색
     neo4jRelationships.value.forEach((rel) => {
       if (tableNamesOnCanvas.has(rel.from_table) && tableNamesOnCanvas.has(rel.to_table)) {
         // source에 따른 스타일 결정
-        // code와 레거시 procedure는 동일 스타일로 처리
-        const isCode = rel.source === 'code' || rel.source === 'procedure' || rel.type === 'CO_REFERENCED'
+        const isCode = rel.source === 'code' || rel.type === 'CO_REFERENCED'
         const isUser = rel.source === 'user'
         
         // visibility 체크 - 해당 source 유형이 비활성화되어 있으면 스킵
@@ -1864,7 +1865,8 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     }
   }
   
-  async function removeRelationship(relationship: RelationshipData) {
+  // 삭제는 from/to 식별자만으로 충분(relationship_type 불필요) — 호출부가 그걸 생략할 수 있게 Omit.
+  async function removeRelationship(relationship: Omit<RelationshipData, 'relationship_type'>) {
     try {
       const params = {
         from_table: relationship.from_table,

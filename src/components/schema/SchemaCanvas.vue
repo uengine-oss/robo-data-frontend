@@ -2,7 +2,7 @@
 import { copyToClipboard } from '@/utils/clipboard'
 import { logger } from '@/utils/logger'
 import { ref, onMounted, provide, computed, markRaw, watch, nextTick } from 'vue'
-import { VueFlow, useVueFlow, type Connection, type NodeChange } from '@vue-flow/core'
+import { VueFlow, useVueFlow, type Connection, type NodeChange, type EdgeMouseEvent, type OnConnectStartParams } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
@@ -492,7 +492,7 @@ function onPaneClick() {
 }
 
 // Edge double click - 관계 편집 다이얼로그 표시
-function onEdgeDoubleClick(event: { edge: { id: string; label?: string; source: string; target: string; sourceHandle?: string; targetHandle?: string } }) {
+function onEdgeDoubleClick(event: EdgeMouseEvent) {
   const edge = event.edge
   
   // 엣지 정보 파싱
@@ -718,18 +718,18 @@ function handleCardinalityModalClose() {
 // 연결 시작 시 소스 정보 저장 (허공 드롭 감지용)
 const connectingSource = ref<{ nodeId: string; handleId: string } | null>(null)
 
-function onConnectStart(event: { nodeId: string; handleId: string | null }) {
+function onConnectStart(event: OnConnectStartParams) {
   isConnecting.value = true
   if (event.nodeId && event.handleId) {
     connectingSource.value = { nodeId: event.nodeId, handleId: event.handleId }
   }
 }
 
-function onConnectEnd(event: MouseEvent) {
+function onConnectEnd(event?: MouseEvent) {
   isConnecting.value = false
   
   // 허공에 드롭되었는지 확인 (hideTablePanel이 true인 경우 = ObjectTypeModeler)
-  if (props.hideTablePanel && connectingSource.value) {
+  if (props.hideTablePanel && connectingSource.value && event) {
     // 드롭 위치에 노드가 있는지 확인
     const dropTarget = document.elementFromPoint(event.clientX, event.clientY)
     const isDropOnNode = dropTarget?.closest('.vue-flow__node')
