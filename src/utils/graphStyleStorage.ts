@@ -83,21 +83,6 @@ export function setSize(category: StyleCategory, type: string, size: number): vo
   saveStyles(category, styles)
 }
 
-export function removeStyle(category: StyleCategory, type: string): void {
-  const styles = loadStyles(category)
-  if (!(type in styles)) return
-  delete styles[type]
-  saveStyles(category, styles)
-}
-
-export function clearStyles(category: StyleCategory): void {
-  try {
-    localStorage.removeItem(CATEGORY_STORAGE_KEY[category])
-    bumpVersion()
-  } catch (e) {
-    logger.warn(`[graphStyleStorage] clear ${category} 실패:`, e)
-  }
-}
 
 /** graphStyles.ts 가 색 결정에 사용 */
 export const getNodeStyle = (type: string) => getStyle('node', type)

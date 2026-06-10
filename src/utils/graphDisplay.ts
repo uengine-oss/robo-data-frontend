@@ -69,16 +69,6 @@ export function logicalNodeName(node: GraphNode | undefined): string {
   return ''
 }
 
-/**
- * 리스트/관계 줄 — `기술명 (논리명)`. 논리명 없거나 동일하면 기술명만.
- */
-export function formatPeerListLabel(node: GraphNode | undefined): string {
-  const tech = technicalNodeName(node)
-  const log = logicalNodeName(node)
-  if (log && log !== tech) return `${tech} (${log})`
-  return tech || log
-}
-
 export function linkEdgeOp(link: GraphLink): string {
   const op = link.properties?.op
   return typeof op === 'string' ? op.trim() : ''
@@ -119,10 +109,4 @@ export function relationshipRowParts(link: GraphLink, peerNode: GraphNode | unde
   const log = logicalNodeName(peerNode)
   const peerCaption = log && log !== tech ? log : peerFallbackCaption(peerNode, tech)
   return { edge, peerTech: tech, peerCaption }
-}
-
-/** 한 줄: 관계 타입(op 포함) → 상대 노드 `기술명 (논리명)`. */
-export function formatRelationshipLine(link: GraphLink, peerNode: GraphNode | undefined): string {
-  const { edge, peerTech, peerCaption } = relationshipRowParts(link, peerNode)
-  return peerCaption ? `${edge} → ${peerTech} — ${peerCaption}` : `${edge} → ${peerTech}`
 }

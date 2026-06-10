@@ -346,7 +346,7 @@ watch(hasRecentError, (hasError) => {
 
 <style scoped lang="scss">
 .floating-progress-panel {
-  position: fixed;
+  position: absolute;
   z-index: 1000;
   width: 380px;
   background: var(--color-bg-secondary);
@@ -687,7 +687,7 @@ watch(hasRecentError, (hasError) => {
 
 /* 최소화된 배지 */
 .minimized-badge {
-  position: fixed;
+  position: absolute;
   bottom: 20px;
   right: 20px;
   z-index: 1000;

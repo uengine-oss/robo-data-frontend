@@ -2,13 +2,8 @@ import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 
 const STORAGE_KEY_THEME = 'robo-analyzer-theme'
-const STORAGE_KEY_API_KEY = 'robo-analyzer-api-key'
-const STORAGE_KEY_API_BASE = 'robo-analyzer-api-base'
-const STORAGE_KEY_LLM_MODEL = 'robo-analyzer-llm-model'
-const STORAGE_KEY_API_PROVIDER = 'robo-analyzer-api-provider'
 
 export type Theme = 'dark' | 'light'
-export type ApiProvider = 'openai' | 'anthropic'
 
 // 로컬스토리지에서 값 로드
 const loadFromStorage = (key: string, defaultValue: string): string => {
@@ -26,12 +21,6 @@ export const useSessionStore = defineStore('session', () => {
   const theme = ref<Theme>(
     (loadFromStorage(STORAGE_KEY_THEME, 'dark') as Theme)
   )
-
-  // LLM 설정 - 로컬스토리지에서 로드 (빈 값이면 서버 .env 사용)
-  const apiKey = ref<string>(loadFromStorage(STORAGE_KEY_API_KEY, ''))
-  const apiProvider = ref<ApiProvider>(loadFromStorage(STORAGE_KEY_API_PROVIDER, 'openai') as ApiProvider)
-  const apiBase = ref<string>(loadFromStorage(STORAGE_KEY_API_BASE, ''))
-  const llmModel = ref<string>(loadFromStorage(STORAGE_KEY_LLM_MODEL, ''))
 
   // 현재 활성 탭 - 새로고침 시 항상 업로드 탭으로 시작
   const activeTab = ref<string>('upload')
@@ -68,11 +57,6 @@ export const useSessionStore = defineStore('session', () => {
     activeTab.value = 'upload'
   }
 
-  // 세션 초기화
-  const clearSession = () => {
-    activeTab.value = 'upload'
-  }
-
   // 탭 변경
   const setActiveTab = (tab: string) => {
     activeTab.value = tab
@@ -96,22 +80,6 @@ export const useSessionStore = defineStore('session', () => {
     return query
   }
 
-  // 소스 파일로 이동하며 특정 라인 하이라이팅
-  const navigateToSourceWithLine = (
-    procedureName: string,
-    lineNumber: number,
-    fileName?: string,
-    fileDirectory?: string
-  ) => {
-    pendingSourceNavigation.value = {
-      procedureName,
-      lineNumber,
-      fileName,
-      fileDirectory
-    }
-    activeTab.value = 'upload'
-  }
-
   // 소스 네비게이션 데이터 소비 (사용 후 초기화)
   const consumeSourceNavigation = () => {
     const data = pendingSourceNavigation.value
@@ -129,63 +97,26 @@ export const useSessionStore = defineStore('session', () => {
     theme.value = theme.value === 'dark' ? 'light' : 'dark'
   }
 
-  // LLM 설정
-  const setApiKey = (key: string) => {
-    apiKey.value = key
-    saveToStorage(STORAGE_KEY_API_KEY, key)
-  }
-
-  const setApiBase = (url: string) => {
-    apiBase.value = url
-    saveToStorage(STORAGE_KEY_API_BASE, url)
-  }
-
-  const setApiProvider = (provider: ApiProvider) => {
-    apiProvider.value = provider
-    saveToStorage(STORAGE_KEY_API_PROVIDER, provider)
-  }
-
-  const setLlmModel = (model: string) => {
-    llmModel.value = model
-    saveToStorage(STORAGE_KEY_LLM_MODEL, model)
-  }
-
-  // 헤더 생성 (LLM 설정 포함 — 빈 값은 전송하지 않아 서버 .env 폴백)
+  // 요청 헤더 — LLM 키는 프론트에서 보내지 않는다(백엔드 .env 일관 사용).
   const getHeaders = (): Record<string, string> => {
-    const headers: Record<string, string> = {
+    return {
       'Accept-Language': 'ko'
     }
-
-    if (apiKey.value) headers['X-LLM-Api-Key'] = apiKey.value
-    if (apiBase.value) headers['X-LLM-Api-Base'] = apiBase.value
-    if (llmModel.value) headers['X-LLM-Model'] = llmModel.value
-
-    return headers
   }
 
   return {
     activeTab,
     theme,
-    apiKey,
-    apiProvider,
-    apiBase,
-    llmModel,
     pendingSchemaSearch,
     pendingSourceNavigation,
     createNewSession,
-    clearSession,
     setTheme,
     toggleTheme,
-    setApiKey,
-    setApiProvider,
-    setApiBase,
-    setLlmModel,
     setActiveTab,
     goHome,
     getHeaders,
     navigateToSchemaSearch,
     consumeSchemaSearch,
-    navigateToSourceWithLine,
     consumeSourceNavigation,
   }
 })

@@ -13,17 +13,34 @@ import App from './App.vue'
 import router from './router'
 import './styles/main.scss'
 import { initializeAppSettings } from './config/appSettings'
+import { useAnalyzerStore } from './stores/analyzer'
 
 let app: VueApp | null = null
 
-/** analyzer 앱을 주어진 DOM(셀렉터 또는 Element)에 마운트한다. */
-export function mount(el: string | Element): () => void {
+/**
+ * analyzer 앱을 주어진 DOM(셀렉터 또는 Element)에 마운트한다.
+ * @param opts.embedded    host(architect) 안에 끼워질 때 true — analyzer 자체 상단바를 숨긴다.
+ * @param opts.projectRoot host(architect, Electron)가 고른 로컬 폴더 경로 — 주면 경로 모드
+ *                         (업로드 없이 그 폴더를 직접 분석). 없으면 브라우저 업로드 모드.
+ */
+export function mount(
+  el: string | Element,
+  opts: { embedded?: boolean; projectRoot?: string } = {},
+): () => void {
   // 앱 설정 초기화 (document.title 등)
   initializeAppSettings()
 
   app = createApp(App)
-  app.use(createPinia())   // 이 앱 전용 Pinia 인스턴스 (host 와 격리)
-  app.use(router)          // 이 앱 전용 Router 인스턴스 (host 와 격리)
+  app.provide('isEmbedded', !!opts.embedded)  // MainLayout 이 상단바 표시 여부 결정
+  const pinia = createPinia()  // 이 앱 전용 Pinia 인스턴스 (host 와 격리)
+  app.use(pinia)
+  app.use(router)              // 이 앱 전용 Router 인스턴스 (host 와 격리)
+
+  // 경로 모드: host 가 넘긴 로컬 폴더를 store 에 주입 (analyzer 는 "경로를 받았나"만 본다).
+  if (opts.projectRoot) {
+    useAnalyzerStore(pinia).setProjectRoot(opts.projectRoot)
+  }
+
   app.mount(el)
 
   return unmount

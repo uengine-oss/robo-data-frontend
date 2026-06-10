@@ -5,7 +5,7 @@
  */
 import { useSessionStore } from '@/stores/session'
 import { storeToRefs } from 'pinia'
-import { IconFolder, IconDatabase } from '@/components/icons'
+import { IconDatabase, IconTable, IconFolder } from '@/components/icons'
 import type { Component } from 'vue'
 import { useNavigatorStore } from '@/stores/navigator'
 
@@ -29,7 +29,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { id: 'upload', label: '코드', icon: IconFolder },
   { id: 'datasources', label: '데이터 소스', icon: IconDatabase },
-  { id: 'graph', label: '스키마 관리', icon: IconDatabase }
+  { id: 'graph', label: '스키마 관리', icon: IconTable }
 ]
 
 const setActiveTab = (tabId: string) => {
@@ -43,7 +43,7 @@ const setActiveTab = (tabId: string) => {
       <button v-for="item in navItems" :key="item.id" class="nav-item"
         :class="{ active: activeTab === item.id }" @click="setActiveTab(item.id)" :title="item.label">
         <span class="nav-icon">
-          <component :is="item.icon" :size="20" />
+          <component :is="item.icon" :size="24" />
         </span>
         <span class="nav-label">{{ item.label }}</span>
       </button>
@@ -54,7 +54,7 @@ const setActiveTab = (tabId: string) => {
         <button class="nav-item" :class="{ active: isNavigatorPanelOpen }"
           @click="toggleNavigator" title="Project Navigator">
           <span class="nav-icon">
-            <IconFolder :size="20" />
+            <IconFolder :size="24" />
           </span>
           <span class="nav-label">Navigator</span>
         </button>
@@ -83,6 +83,12 @@ const setActiveTab = (tabId: string) => {
       opacity: 1;
       max-width: 100px;
     }
+
+    // 펼쳐지면 아이콘+라벨을 좌측 정렬 + 간격 복원
+    .nav-item {
+      justify-content: flex-start;
+      gap: 12px;
+    }
   }
 }
 
@@ -96,7 +102,8 @@ const setActiveTab = (tabId: string) => {
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: center;  // 접힌 상태(72px): 아이콘 가로 중앙
+  gap: 0;                   // 접힘: 라벨 너비0 + gap0 → 아이콘 정확히 가운데
   padding: 12px;
   background: transparent;
   border: none;

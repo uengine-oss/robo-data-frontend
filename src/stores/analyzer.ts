@@ -129,6 +129,8 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const sourceType = ref<SourceType>('java')
   const ddl = ref<string[]>([])
   const nameCaseOption = ref<'original' | 'uppercase' | 'lowercase'>('original')
+  // Electron 경로 모드: host(architect)가 넘긴 로컬 폴더 절대경로. null이면 브라우저 업로드 모드.
+  const projectRoot = ref<string | null>(null)
 
   // ----- 파일 -----
   const uploadedFiles = ref<UploadedFile[]>([])
@@ -240,19 +242,6 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     linkMap.value = new Map()
   }
 
-  function deleteNodeAndRelationships(nodeId: string): void {
-    const newNodeMap = new Map(nodeMap.value)
-    const newLinkMap = new Map(linkMap.value)
-    newNodeMap.delete(nodeId)
-    for (const [linkId, link] of linkMap.value.entries()) {
-      if (link.source === nodeId || link.target === nodeId) {
-        newLinkMap.delete(linkId)
-      }
-    }
-    nodeMap.value = newNodeMap
-    linkMap.value = newLinkMap
-  }
-
   // ----- 콘솔 메시지 -----
   const consoleMessages = ref<StreamMessage[]>([])
 
@@ -354,17 +343,16 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     nameCase: nameCaseOption.value,
     datasourceName: datasourceName.value,
     inferFkRelations: inferFkRelations.value,
+    project_root: projectRoot.value || undefined,   // 경로 모드면 antlr·robo 둘 다 이 경로 사용
   }))
 
-  const isValidConfig = computed(() =>
-    Boolean(uploadedFiles.value.length > 0 || uploadedDdlFiles.value.length > 0)
-  )
+  /** host가 projectRoot를 넘겼는가 = Electron 경로 모드(업로드 없이 로컬 폴더 분석). */
+  const isPathMode = computed(() => !!projectRoot.value)
 
   // ----- Setters -----
-  function setSourceType(type: SourceType): void { sourceType.value = type }
+  function setProjectRoot(p: string | null): void { projectRoot.value = p }
   function setDatasourceName(name: string | null): void { datasourceName.value = name }
   function setInferFkRelations(value: boolean): void { inferFkRelations.value = value }
-  function setDdl(d: string[]): void { ddl.value = d }
 
   // ----- 개별 단계 함수 -----
 
@@ -393,6 +381,10 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
       sessionStore.getHeaders(),
       (event) => {
         if ((event.type as string) === 'system_log') return
+        if (event.type === 'detected') {
+          applyDetected(event.content)
+          return
+        }
         if (event.content) {
           addMessage(event.type === 'error' ? 'error' : 'message', event.content)
         }
@@ -404,6 +396,24 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     )
 
     addMessage('message', '✅ 파싱 완료')
+  }
+
+  /**
+   * antlr 가 자동 감지한 언어를 sourceType 에 반영 — 사용자가 수동 선택하지 않아도 자동.
+   * sourceType 이 analyzeMeta(strategy/target) 와 UML 탭 노출을 파생하므로, 이것만 세팅하면
+   * 이어지는 doAnalyze(robo) 가 올바른 strategy 를 받는다.
+   */
+  function applyDetected(content?: string): void {
+    if (!content) return
+    try {
+      const detected = JSON.parse(content) as { target?: SourceType }
+      if (detected.target) {
+        sourceType.value = detected.target
+        saveToStorage()
+      }
+    } catch (e) {
+      logger.warn('[analyzer] detected 이벤트 파싱 실패:', e)
+    }
   }
 
   async function doAnalyze(): Promise<void> {
@@ -751,7 +761,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     clearMessages()
 
     try {
-      addMessage('message', `🔄 인제스천 재시작... (타입: ${sourceType.value})`)
+      addMessage('message', '🔄 인제스천 시작...')
       await doParse()
       await doAnalyze()
 
@@ -765,6 +775,15 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     } finally {
       isProcessing.value = false
     }
+  }
+
+  /** 경로 모드(Electron): 업로드 없이 host가 준 로컬 폴더를 바로 파싱→분석(antlr·robo가 그 경로 직접 읽음). */
+  async function analyzeProjectPath(): Promise<void> {
+    if (!projectRoot.value) {
+      addMessage('error', '❌ 분석할 폴더 경로가 없습니다.')
+      return
+    }
+    await executeRestartPipeline()
   }
 
   function removeFile(relPath: string, type: 'file' | 'ddl' = 'file'): void {
@@ -837,17 +856,6 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     }
   }
 
-  async function stopPipeline(): Promise<void> {
-    try {
-      const result = await roboApi.controlPipeline('stop', sessionStore.getHeaders())
-      pipelineStatus.value = result.status
-      isPipelineStopped.value = result.status.isStopped
-      if (result.success) addMessage('message', '⏹️ 파이프라인 중단됨')
-    } catch (error) {
-      addMessage('error', `⏹️ 중단 실패: ${error}`)
-    }
-  }
-
   // ----- 기타 -----
 
   async function deleteAllData(): Promise<void> {
@@ -907,13 +915,14 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
     metadata,
     analyzeMeta,
-    isValidConfig,
+    projectRoot,
+    isPathMode,
+    setProjectRoot,
+    analyzeProjectPath,
 
     // Setters
-    setSourceType,
     setDatasourceName,
     setInferFkRelations,
-    setDdl,
 
     // Messages
     addMessage,
@@ -936,11 +945,9 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     fetchPipelinePhases,
     pausePipeline,
     resumePipeline,
-    stopPipeline,
 
     // Misc
     deleteAllData,
-    deleteNodeAndRelationships,
     reset,
   }
 })

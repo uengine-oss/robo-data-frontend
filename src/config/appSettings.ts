@@ -53,13 +53,6 @@ export function setAppTitle(title: string): void {
 }
 
 /**
- * 앱 타이틀 초기화 (기본값으로)
- */
-export function resetAppTitle(): void {
-  setAppTitle(DEFAULT_APP_TITLE)
-}
-
-/**
  * 초기화 - document.title을 저장된 설정으로 설정
  */
 export function initializeAppSettings(): void {

@@ -246,27 +246,6 @@ export const useCanvasStore = defineStore('canvas', () => {
     }
   }
 
-  /**
-   * 전체 nodeMap 에서 지정 라벨을 가진 모든 노드를 캔버스에 일괄 로드.
-   * 라벨 비교는 대소문자 무관 (그래프 라벨이 SCREAMING_SNAKE 와 PascalCase 혼재해도 매치).
-   * 그들 사이의 관계는 canvasGraphData computed 가 linkMap 에서 자동 포함.
-   */
-  function loadNodesByLabels(labels: string[]): void {
-    if (labels.length === 0) {
-      canvasNodeIds.value = new Set()
-      return
-    }
-    const targets = new Set(labels.map(l => l.toUpperCase()))
-    const next = new Set<string>()
-    for (const node of projectStore.nodeMap.values()) {
-      const nodeLabels = node.labels || []
-      if (nodeLabels.some(l => targets.has(l.toUpperCase()))) {
-        next.add(node.id)
-      }
-    }
-    canvasNodeIds.value = next
-  }
-
   return {
     canvasNodeIds,
     canvasGraphData,
@@ -276,7 +255,6 @@ export const useCanvasStore = defineStore('canvas', () => {
     collapseNodeOnCanvas,
     removeFromCanvas,
     clearCanvas,
-    loadNodesByLabels,
     setPreset,
     isolateLabel,
   }

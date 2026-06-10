@@ -5,7 +5,7 @@
  * MindsDB 지원 전체 데이터 소스 유형 포함
  */
 import { ref, onMounted, computed } from 'vue'
-import { useDatasourcesStore, type DataSourceTypeConfig, type DataSource, type DataSourceCategory, type ExtractionProgress, getAllDataSourceTypes } from '@/stores/datasources'
+import { useDatasourcesStore, type DataSourceTypeConfig, type DataSource, type DataSourceCategory, getAllDataSourceTypes } from '@/stores/datasources'
 
 const store = useDatasourcesStore()
 

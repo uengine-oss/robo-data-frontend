@@ -100,19 +100,6 @@ export interface UmlRelationship {
   multiplicity?: string
 }
 
-/** VueFlow 노드 데이터 */
-export interface ClassNodeData {
-  umlClass: UmlClass
-  isExpanded: boolean
-  isSelected: boolean
-  depth: number
-}
-
-/** VueFlow 엣지 데이터 */
-export interface ClassEdgeData {
-  relationship: UmlRelationship
-}
-
 // ============================================================================
 // 유틸리티 함수 - 노드 정보 추출
 // ============================================================================
@@ -464,9 +451,6 @@ const FIELD_LABELS = ['VARIABLE', 'CONSTANT', 'FIELD', 'Field', 'MEMBER', 'GLOBA
 /** METHOD/CONSTRUCTOR 노드 라벨 */
 const METHOD_LABELS = ['FUNCTION', 'METHOD', 'Method', 'CONSTRUCTOR', 'Constructor']
 
-/** Parameter 노드 라벨 */
-const PARAMETER_LABELS = ['Parameter', 'PARAMETER']
-
 /**
  * 노드가 FIELD인지 확인
  */
@@ -479,13 +463,6 @@ export function isFieldNode(node: GraphNode): boolean {
  */
 export function isMethodNode(node: GraphNode): boolean {
   return node.labels?.some(label => METHOD_LABELS.includes(label)) ?? false
-}
-
-/**
- * 노드가 Parameter인지 확인
- */
-export function isParameterNode(node: GraphNode): boolean {
-  return node.labels?.some(label => PARAMETER_LABELS.includes(label)) ?? false
 }
 
 /**

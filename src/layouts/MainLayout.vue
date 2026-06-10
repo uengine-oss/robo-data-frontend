@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, inject } from 'vue'
 import { storeToRefs } from 'pinia'
 import TopToolbar from '@/components/common/TopToolbar.vue'
 import SideNav from '@/components/common/SideNav.vue'
@@ -9,6 +9,9 @@ import { RouterView } from 'vue-router'
 import { useAnalyzerStore } from '@/stores/analyzer'
 import { useSessionStore } from '@/stores/session'
 import { useNavigatorStore } from '@/stores/navigator'
+
+// host(robo-architect)에 임베드되면 architect 상단바를 쓰므로 analyzer 자체 TopToolbar 는 숨긴다.
+const isEmbedded = inject<boolean>('isEmbedded', false)
 
 const projectStore = useAnalyzerStore()
 const sessionStore = useSessionStore()
@@ -33,8 +36,8 @@ onMounted(async () => {
 
 <template>
   <div class="main-layout">
-    <!-- 상단 헤더 -->
-    <TopToolbar />
+    <!-- 상단 헤더 (단독 실행 시에만 — 임베드 시엔 architect 상단바 사용) -->
+    <TopToolbar v-if="!isEmbedded" />
     
     <!-- 메인 영역: 사이드바 + Navigator + 콘텐츠 -->
     <div class="main-body">
@@ -61,6 +64,8 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   background: var(--color-bg);
+  // FloatingProgressPanel(position:absolute)의 기준 컨테이너 — 임베드 시 탭 밖으로 안 튀게.
+  position: relative;
 }
 
 .main-body {

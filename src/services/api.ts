@@ -16,13 +16,7 @@ import type {
   Text2SqlTableInfo,
   Text2SqlColumnInfo,
   ReactRequest,
-  ReactStreamEvent,
-  OntologySchema,
-  GenerateSchemaRequest,
-  GenerateSchemaResponse,
-  ApplyFeedbackRequest,
-  ApplyFeedbackResponse,
-  NodeInstanceData
+  ReactStreamEvent
 } from '@/types'
 import { getNormalizedUploadPath } from '@/utils/upload'
 
@@ -201,83 +195,6 @@ async function postFormData<T>(
   }
 }
 
-async function streamSseFetch(
-  url: string,
-  headers: Headers,
-  onEvent: (event: { event: string; data: any }) => void,
-  signal?: AbortSignal
-): Promise<void> {
-  const response = await fetch(url, {
-    method: 'GET',
-    headers,
-    signal
-  })
-
-  if (!response.ok) {
-    await handleHttpError(response)
-  }
-
-  const reader = response.body?.getReader()
-  if (!reader) {
-    throw new Error('SSE 응답 바디를 읽을 수 없습니다.')
-  }
-
-  const decoder = new TextDecoder('utf-8')
-  let buffer = ''
-  let currentEvent = 'message'
-  let currentDataLines: string[] = []
-
-  const flushEvent = () => {
-    if (currentDataLines.length === 0) return
-    const rawData = currentDataLines.join('\n')
-    onEvent({
-      event: currentEvent,
-      data: JSON.parse(rawData)
-    })
-    currentEvent = 'message'
-    currentDataLines = []
-  }
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split(/\r?\n/)
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        if (!line.trim()) {
-          flushEvent()
-          continue
-        }
-        if (line.startsWith('event:')) {
-          currentEvent = line.slice(6).trim() || 'message'
-          continue
-        }
-        if (line.startsWith('data:')) {
-          currentDataLines.push(line.slice(5).trim())
-        }
-      }
-    }
-
-    if (buffer.trim()) {
-      const lines = buffer.split(/\r?\n/)
-      for (const line of lines) {
-        if (line.startsWith('event:')) {
-          currentEvent = line.slice(6).trim() || 'message'
-        } else if (line.startsWith('data:')) {
-          currentDataLines.push(line.slice(5).trim())
-        }
-      }
-    }
-    flushEvent()
-  } finally {
-    reader.releaseLock()
-  }
-}
-
 // ============================================================================
 // NDJSON 스트림 처리
 // ============================================================================
@@ -443,48 +360,7 @@ export const antlrApi = {
 // ROBO Analyzer API
 // ============================================================================
 
-/** 파일 타입 감지 요청 항목 */
-interface FileContentForDetection {
-  fileName: string
-  content: string
-}
-
-/** 파일 타입 감지 결과 항목 */
-export interface FileTypeResult {
-  fileName: string
-  fileType: 'java' | 'oracle_sp' | 'oracle_ddl' | 'postgresql_sp' | 'postgresql_ddl' | 'python' | 'xml' | 'sql_generic' | 'unknown'
-  confidence: number
-  details: string
-  suggestedStrategy: 'framework' | 'dbms'
-  suggestedTarget: 'java' | 'oracle' | 'postgresql' | 'python'
-}
-
-/** 파일 타입 감지 응답 */
-export interface DetectTypesResponse {
-  files: FileTypeResult[]
-  summary: {
-    total: number
-    byType: Record<string, number>
-    suggestedStrategy: 'framework' | 'dbms'
-    suggestedTarget: 'java' | 'oracle' | 'postgresql' | 'python'
-  }
-}
-
 export const roboApi = {
-  // [주석] /detect-types/ 엔드포인트 삭제 예정
-  // /**
-  //  * 파일 내용을 분석하여 소스 코드 타입 자동 감지
-  //  */
-  // async detectTypes(files: FileContentForDetection[]): Promise<DetectTypesResponse> {
-  //   const response = await fetch(`${ROBO_BASE_URL}/detect-types/`, {
-  //     method: 'POST',
-  //     headers: { 'Content-Type': 'application/json' },
-  //     body: JSON.stringify({ files })
-  //   })
-  //   if (!response.ok) await handleHttpError(response)
-  //   return response.json()
-  // },
-
   /**
    * 소스 파일 분석 → Neo4j 그래프 생성
    * 
@@ -965,22 +841,6 @@ export const text2sqlApi = {
   },
 
   /**
-   * 컬럼 검색
-   */
-  async searchColumns(datasource: string, search: string, limit: number = 50): Promise<Text2SqlColumnInfo[]> {
-    if (!datasource) {
-      throw new Error('datasource is required')
-    }
-    const params = new URLSearchParams({ search, limit: limit.toString() })
-    params.append('datasource', datasource)
-    const response = await fetch(`${TEXT2SQL_BASE_URL}/meta/columns?${params}`)
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
-    return response.json()
-  },
-
-  /**
    * 테이블 설명 수정 (robo-analyzer 사용)
    */
   async updateTableDescription(
@@ -1153,147 +1013,4 @@ export const text2sqlApi = {
     }
   },
 
-  /**
-   * Text2SQL 결과 피드백 제출
-   */
-  async submitFeedback(payload: {
-    prompt_snapshot_id?: string
-    question?: string
-    react_run_id?: string
-    conversation_state?: string
-    original_sql: string
-    corrected_sql?: string | null
-    rating: number
-    notes?: string | null
-    approved: boolean
-    source?: string
-  }): Promise<{ feedback_id: string; message: string }> {
-    return postJson(`${TEXT2SQL_BASE_URL}/feedback`, payload, {})
-  },
-
-  /**
-   * 헬스체크
-   */
-  async healthCheck(): Promise<unknown> {
-    const response = await fetch(`${TEXT2SQL_BASE_URL}/health`)
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
-    return response.json()
-  },
-
-  // ========================================================================
-  // Materialized View 관리
-  // ========================================================================
-
-  /**
-   * Materialized View 생성
-   */
-  async createMaterializedView(request: {
-    datasource: string
-    view_name: string
-    schema_name?: string
-    source_sql: string
-    refresh_on_create?: boolean
-    description?: string
-  }): Promise<{
-    status: string
-    view_name: string
-    full_name: string
-    row_count: number
-    message: string
-    error_message?: string
-  }> {
-    if (!request.datasource) {
-      throw new Error('datasource is required')
-    }
-    const response = await fetch(`${TEXT2SQL_BASE_URL}/direct-sql/materialized-view`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        datasource: request.datasource,
-        view_name: request.view_name,
-        schema_name: request.schema_name || 'public',
-        source_sql: request.source_sql,
-        refresh_on_create: request.refresh_on_create ?? true,
-        description: request.description || ''
-      })
-    })
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
-    return response.json()
-  },
-
-  /**
-   * Materialized View 새로고침
-   */
-  async refreshMaterializedView(
-    viewName: string, 
-    datasource: string,
-    schemaName: string = 'public'
-  ): Promise<{
-    status: string
-    view_name: string
-    row_count: number
-    message: string
-    error_message?: string
-  }> {
-    if (!datasource) {
-      throw new Error('datasource is required')
-    }
-    const response = await fetch(
-      `${TEXT2SQL_BASE_URL}/direct-sql/materialized-view/${viewName}/refresh?datasource=${encodeURIComponent(datasource)}&schema_name=${schemaName}`,
-      { method: 'POST' }
-    )
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
-    return response.json()
-  },
-
-  /**
-   * Materialized View 목록 조회
-   */
-  async listMaterializedViews(schemaName: string = 'public'): Promise<{
-    status: string
-    views: Array<{
-      schema: string
-      name: string
-      owner: string
-      is_populated: boolean
-      size: string
-      description: string | null
-    }>
-    count: number
-    error_message?: string
-  }> {
-  // NOTE: datasource is required by backend; call sites must provide it via the overload below.
-    throw new Error('Use listMaterializedViewsForDatasource(datasource, schemaName)')
-  },
-
-  async listMaterializedViewsForDatasource(datasource: string, schemaName: string = 'public'): Promise<{
-    status: string
-    views: Array<{
-      schema: string
-      name: string
-      owner: string
-      is_populated: boolean
-      size: string
-      description: string | null
-    }>
-    count: number
-    error_message?: string
-  }> {
-    if (!datasource) {
-      throw new Error('datasource is required')
-    }
-    const response = await fetch(
-      `${TEXT2SQL_BASE_URL}/direct-sql/materialized-views?datasource=${encodeURIComponent(datasource)}&schema_name=${schemaName}`
-    )
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
-    return response.json()
-  }
 }

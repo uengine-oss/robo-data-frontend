@@ -34,6 +34,7 @@ export interface BackendRequestMetadata {
   datasourceName?: string | null  // 타겟 데이터 소스 이름
   inferFkRelations?: boolean  // FK 관계 자동 추론 여부 (기본: false)
   targetFolder?: string  // source/ 아래 강제 배치할 폴더 prefix (폴더 픽커로 안 올린 단일 파일에만 적용)
+  project_root?: string  // Electron 경로 모드: 분석할 로컬 폴더 절대경로. 미전달=업로드 모드(서버 data/source)
 }
 
 // ============================================================================
@@ -127,26 +128,14 @@ export interface NvlRelationship {
 }
 
 // ============================================================================
-// 다이어그램 (VueFlow 기반)
-// ============================================================================
-
-/** 클래스 정보 (다이어그램 검색용) */
-export interface ClassInfo {
-  className: string
-  directory: string
-  fileName: string
-  type: 'CLASS' | 'INTERFACE'
-}
-
-// ============================================================================
 // 스트리밍
 // ============================================================================
 
 /** 스트림 메시지 타입 */
 export type StreamMessageType = 'message' | 'error' | 'data' | 'status'
 
-/** 스트림 이벤트 타입 */
-export type StreamEventType = 'message' | 'data' | 'status' | 'complete' | 'error' | 'phase_event' | 'canvas_update'
+/** 스트림 이벤트 타입 ('detected' = antlr 가 자동 감지한 언어/strategy 전달) */
+export type StreamEventType = 'message' | 'data' | 'status' | 'complete' | 'error' | 'phase_event' | 'canvas_update' | 'detected'
 
 /** 스트림 메시지 (UI 표시용) */
 export interface StreamMessage {
@@ -213,18 +202,6 @@ export interface ParseResponse {
 // ============================================================================
 // VueFlow UML 클래스 다이어그램
 // ============================================================================
-
-/** UML 클래스 다이어그램에서 선택된 클래스 정보 */
-export interface SelectedClassInfo {
-  className: string
-  directory: string
-}
-
-/** UML 클래스 다이어그램 상태 */
-export interface UmlDiagramState {
-  selectedClasses: SelectedClassInfo[]
-  depth: number
-}
 
 // ============================================================================
 // Text2SQL (ReAct)
@@ -504,138 +481,3 @@ export type ReactStreamEvent =
       event: 'error'
       message: string
     }
-
-/** ReAct 상태 */
-export type ReactStatus = 'idle' | 'running' | 'needs_user_input' | 'completed' | 'error'
-
-/** ReAct Phase 상태 */
-export type ReactPhase = 'idle' | 'thinking' | 'reasoning' | 'acting' | 'observing'
-
-// ============================================================================
-// 도메인 온톨로지 스키마
-// ============================================================================
-
-/** 온톨로지 라벨 타입 (PRD 정의) */
-export type OntologyLabelType = 'Asset' | 'System' | 'Component' | 'Event' | string
-
-/** 온톨로지 라벨 정의 */
-export interface OntologyLabel {
-  name: string
-  description?: string
-  icon?: string
-  color?: string
-}
-
-/** 온톨로지 노드 속성 */
-export interface OntologyNodeProperty {
-  name: string
-  type: 'string' | 'number' | 'boolean' | 'date' | 'datetime' | 'json'
-  description?: string
-  required?: boolean
-}
-
-/** 온톨로지 노드 */
-export interface OntologyNode {
-  id: string
-  name: string
-  label: OntologyLabelType
-  description?: string
-  properties?: OntologyNodeProperty[]
-  dataSource?: string  // 바인딩된 테이블/뷰 이름
-  dataSourceSchema?: string | { columns: string[]; sql: string; row_count: number }  // 스키마명 또는 데이터소스 메타정보
-  materializedView?: string  // 생성된 Materialized View 이름
-  instanceCount?: number  // 인스턴스 수 (실시간)
-  position?: { x: number; y: number }  // VueFlow 위치
-}
-
-/** 온톨로지 관계 타입 */
-export type OntologyRelationshipType = 
-  | 'CONTAINS'
-  | 'OPERATES'
-  | 'GENERATES'
-  | 'BELONGS_TO'
-  | 'MONITORS'
-  | 'TRIGGERS'
-  | string
-
-/** 온톨로지 관계 */
-export interface OntologyRelationship {
-  id: string
-  source: string  // source node id
-  target: string  // target node id
-  type: OntologyRelationshipType
-  description?: string
-  properties?: Record<string, unknown>
-}
-
-/** 온톨로지 스키마 (전체) */
-export interface OntologySchema {
-  id?: string
-  name: string
-  description?: string
-  domain?: string  // 예: "스마트 정수장 운영 관리"
-  nodes: OntologyNode[]
-  relationships: OntologyRelationship[]
-  labels: OntologyLabel[]
-  createdAt?: string
-  updatedAt?: string
-  version?: number
-}
-
-/** 노드 인스턴스 데이터 */
-export interface NodeInstanceData {
-  nodeId: string
-  nodeName: string
-  dataSource: string
-  totalCount: number
-  previewData: {
-    columns: string[]
-    rows: unknown[][]
-  }
-  lastUpdated?: string
-}
-
-/** 스키마 생성 요청 */
-export interface GenerateSchemaRequest {
-  inputType: 'text' | 'pdf'
-  text?: string
-  pdfUrl?: string
-  pdfContent?: string  // Base64 encoded
-  domainHint?: string
-}
-
-/** 스키마 생성 응답 */
-export interface GenerateSchemaResponse {
-  success: boolean
-  schema?: OntologySchema
-  error?: string
-  warnings?: string[]
-}
-
-/** 피드백 적용 요청 */
-export interface ApplyFeedbackRequest {
-  currentSchema: OntologySchema
-  feedback: string
-}
-
-/** 피드백 적용 응답 */
-export interface ApplyFeedbackResponse {
-  success: boolean
-  schema?: OntologySchema
-  changes?: string[]
-  error?: string
-}
-
-/** 데이터 소스 바인딩 요청 */
-export interface BindDataSourceRequest {
-  nodeId: string
-  dataSource: string
-  schema?: string
-}
-
-/** Materialized View 생성 요청 */
-export interface CreateMaterializedViewRequest {
-  nodeId: string
-  viewName?: string
-  refreshInterval?: number  // 분 단위
-}

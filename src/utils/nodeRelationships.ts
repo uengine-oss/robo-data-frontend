@@ -94,19 +94,6 @@ export interface RelationshipGroups {
   incomingOutputs: GraphLink[]
 }
 
-/** 빈 그룹 — null-safe 렌더링용. */
-export const EMPTY_GROUPS: RelationshipGroups = {
-  inputs: [],
-  outputs: [],
-  calls: [],
-  attached: [],
-  fk: [],
-  uml: [],
-  variableRefs: [],
-  incomingCalls: [],
-  incomingInputs: [],
-  incomingOutputs: [],
-}
 
 /**
  * 노드 ID 기반으로 의미 그룹별 관계 분류.

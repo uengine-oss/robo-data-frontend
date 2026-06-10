@@ -5,7 +5,7 @@ import { IconX, IconTrash, IconPlus, IconAlertTriangle } from '@/components/icon
 export type DataAction = 'delete' | 'append' | 'cancel'
 export type NameCaseOption = 'original' | 'uppercase' | 'lowercase'
 
-const props = defineProps<{
+defineProps<{
   isOpen: boolean
   nodeCount: number
 }>()

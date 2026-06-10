@@ -560,34 +560,6 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     logger.debug(`[Canvas] 전체 테이블 보기 모드: ${enabled ? 'ON' : 'OFF'}`)
   }
   
-  /**
-   * 테이블이 새로 추가되었는지 확인 (애니메이션용)
-   */
-  function isTableNewlyAdded(nodeId: string): boolean {
-    return newlyAddedTables.value.has(nodeId)
-  }
-  
-  /**
-   * 엣지가 새로 추가되었는지 확인 (애니메이션용)
-   */
-  function isEdgeNewlyAdded(edgeId: string): boolean {
-    return newlyAddedEdges.value.has(edgeId)
-  }
-  
-  /**
-   * 노드가 최근 업데이트되었는지 확인 (애니메이션용)
-   */
-  function isNodeRecentlyUpdated(nodeId: string): boolean {
-    return updatedNodes.value.has(nodeId)
-  }
-  
-  /**
-   * 컬럼이 최근 업데이트되었는지 확인 (애니메이션용)
-   */
-  function isColumnRecentlyUpdated(tableName: string, columnName: string): boolean {
-    return updatedColumns.value.has(`${tableName}:${columnName}`)
-  }
-  
   // Watch data source changes
   watch(dataSource, () => {
     // Clear canvas when data source changes
@@ -631,29 +603,6 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       schemaSet.add(table.schema || 'public')
     })
     return Array.from(schemaSet).sort()
-  })
-  
-  // 스키마별 테이블 그룹화 (캔버스에 없는 테이블만)
-  const tablesBySchema = computed(() => {
-    const onCanvas = new Set(tablesOnCanvas.value)
-    const grouped: Record<string, Text2SqlTableInfo[]> = {}
-    
-    filteredTables.value.forEach(table => {
-      if (onCanvas.has(table.name)) return
-      
-      const schema = table.schema || 'public'
-      if (!grouped[schema]) {
-        grouped[schema] = []
-      }
-      grouped[schema].push(table)
-    })
-    
-    // 각 스키마 내 테이블 정렬
-    Object.keys(grouped).forEach(schema => {
-      grouped[schema].sort((a, b) => a.name.localeCompare(b.name))
-    })
-    
-    return grouped
   })
   
   // 3레벨 그룹핑: datasource > schema > tables (캔버스에 없는 테이블만)
@@ -2124,7 +2073,6 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     tablesNotOnCanvas,
     datasources,
     schemas,
-    tablesBySchema,
     tablesByDatasource,
     
     // Actions
@@ -2166,8 +2114,6 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     
     // 실시간 캔버스 업데이트
     handleCanvasUpdate,
-    isNodeRecentlyUpdated,
-    isColumnRecentlyUpdated,
     updatedNodes,
     updatedColumns,
     newRelationships,
@@ -2175,8 +2121,6 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     // 전체 테이블 보기 모드
     isFullViewMode,
     setFullViewMode,
-    isTableNewlyAdded,
-    isEdgeNewlyAdded,
     newlyAddedTables,
     newlyAddedEdges,
     addTableToCanvasWithAnimation

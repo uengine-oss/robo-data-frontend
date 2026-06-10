@@ -1329,37 +1329,6 @@ export const useDatasourcesStore = defineStore('datasources', () => {
     [...datasources.value].sort((a, b) => a.name.localeCompare(b.name))
   )
   
-  // Category-based grouping
-  const typesByCategory = computed(() => {
-    const types = datasourceTypes.value.length > 0 
-      ? datasourceTypes.value 
-      : getAllDataSourceTypes()
-    
-    const grouped: Record<DataSourceCategory, DataSourceTypeConfig[]> = {
-      database: [],
-      nosql: [],
-      datawarehouse: [],
-      api: [],
-      saas: [],
-      file: [],
-      streaming: [],
-      analytics: [],
-      vector: [],
-      other: []
-    }
-    
-    types.forEach(type => {
-      const category = type.category || 'other'
-      if (grouped[category]) {
-        grouped[category].push(type)
-      } else {
-        grouped.other.push(type)
-      }
-    })
-    
-    return grouped
-  })
-  
   const categoryLabels: Record<DataSourceCategory, string> = {
     database: '관계형 데이터베이스',
     nosql: 'NoSQL 데이터베이스',
@@ -1527,10 +1496,6 @@ export const useDatasourcesStore = defineStore('datasources', () => {
     error.value = null
   }
 
-  function getDefaultTypes(): DataSourceTypeConfig[] {
-    return getAllDataSourceTypes()
-  }
-
   // ========================================
   // 메타데이터 추출 기능
   // ========================================
@@ -1670,7 +1635,6 @@ export const useDatasourcesStore = defineStore('datasources', () => {
     // Getters
     hasDatasources,
     sortedDatasources,
-    typesByCategory,
     categoryLabels,
     // Actions
     fetchTypes,
@@ -1685,7 +1649,6 @@ export const useDatasourcesStore = defineStore('datasources', () => {
     checkHealth,
     checkAllHealth,
     clearError,
-    getDefaultTypes,
     getAllDataSourceTypes,
     // Extraction
     fetchSupportedEngines,

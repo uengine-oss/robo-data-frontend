@@ -16,25 +16,8 @@ export const STORAGE_KEYS = {
   // 프로젝트/세션
   PROJECT_STATE: 'robo-analyzer-project-state',
   THEME: 'robo-analyzer-theme',
-  API_KEY: 'robo-analyzer-api-key',
-  API_BASE: 'robo-analyzer-api-base',
-  LLM_MODEL: 'robo-analyzer-llm-model',
 
   // 앱 설정
   APP_TITLE: 'appTitle',
   UML_DEPTH: 'umlDepth',
-
-  // What-If 시뮬레이션
-  WHATIF_SESSIONS: 'whatif_sessions',
-  WHATIF_CURRENT_SESSION: 'whatif_current_session',
-  WHATIF_PROFILES: 'whatif_profiles',
-
-  // Text2SQL
-  RECENT_QUERIES: 'text2sql_recent_queries',
-
-  // Ontology Viewer
-  RECENT_SCHEMAS: 'robo-analyzer-recent-schemas',
-  SELECTED_NODES: 'robo-analyzer-selected-nodes',
 } as const
-
-export type StorageKey = typeof STORAGE_KEYS[keyof typeof STORAGE_KEYS]

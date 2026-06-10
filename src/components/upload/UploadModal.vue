@@ -1,34 +1,24 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted } from 'vue'
-import type { ComputedRef } from 'vue'
 import UploadTree from './UploadTree.vue'
 import AddMenu from './AddMenu.vue'
-import type { SourceType } from '@/types'
-import type { DetectTypesResponse } from '@/services/api'
 import { buildUploadTree, collectAllFolderPaths, forceWebkitRelativePath, getNormalizedUploadPath, getParentFolderRelPath, mapPickedFilesToTarget, moveRelPathToFolder, normalizeSlashes, resolveSelectedTargetFolder, splitPath, type UploadTreeNode, uniqueFilesByRelPath } from '@/utils/upload'
-import { IconFolder, IconX, IconCheck, IconAlertTriangle, IconLoader } from '@/components/icons'
+import { IconFolder, IconX, IconCheck, IconAlertTriangle } from '@/components/icons'
 import { useDatasourcesStore, type DataSource } from '@/stores/datasources'
 
 interface Props {
   initialFiles?: File[]
-  /** 자동 감지된 파일 타입 정보 */
-  detectedTypes?: DetectTypesResponse | null
-  /** 타입 감지 중 여부 */
-  isDetecting?: boolean
 }
 
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
-  confirm: [metadata: { sourceType: SourceType; datasource?: DataSource | null; inferFkRelations?: boolean }]
+  confirm: [metadata: { datasource?: DataSource | null; inferFkRelations?: boolean }]
   cancel: []
   'add-files': [files: File[], reanalyze: boolean]
   'files-updated': [files: File[]]
 }>()
 const files = ref<File[]>([...(props.initialFiles || [])])
-const sourceType = ref<SourceType>('java')
-// 사용자가 수동으로 소스 타입을 변경했는지 추적
-const userManuallySelectedType = ref(false)
 
 // 데이터 소스 스토어
 const datasourcesStore = useDatasourcesStore()
@@ -56,31 +46,6 @@ const datasourceIcons: Record<string, string> = {
 onMounted(async () => {
   await datasourcesStore.fetchDatasources()
 })
-
-// 자동 감지 결과 표시용
-const autoDetectedType = ref<SourceType | null>(null)
-const detectionConfidence = ref<string>('')
-
-// 자동 감지 결과가 오면 sourceType 자동 설정 (사용자 수동 선택 존중)
-watch(() => props.detectedTypes, (detected) => {
-  if (detected?.summary) {
-    const suggested = detected.summary.suggestedTarget as SourceType
-    // 사용자가 이미 수동으로 선택한 경우 자동 감지로 덮어쓰지 않음
-    if (!userManuallySelectedType.value) {
-      sourceType.value = suggested
-    }
-    autoDetectedType.value = suggested
-    
-    // 신뢰도 계산 (상위 타입 비율)
-    const total = detected.summary.total
-    const byType = detected.summary.byType
-    const topType = Object.entries(byType).sort((a, b) => b[1] - a[1])[0]
-    if (topType) {
-      const ratio = Math.round((topType[1] / total) * 100)
-      detectionConfidence.value = `${topType[0]} ${ratio}%`
-    }
-  }
-}, { immediate: true })
 
 // 데이터 소스 추가 모달 열기
 async function openAddDatasourceModal() {
@@ -203,59 +168,6 @@ const hasFiles = computed(() => files.value.length > 0)
 // 전체 파일 수
 const totalFileCount = computed(() => files.value.length)
 
-// 소스 타입 옵션 (antlr-code-parser에서 지원하는 타입만)
-const sourceTypeOptions: { value: SourceType; label: string }[] = [
-  { value: 'java', label: 'Java' },
-  { value: 'python', label: 'Python' },
-  { value: 'c', label: 'C' },
-  { value: 'postgresql', label: 'PostgreSQL' },
-  { value: 'oracle', label: 'Oracle' }
-]
-
-// 파일 확장자로 소스 타입 자동 감지
-const detectSourceType = (files: File[]): SourceType | null => {
-  if (files.length === 0) return null
-  
-  const extensions = files.map(f => {
-    const name = f.name.toLowerCase()
-    if (name.endsWith('.sql')) return 'sql'
-    if (name.endsWith('.java')) return 'java'
-    if (name.endsWith('.py')) return 'python'
-    if (name.endsWith('.c') || name.endsWith('.h')) return 'c'
-    return 'other'
-  })
-
-  const hasJava = extensions.includes('java')
-  const hasPython = extensions.includes('python')
-  const hasC = extensions.includes('c')
-  const hasSql = extensions.includes('sql')
-
-  // Java 파일이 있으면 Java
-  if (hasJava) return 'java'
-  // C 파일이 있으면 C
-  if (hasC) return 'c'
-  // Python 파일이 있으면 Python
-  if (hasPython) return 'python'
-  // SQL 파일만 있으면 null (사용자가 PostgreSQL/Oracle 선택해야 함)
-  if (hasSql && !hasJava && !hasPython) return null
-  
-  return null
-}
-
-// 파일이 변경되면 자동으로 소스 타입 감지 (초기 설정만, 사용자 수동 선택 존중)
-watch(files, (newFiles) => {
-  if (newFiles.length === 0) return
-  // 사용자가 이미 수동으로 소스 타입을 선택한 경우 자동 감지로 덮어쓰지 않음
-  if (userManuallySelectedType.value) return
-  
-  const detected = detectSourceType(newFiles)
-  // 자동 감지가 가능한 경우(Java/Python/C)에 자동 설정
-  // SQL인 경우는 사용자가 직접 PostgreSQL/Oracle 선택해야 함
-  if (detected && detected !== 'oracle' && detected !== 'postgresql') {
-    sourceType.value = detected
-  }
-}, { deep: true })
-
 // 유효성 검사: 파일만 있으면 업로드 가능하도록 변경
 const isValid = computed(() => hasFiles.value)
 
@@ -264,36 +176,6 @@ const validationError = computed(() => {
   if (!hasFiles.value) return '파일을 추가해주세요'
   return ''
 })
-
-// 감지된 타입 포맷팅 함수
-const formatDetectedTypes = (byType: Record<string, number>): string => {
-  const typeLabels: Record<string, string> = {
-    java: 'Java',
-    c: 'C',
-    oracle_sp: 'Oracle SP',
-    oracle_ddl: 'Oracle DDL',
-    postgresql_sp: 'PostgreSQL SP',
-    postgresql_ddl: 'PostgreSQL DDL',
-    python: 'Python',
-    xml: 'XML',
-    sql_generic: 'SQL',
-    unknown: '기타'
-  }
-  
-  const entries = Object.entries(byType)
-    .filter(([, count]) => count > 0)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3)  // 상위 3개만 표시
-    .map(([type, count]) => `${typeLabels[type] || type} ${count}개`)
-  
-  return entries.join(', ')
-}
-
-// isDetecting prop을 로컬에서 사용
-const isDetecting = computed(() => props.isDetecting ?? false)
-
-// detectedTypes prop을 로컬에서 사용
-const detectedTypes = computed(() => props.detectedTypes ?? null)
 
 watch(() => props.initialFiles, (val) => {
   files.value = [...(val || [])]
@@ -391,7 +273,6 @@ const handleConfirm = () => {
     return
   }
   emit('confirm', {
-    sourceType: sourceType.value,
     datasource: selectedDatasource.value,
     inferFkRelations: inferFkRelations.value
   })
@@ -612,30 +493,10 @@ const moveFileRelPath = (sourceRelPath: string, targetFolderRelPath: string) => 
             </div>
           </div>
           
-          <!-- 소스 타입 선택 -->
-          <div class="source-type-group">
-            <label class="form-label form-label--compact">
-              소스 타입 <span class="required">*</span>
-              <span v-if="isDetecting" class="detecting-badge">
-                <IconLoader :size="12" /> 감지중...
-              </span>
-              <span v-else-if="autoDetectedType" class="auto-detected-badge" :title="`자동 감지: ${detectionConfidence}`">
-                <IconCheck :size="12" /> 자동 감지됨
-              </span>
-            </label>
-            <select 
-              v-model="sourceType" 
-              class="select select--compact"
-              :class="{ 'auto-detected': autoDetectedType && sourceType === autoDetectedType }"
-              @change="userManuallySelectedType = true"
-            >
-              <option v-for="option in sourceTypeOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
-          </div>
         </div>
-        
+
+        <!-- 언어는 파싱 단계에서 antlr 가 자동 감지 — 사용자 선택 불필요 -->
+
         <!-- FK 관계 자동 추론 옵션 -->
         <div class="options-row">
           <label class="checkbox-option" :title="'컬럼명 유사도와 샘플 데이터를 분석하여 FK 관계를 자동으로 추론합니다.\n⚠️ 테이블이 많을 경우 시간이 오래 걸릴 수 있습니다.'">
@@ -700,17 +561,7 @@ const moveFileRelPath = (sourceRelPath: string, targetFolderRelPath: string) => 
           <div class="file-summary" v-if="hasFiles">
             <div class="file-summary-row">
               <div class="file-summary-main">총 {{ totalFileCount }}개 파일</div>
-              <!-- 감지 결과 표시 -->
-              <div v-if="isDetecting" class="file-summary-detecting">
-                <IconLoader :size="14" /> 파일 타입 분석 중...
-              </div>
-              <div v-else-if="detectedTypes?.summary" class="file-summary-detected">
-                <IconCheck :size="14" class="detected-icon" />
-                <span class="detected-types">
-                  {{ formatDetectedTypes(detectedTypes.summary.byType) }}
-                </span>
-              </div>
-              <div v-else class="file-summary-sub">· 수정 필요시, 원하는 폴더 선택 후 추가</div>
+              <div class="file-summary-sub">· 수정 필요시, 원하는 폴더 선택 후 추가</div>
             </div>
           </div>
           <div class="validation-error" v-if="validationError && hasFiles">
@@ -905,66 +756,12 @@ const moveFileRelPath = (sourceRelPath: string, targetFolderRelPath: string) => 
     flex-wrap: wrap;
   }
   
-  .detecting-badge {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 10px;
-    color: var(--color-warning, #f59e0b);
-    font-weight: 500;
-  }
-  
-  .auto-detected-badge {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 10px;
-    color: var(--color-success, #22c55e);
-    font-weight: 500;
-    cursor: help;
-  }
-  
-  .select {
-    font-size: 13px;
-    padding: 8px 10px;
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    color: var(--color-text);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    
-    &.auto-detected {
-      border-color: var(--color-success, #22c55e);
-      background: rgba(34, 197, 94, 0.08);
-    }
-    
-    &:focus {
-      outline: none;
-      border-color: var(--color-accent);
-      box-shadow: 0 0 0 2px rgba(34, 139, 230, 0.2);
-    }
-    
-    &:hover {
-      border-color: var(--color-text-muted);
-    }
-  }
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
 }
 
 .form-label--compact {
   font-size: 11px;
   font-weight: 500;
   color: var(--color-text-light);
-}
-
-.select--compact {
-  font-size: 13px;
-  padding: 8px 10px;
 }
 
 .tree-split {
@@ -1091,37 +888,6 @@ const moveFileRelPath = (sourceRelPath: string, targetFolderRelPath: string) => 
   font-weight: 400;
   line-height: 1.2;
   white-space: nowrap;
-}
-
-.file-summary-detecting {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--color-warning, #f59e0b);
-  font-weight: 500;
-}
-
-.file-summary-detected {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--color-success, #22c55e);
-  font-weight: 500;
-  
-  .detected-icon {
-    flex-shrink: 0;
-  }
-  
-  .detected-types {
-    color: var(--color-text-secondary, var(--color-text-light));
-  }
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 .validation-error {

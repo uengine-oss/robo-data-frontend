@@ -393,11 +393,6 @@ export const useNavigatorStore = defineStore('navigator', () => {
     collapsedNodes.value = all
   }
 
-  /** 모든 노드 펼치기 (= collapsedNodes 비우기). */
-  function expandAll(): void {
-    collapsedNodes.value = new Set()
-  }
-
   /** Navigator 트리 노드 단일 클릭 — 디테일 패널에 즉시 표시. */
   function selectNode(nodeId: string | null): void {
     selectedNodeId.value = nodeId
@@ -424,7 +419,6 @@ export const useNavigatorStore = defineStore('navigator', () => {
     toggleNode,
     isNodeExpanded,
     collapseAll,
-    expandAll,
     // 선택 상태
     selectedNodeId,
     selectNode,
