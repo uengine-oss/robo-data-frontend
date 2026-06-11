@@ -4,12 +4,11 @@
  * 인제스천 진행 상태를 플로팅 팝업으로 표시
  * 메타데이터 관련 탭 전체에서 보임
  */
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useAnalyzerStore } from '@/stores/analyzer'
 import { useDrag } from '@/composables/useDrag'
 import { IconX, IconChevronDown } from '@/components/icons'
-import type { PipelinePhaseInfo } from '@/services/api'
 
 const projectStore = useAnalyzerStore()
 const {
@@ -21,44 +20,25 @@ const {
   isPipelinePaused,
   graphEvents,
   consoleMessages,
-  pipelinePhases,
-  pipelineStatus,
+  dynamicSteps,
 } = storeToRefs(projectStore)
 
 const { pausePipeline, resumePipeline, clearMessages } = projectStore
 
-// phases 메타 로드 + 진행 중 500ms 폴링
-onMounted(async () => {
-  if (pipelinePhases.value.length === 0) {
-    await projectStore.fetchPipelinePhases()
-  }
-})
-let statusPollingId: ReturnType<typeof setInterval> | null = null
-watch(isProcessing, (processing) => {
-  if (processing) {
-    statusPollingId = setInterval(() => projectStore.fetchPipelineStatus(), 500)
-  } else if (statusPollingId) {
-    clearInterval(statusPollingId)
-    statusPollingId = null
-  }
-}, { immediate: true })
-onUnmounted(() => {
-  if (statusPollingId) clearInterval(statusPollingId)
-})
+// 진행 단계/상태는 분석 NDJSON 스트림(phase_event)이 채우는 dynamicSteps·currentPhase 로 표시 (폴링 폐기)
+type PhaseStep = { num: number; name: string }
 
-const currentPhaseOrder = computed(() => pipelineStatus.value?.phaseOrder ?? -1)
-
-function phaseStatusClass(phase: PipelinePhaseInfo): string {
-  if (phase.order < currentPhaseOrder.value) return 'done'
-  if (phase.order === currentPhaseOrder.value) {
+function phaseStatusClass(phase: PhaseStep): string {
+  if (phase.num < currentPhase.value) return 'done'
+  if (phase.num === currentPhase.value) {
     return isPipelinePaused.value ? 'paused' : 'active'
   }
   return 'pending'
 }
 
-function phaseStatusIcon(phase: PipelinePhaseInfo): string {
-  if (phase.order < currentPhaseOrder.value) return '✓'
-  if (phase.order === currentPhaseOrder.value) {
+function phaseStatusIcon(phase: PhaseStep): string {
+  if (phase.num < currentPhase.value) return '✓'
+  if (phase.num === currentPhase.value) {
     return isPipelinePaused.value ? '⏸' : '▶'
   }
   return '○'
@@ -262,7 +242,7 @@ watch(hasRecentError, (hasError) => {
             @click="activeTab = 'phases'"
           >
             단계
-            <span class="tab-count">{{ pipelinePhases.length }}</span>
+            <span class="tab-count">{{ dynamicSteps.length }}</span>
           </button>
           <button
             class="tab-btn"
@@ -285,18 +265,17 @@ watch(hasRecentError, (hasError) => {
         <!-- 단계 타임라인 -->
         <div v-show="activeTab === 'phases'" class="phase-timeline">
           <div
-            v-for="phase in pipelinePhases"
-            :key="phase.phase"
+            v-for="phase in dynamicSteps"
+            :key="phase.num"
             class="phase-row"
             :class="phaseStatusClass(phase)"
           >
             <span class="phase-icon">{{ phaseStatusIcon(phase) }}</span>
             <div class="phase-info">
               <span class="phase-name">{{ phase.name }}</span>
-              <span class="phase-desc">{{ phase.description }}</span>
             </div>
           </div>
-          <div v-if="pipelinePhases.length === 0" class="empty-hint">
+          <div v-if="dynamicSteps.length === 0" class="empty-hint">
             대기 중
           </div>
         </div>

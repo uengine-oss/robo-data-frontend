@@ -33,7 +33,7 @@ import type {
 } from '@/types'
 import { useSessionStore } from './session'
 import { useSchemaCanvasStore } from './schemaCanvas'
-import { antlrApi, roboApi, type PipelineStatus, type PipelinePhaseInfo } from '@/services/api'
+import { antlrApi, roboApi } from '@/services/api'
 
 // ============================================================================
 // 라벨 분류 — 멀티라벨에서 sub-label 우선 (역할 라벨은 후순위)
@@ -322,11 +322,8 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const pendingUploadMeta = ref<BackendRequestMetadata | null>(null)
   const pendingAction = ref<'upload' | 'restart' | null>(null)
 
-  // ----- 파이프라인 제어 -----
-  const pipelineStatus = ref<PipelineStatus | null>(null)
+  // ----- 파이프라인 제어 (진행 상태는 분석 NDJSON 스트림의 phase_event 단일 채널) -----
   const isPipelinePaused = ref(false)
-  const isPipelineStopped = ref(false)
-  const pipelinePhases = ref<PipelinePhaseInfo[]>([])
 
   // ----- 메타데이터 -----
   const datasourceName = ref<string | null>(null)
@@ -816,28 +813,9 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     addMessage('message', `🗑️ ${deletedCount}개 파일 전체 삭제됨`)
   }
 
-  async function fetchPipelineStatus(): Promise<void> {
-    try {
-      pipelineStatus.value = await roboApi.getPipelineStatus(sessionStore.getHeaders())
-      isPipelinePaused.value = pipelineStatus.value?.isPaused || false
-      isPipelineStopped.value = pipelineStatus.value?.isStopped || false
-    } catch (error) {
-      logger.error('파이프라인 상태 조회 실패:', error)
-    }
-  }
-
-  async function fetchPipelinePhases(): Promise<void> {
-    try {
-      pipelinePhases.value = await roboApi.getPipelinePhases()
-    } catch (error) {
-      logger.error('파이프라인 단계 정보 조회 실패:', error)
-    }
-  }
-
   async function pausePipeline(): Promise<void> {
     try {
       const result = await roboApi.controlPipeline('pause', sessionStore.getHeaders())
-      pipelineStatus.value = result.status
       isPipelinePaused.value = result.status.isPaused
       if (result.success) addMessage('message', '⏸️ 파이프라인 일시정지 요청됨')
     } catch (error) {
@@ -848,7 +826,6 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   async function resumePipeline(): Promise<void> {
     try {
       const result = await roboApi.controlPipeline('resume', sessionStore.getHeaders())
-      pipelineStatus.value = result.status
       isPipelinePaused.value = result.status.isPaused
       if (result.success) addMessage('message', '▶️ 파이프라인 재개됨')
     } catch (error) {
@@ -908,10 +885,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     pendingNodeCount,
 
     // 파이프라인 제어
-    pipelineStatus,
     isPipelinePaused,
-    isPipelineStopped,
-    pipelinePhases,
 
     metadata,
     analyzeMeta,
@@ -941,8 +915,6 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     clearAllFiles,
 
     // Pipeline control
-    fetchPipelineStatus,
-    fetchPipelinePhases,
     pausePipeline,
     resumePipeline,
 
