@@ -2951,22 +2951,14 @@ async function runCausalAnalysisFromBrush(analysisType?: 'increase' | 'decrease'
   analysisState.value = { loading: true, result: null, error: null, progress: undefined, streamingReport: '' }
   // detailPanelTab.value = 'analysis' 제거 (이미 분석 탭으로 전환된 상태)
   try {
-    const incRes = await fetch(
-      `/api/gateway/ontology/schemas/${encodeURIComponent(schemaId)}/nodes/${encodeURIComponent(node.id)}/incoming-network`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ max_depth: 3 })
-      }
-    )
-    if (incRes.ok) {
-      const incData = await incRes.json()
+    try {
+      const incData = await objectExplorerApi.getIncomingNetwork(schemaId, node.id, { max_depth: 3 })
       highlightedCausalNodeIds.value = new Set((incData.nodes || []).map((n: any) => n.id).filter(Boolean))
       highlightedCausalEdgePairs.value = new Set(
         (incData.relationships || []).map((r: any) => `${r.source}\t${r.target}`)
       )
       applyCausalHighlight()
-    }
+    } catch { /* incoming-network 실패는 비치명적 — 하이라이트 없이 진행 */ }
 
     const requestBody = {
       time_range: { start: sel.start, end: sel.end },
@@ -8546,19 +8538,8 @@ async function saveToNeo4jSilent(): Promise<void> {
     relationships: relationships.value
   }
 
-  const response = await fetch('/api/gateway/ontology/schema', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(schema)
-  })
-
-  if (response.ok) {
-    const result = await response.json()
-    currentSchemaId.value = result.id
-  } else {
-    const errorText = await response.text()
-    throw new Error(errorText)
-  }
+  const result = await ontologyApi.saveSchema(schema as any)
+  currentSchemaId.value = result.id
 }
 
 async function saveToNeo4j() {
