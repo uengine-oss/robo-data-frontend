@@ -7,12 +7,12 @@
  * - ObjectType을 드래그하여 캔버스에 추가
  */
 import { ref, computed, onMounted, provide, Teleport } from 'vue'
-import SchemaCanvas from '@/components/text2sql/SchemaCanvas.vue'
+import { SchemaCanvas } from '@/features/schema'
 import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
 import { useSessionStore } from '@/stores/session'
 import { IconPlus, IconSearch, IconRefresh, IconDatabase, IconTrash, IconAlertTriangle, IconEdit } from '@/components/icons'
 import CreateObjectTypeDialog from './CreateObjectTypeDialog.vue'
-import EditRelationshipDialog from '@/components/text2sql/EditRelationshipDialog.vue'
+import { EditRelationshipDialog } from '@/features/schema'
 import ObjectTypeEditDialog from './ObjectTypeEditDialog.vue'
 import BehaviorDialog from './BehaviorDialog.vue'
 import BehaviorExecuteDialog from './BehaviorExecuteDialog.vue'

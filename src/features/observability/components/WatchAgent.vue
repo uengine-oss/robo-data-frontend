@@ -30,7 +30,7 @@ import SqlNode from './nodes/SqlNode.vue'
 import ConditionNode from './nodes/ConditionNode.vue'
 import ActionNode from './nodes/ActionNode.vue'
 import WhatIfNode from './nodes/WhatIfNode.vue'
-import ResultTable from '@/components/text2sql/ResultTable.vue'
+import { ResultTable } from '@/features/text2sql'
 
 // 파이프라인 스텝 타입
 interface PipelineStep {

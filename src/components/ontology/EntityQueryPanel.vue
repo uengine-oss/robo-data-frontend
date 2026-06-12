@@ -9,7 +9,7 @@ import { useSessionStore } from '@/stores/session'
 import { useOntologyStore } from '@/stores/ontology'
 import { useDatasourcesStore } from '@/stores/datasources'
 import { IconPlay, IconRefresh, IconDatabase, IconSearch, IconLink, IconCheck } from '@/components/icons'
-import ResultTable from '@/components/text2sql/ResultTable.vue'
+import { ResultTable } from '@/features/text2sql'
 
 const props = defineProps<{
   node: OntologyNode

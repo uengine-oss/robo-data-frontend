@@ -11,7 +11,7 @@ import type { OntologyNode } from '@/types'
 import { storeToRefs } from 'pinia'
 import { IconX, IconRefresh, IconDatabase, IconSearch, IconCheck } from '@/components/icons'
 import { ontologyApi } from '@/services/api'
-import Text2SqlTab from '@/components/text2sql/Text2SqlTab.vue'
+import { Text2SqlTab } from '@/features/text2sql'
 import { useReactStore } from '@/stores/text2sql'
 import { useDatasourcesStore } from '@/stores/datasources'
 

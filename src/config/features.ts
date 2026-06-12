@@ -75,7 +75,7 @@ export const FEATURES: FeatureDef[] = [
   { id: 'graph', label: '스키마 관리', icon: IconDatabase, group: 'physical', embeddable: true,
     component: lazy(() => import('@/components/graph/GraphTab.vue')) },
   { id: 'text2sql', label: '자연어 질의', icon: IconMessageSquare, group: 'physical',
-    component: lazy(() => import('@/components/text2sql/Text2SqlTab.vue')) },
+    component: lazy(() => import('@/features/text2sql').then((m: any) => m.Text2SqlTab)) },
   { id: 'security-guard', label: '보안관리자', icon: IconSecurity, group: 'physical',
     component: lazy(() => import('@/features/security').then((m: any) => m.SecurityGuardTab)) },
 
@@ -90,7 +90,7 @@ export const FEATURES: FeatureDef[] = [
     component: lazy(() => import('@/components/domain/OntologyViewerRemote.vue')) },
   { id: 'domain-text2sql', label: '자연어 질의', icon: IconMessageSquare, group: 'domain',
     props: { domainLayerMode: true },
-    component: lazy(() => import('@/components/text2sql/Text2SqlTab.vue')) },
+    component: lazy(() => import('@/features/text2sql').then((m: any) => m.Text2SqlTab)) },
   // 메뉴 숨김(원래 SideNav 에서 주석 처리)이나 activeTab 라우팅은 보존
   { id: 'ontology', label: '문서에서 스키마 추출', icon: IconOntology, group: 'domain', hidden: true,
     component: lazy(() => import('@/components/ontology').then((m: any) => m.OntologyTab)) },

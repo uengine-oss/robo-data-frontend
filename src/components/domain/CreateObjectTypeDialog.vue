@@ -10,7 +10,7 @@
  */
 import { ref, computed, watch, onMounted } from 'vue'
 import { Teleport } from 'vue'
-import Text2SqlTab from '@/components/text2sql/Text2SqlTab.vue'
+import { Text2SqlTab } from '@/features/text2sql'
 import { useReactStore } from '@/stores/text2sql'
 import { useDatasourcesStore } from '@/stores/datasources'
 import { IconX, IconCheck, IconDatabase, IconLink, IconPlus, IconTrash } from '@/components/icons'
