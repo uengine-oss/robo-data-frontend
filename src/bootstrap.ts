@@ -14,6 +14,7 @@ import router from './router'
 import './styles/main.scss'
 import { initializeAppSettings } from '@/shared/config/appSettings'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
+import { useSessionStore, type Neo4jConnection } from '@/shared/stores/session'
 
 let app: VueApp | null = null
 
@@ -22,10 +23,12 @@ let app: VueApp | null = null
  * @param opts.embedded    host(architect) 안에 끼워질 때 true — analyzer 자체 상단바를 숨긴다.
  * @param opts.projectRoot host(architect, Electron)가 고른 로컬 폴더 경로 — 주면 경로 모드
  *                         (업로드 없이 그 폴더를 직접 분석). 없으면 브라우저 업로드 모드.
+ * @param opts.neo4j       host(Electron)가 고른 Neo4j 연결 — 주면 요청 헤더로 백엔드에 override.
+ *                         없으면(브라우저/테스트) 백엔드가 서버 env(ROBO_NEO4J_*) 사용.
  */
 export function mount(
   el: string | Element,
-  opts: { embedded?: boolean; projectRoot?: string } = {},
+  opts: { embedded?: boolean; projectRoot?: string; neo4j?: Neo4jConnection } = {},
 ): () => void {
   // 앱 설정 초기화 (document.title 등)
   initializeAppSettings()
@@ -39,6 +42,11 @@ export function mount(
   // 경로 모드: host 가 넘긴 로컬 폴더를 store 에 주입 (analyzer 는 "경로를 받았나"만 본다).
   if (opts.projectRoot) {
     useAnalyzerStore(pinia).setProjectRoot(opts.projectRoot)
+  }
+
+  // Neo4j override: host(Electron)가 넘긴 연결을 session 에 주입 → getHeaders 가 X-Neo4j-* 헤더로 전달.
+  if (opts.neo4j) {
+    useSessionStore(pinia).setNeo4jConnection(opts.neo4j)
   }
 
   app.mount(el)

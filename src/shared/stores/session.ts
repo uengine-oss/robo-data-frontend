@@ -8,6 +8,15 @@ const STORAGE_KEY_API_PROVIDER = 'robo-analyzer-api-provider'
 export type Theme = 'dark' | 'light'
 export type ApiProvider = 'openai' | 'anthropic'
 
+// Neo4j 연결 override — Electron 호스트(데스크톱)가 mount 시 주입.
+// 브라우저 standalone / 테스트는 미주입 → 백엔드가 서버 env(ROBO_NEO4J_*) 폴백.
+export interface Neo4jConnection {
+  uri: string
+  user: string
+  password: string
+  database?: string
+}
+
 // 로컬스토리지에서 값 로드
 const loadFromStorage = (key: string, defaultValue: string): string => {
   const stored = localStorage.getItem(key)
@@ -28,6 +37,10 @@ export const useSessionStore = defineStore('session', () => {
   // LLM 설정 - 로컬스토리지에서 로드 (빈 값이면 서버 .env 사용)
   const apiKey = ref<string>(loadFromStorage(STORAGE_KEY_API_KEY, ''))
   const apiProvider = ref<ApiProvider>(loadFromStorage(STORAGE_KEY_API_PROVIDER, 'openai') as ApiProvider)
+
+  // Neo4j 연결 override — Electron 호스트가 mount 시 주입. localStorage 영속 X
+  // (연결의 진실은 데스크톱이 소유, 매 mount 주입). null = 서버 env 사용.
+  const neo4jConnection = ref<Neo4jConnection | null>(null)
 
   // 현재 활성 탭 - 새로고침 시 항상 업로드 탭으로 시작
   const activeTab = ref<string>('upload')
@@ -217,13 +230,28 @@ export const useSessionStore = defineStore('session', () => {
     saveToStorage(STORAGE_KEY_API_PROVIDER, provider)
   }
 
-  // 헤더 생성 (apiKey 있으면 override, 없으면 서버 .env 폴백)
+  // Neo4j 연결 설정 — Electron 호스트가 mount 시 주입. 있으면 요청 헤더로 override,
+  // 없으면(브라우저/테스트) 백엔드가 서버 env 사용.
+  const setNeo4jConnection = (conn: Neo4jConnection | null) => {
+    neo4jConnection.value = conn
+  }
+
+  // 헤더 생성 (apiKey·Neo4j 연결 있으면 override, 없으면 서버 .env 폴백)
   const getHeaders = (): Record<string, string> => {
     const headers: Record<string, string> = {
       'Accept-Language': 'ko'
     }
 
     if (apiKey.value) headers['X-LLM-Api-Key'] = apiKey.value
+
+    // Neo4j 연결 override (Electron) — 있으면 헤더로 전달, 없으면 백엔드 env 폴백.
+    const conn = neo4jConnection.value
+    if (conn?.uri) {
+      headers['X-Neo4j-Uri'] = conn.uri
+      headers['X-Neo4j-User'] = conn.user
+      headers['X-Neo4j-Password'] = conn.password
+      if (conn.database) headers['X-Neo4j-Database'] = conn.database
+    }
 
     return headers
   }
@@ -233,6 +261,7 @@ export const useSessionStore = defineStore('session', () => {
     theme,
     apiKey,
     apiProvider,
+    neo4jConnection,
     olapTransferData,
     watchAgentTransferData,
     pendingSchemaSearch,
@@ -244,6 +273,7 @@ export const useSessionStore = defineStore('session', () => {
     toggleTheme,
     setApiKey,
     setApiProvider,
+    setNeo4jConnection,
     setActiveTab,
     goHome,
     getHeaders,
