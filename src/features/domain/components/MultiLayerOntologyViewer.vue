@@ -6805,65 +6805,26 @@ async function autoLinkDataSources() {
     }))
     
     // 스트리밍 API 호출
-    const response = await fetch('/api/gateway/ontology/auto-link-datasource/stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nodes: nodeData })
-    })
-    
-    if (!response.ok) {
-      throw new Error('스트리밍 연결 실패')
-    }
-    
-    const reader = response.body?.getReader()
-    const decoder = new TextDecoder()
-    
-    if (!reader) {
-      throw new Error('스트리밍 리더 없음')
-    }
-    
-    let buffer = ''
-    
-    while (true) {
-      const { done, value } = await reader.read()
-      
-      if (done) break
-      
-      buffer += decoder.decode(value, { stream: true })
-      
-      // SSE 이벤트 파싱
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-      
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const event = JSON.parse(line.slice(6))
-            
-            if (event.type === 'progress') {
-              // 진행 상황 업데이트
-              linkingProgress.value.nodeStatuses[event.node_id] = {
-                status: event.status,
-                message: event.message
-              }
-              linkingProgress.value.completed = event.completed || linkingProgress.value.completed
-              linkingProgress.value.currentNode = event.node_id
-            } else if (event.type === 'result') {
-              // 최종 결과
-              dataSourceMappings.value = event.data.mappings || {}
-            } else if (event.type === 'error') {
-              alert(`오류: ${event.message}`)
-            }
-          } catch (e) {
-            console.warn('SSE 파싱 오류:', e)
-          }
+    await objectExplorerApi.autoLinkDatasourceStream({ nodes: nodeData }, (event) => {
+      if (event.type === 'progress') {
+        // 진행 상황 업데이트
+        linkingProgress.value.nodeStatuses[event.node_id] = {
+          status: event.status,
+          message: event.message
         }
+        linkingProgress.value.completed = event.completed || linkingProgress.value.completed
+        linkingProgress.value.currentNode = event.node_id
+      } else if (event.type === 'result') {
+        // 최종 결과
+        dataSourceMappings.value = event.data.mappings || {}
+      } else if (event.type === 'error') {
+        alert(`오류: ${event.message}`)
       }
-    }
-    
+    })
+
   } catch (err) {
     console.error('Auto-link error:', err)
-    
+
     // 폴백: 일반 API 호출
     try {
       const nodeData = nodes.value.map(n => ({
@@ -6872,20 +6833,9 @@ async function autoLinkDataSources() {
         layer: n.layer || n.label,
         description: n.description || ''
       }))
-      
-      const response = await fetch('/api/gateway/ontology/auto-link-datasource', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nodes: nodeData })
-      })
-      
-      if (response.ok) {
-        const result = await response.json()
-        dataSourceMappings.value = result.mappings || {}
-      } else {
-        const error = await response.json()
-        alert(`데이터 소스 연결 실패: ${error.detail || '알 수 없는 오류'}`)
-      }
+
+      const result = await objectExplorerApi.autoLinkDatasource({ nodes: nodeData })
+      dataSourceMappings.value = result.mappings || {}
     } catch (fallbackErr) {
       alert('데이터 소스 자동 연결 중 오류가 발생했습니다.')
     }
@@ -7271,19 +7221,9 @@ async function searchNodeDataSource() {
     }
     // Text2SQL /ask API 호출
     nodeSearchStatus.value = '🤖 AI가 SQL 쿼리 생성 중...'
-    const response = await fetch('/api/gateway/text2sql/ask', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        question: nodeSearchQuery.value,
-        datasource: selectedDatasource.value,
-        limit: 10
-      })
-    })
-    
-    if (response.ok) {
-      nodeSearchStatus.value = '📊 검색 결과 처리 중...'
-      const result = await response.json()
+    const result = await text2sqlApi.ask(nodeSearchQuery.value, selectedDatasource.value, 10)
+    nodeSearchStatus.value = '📊 검색 결과 처리 중...'
+    {
       
       // Text2SQL 응답에서 테이블 정보 추출
       const provenance = result.provenance || {}
@@ -7356,43 +7296,6 @@ async function searchNodeDataSource() {
           nodeSearchStatus.value = '⚠️ 검색 결과가 없습니다'
         }
       }
-    } else {
-      // HTTP 에러 응답 처리
-      let errorMessage = '검색 실패'
-      try {
-        const errorData = await response.json()
-        console.error('Text2SQL API 오류 응답:', errorData)
-        
-        // 에러 메시지 추출
-        if (errorData.detail) {
-          if (typeof errorData.detail === 'string') {
-            errorMessage = errorData.detail
-          } else if (errorData.detail.message) {
-            errorMessage = errorData.detail.message
-          } else if (errorData.detail.detail) {
-            errorMessage = errorData.detail.detail
-          } else {
-            errorMessage = JSON.stringify(errorData.detail)
-          }
-        } else if (errorData.message) {
-          errorMessage = errorData.message
-        } else {
-          errorMessage = `HTTP ${response.status}: ${JSON.stringify(errorData)}`
-        }
-      } catch (parseError) {
-        const errorText = await response.text().catch(() => '')
-        errorMessage = errorText || `HTTP ${response.status} ${response.statusText}`
-      }
-      
-      console.error('검색 실패:', errorMessage)
-      nodeSearchStatus.value = `❌ 검색 실패: ${errorMessage.substring(0, 100)}${errorMessage.length > 100 ? '...' : ''}`
-      // 3초 후 상태 메시지 제거
-      setTimeout(() => {
-        if (nodeSearchStatus.value.includes('❌')) {
-          nodeSearchStatus.value = ''
-        }
-      }, 5000)
-      alert(`검색 실패: ${errorMessage}`)
     }
   } catch (error: any) {
     console.error('노드 데이터 소스 검색 오류:', error)
@@ -8421,47 +8324,17 @@ async function loadSchema(schemaId: string) {
   
   try {
     // 스키마 활성화
-    const activateResponse = await fetch(`/api/gateway/ontology/schemas/${schemaId}/activate`, {
-      method: 'POST'
-    })
-    
-    if (!activateResponse.ok) {
-      const errorText = await activateResponse.text().catch(() => '')
-      let errorDetail = ''
-      try {
-        const errorJson = JSON.parse(errorText)
-        errorDetail = errorJson.detail || errorJson.message || errorText
-      } catch {
-        errorDetail = errorText || `HTTP ${activateResponse.status} ${activateResponse.statusText}`
-      }
-      console.error('스키마 활성화 실패:', errorDetail)
-      throw new Error(`스키마 활성화 실패 (${activateResponse.status}): ${errorDetail}`)
-    }
-    
+    await ontologyApi.activateSchema(schemaId)
+
     // 스키마 상세 조회
-    const schemaResponse = await fetch(`/api/gateway/ontology/schemas/${schemaId}`)
-    
-    if (!schemaResponse.ok) {
-      const errorText = await schemaResponse.text().catch(() => '')
-      let errorDetail = ''
-      try {
-        const errorJson = JSON.parse(errorText)
-        errorDetail = errorJson.detail || errorJson.message || errorText
-      } catch {
-        errorDetail = errorText || `HTTP ${schemaResponse.status} ${schemaResponse.statusText}`
-      }
-      console.error('스키마 조회 실패:', errorDetail)
-      throw new Error(`스키마 조회 실패 (${schemaResponse.status}): ${errorDetail}`)
-    }
-    
-    const schema = await schemaResponse.json()
-    
+    const schema = await ontologyApi.getSchemaById(schemaId)
+
     if (!schema) {
       throw new Error('스키마 데이터가 비어있습니다.')
     }
     
     // 스키마 ID와 이름 저장
-    currentSchemaId.value = schema.id
+    currentSchemaId.value = schema.id ?? null
     schemaName.value = schema.name || ''
     
     // 스키마 로드 중 플래그 (watch가 initCytoscape 덮어쓰기 방지)

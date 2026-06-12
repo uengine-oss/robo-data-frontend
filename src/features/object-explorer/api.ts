@@ -255,6 +255,48 @@ export const objectExplorerApi = {
       await handleHttpError(response)
     }
     return response.json().catch(() => ({}))
+  },
+
+  /**
+   * 데이터소스 자동연결 (SSE 스트림, `data:` 라인) — /auto-link-datasource/stream.
+   * 소비처는 onEvent(event) 에서 event.type(progress/result/error) 분기.
+   */
+  async autoLinkDatasourceStream(body: unknown, onEvent: (event: any) => void): Promise<void> {
+    const response = await fetch(`${ONTOLOGY_BASE_URL}/auto-link-datasource/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    if (!response.ok) {
+      throw new Error('스트리밍 연결 실패')
+    }
+    const reader = response.body?.getReader()
+    if (!reader) {
+      throw new Error('스트리밍 리더 없음')
+    }
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            onEvent(JSON.parse(line.slice(6)))
+          } catch (e) {
+            console.warn('SSE 파싱 오류:', e)
+          }
+        }
+      }
+    }
+  },
+
+  /** 데이터소스 자동연결 (비스트림 폴백) — /auto-link-datasource */
+  async autoLinkDatasource(body: unknown): Promise<{ mappings?: Record<string, any> } & Record<string, any>> {
+    return postJson(`${ONTOLOGY_BASE_URL}/auto-link-datasource`, body, {})
   }
 }
 
