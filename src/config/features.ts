@@ -117,7 +117,7 @@ export const FEATURES: FeatureDef[] = [
 
   // ── 분석/도구 (그룹 헤더 없이 플랫) ──
   { id: 'lineage', label: '데이터 리니지', icon: IconLineage, group: 'bottom',
-    component: lazy(() => import('@/components/lineage/LineageTab.vue')) },
+    component: lazy(() => import('@/features/lineage').then((m: any) => m.LineageTab)) },
   { id: 'olap', label: 'OLAP 분석', icon: IconBarChart, group: 'bottom',
     component: lazy(() => import('@/components/olap').then((m: any) => m.OlapTab)) },
   // 메뉴 없음(HomeView 에만 있던 탭) → hidden 으로 보존
