@@ -1,5 +1,5 @@
 /** observability api — 이벤트 감지·규칙·알림·템플릿(text2sql 백엔드). 공유 http 코어 사용. */
-import { TEXT2SQL_BASE_URL } from '@/shared/services/http'
+import { TEXT2SQL_BASE_URL, handleHttpError } from '@/shared/services/http'
 
 // ============================================================================
 // Event Detection API (이벤트 감지 및 조치)
@@ -182,7 +182,7 @@ export const eventApi = {
   async listRules(): Promise<EventRule[]> {
     const response = await fetch(`${TEXT2SQL_BASE_URL}/events/rules`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -193,7 +193,7 @@ export const eventApi = {
   async getRule(eventId: string): Promise<EventRule> {
     const response = await fetch(`${TEXT2SQL_BASE_URL}/events/rules/${eventId}`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -208,8 +208,7 @@ export const eventApi = {
       body: JSON.stringify(data)
     })
     if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(errorText || `HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -224,7 +223,7 @@ export const eventApi = {
       body: JSON.stringify(data)
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -237,7 +236,7 @@ export const eventApi = {
       method: 'DELETE'
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
   },
 
@@ -249,7 +248,7 @@ export const eventApi = {
       method: 'POST'
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -262,7 +261,7 @@ export const eventApi = {
       method: 'POST'
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -282,7 +281,7 @@ export const eventApi = {
     
     const response = await fetch(`${TEXT2SQL_BASE_URL}/events/notifications?${params}`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -295,7 +294,7 @@ export const eventApi = {
       method: 'POST'
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
   },
 
@@ -307,7 +306,7 @@ export const eventApi = {
       method: 'DELETE'
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
   },
 
@@ -321,7 +320,7 @@ export const eventApi = {
       method: 'POST'
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -334,7 +333,7 @@ export const eventApi = {
       method: 'POST'
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -345,7 +344,7 @@ export const eventApi = {
   async getSchedulerStatus(): Promise<SchedulerStatus> {
     const response = await fetch(`${TEXT2SQL_BASE_URL}/events/scheduler/status`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -364,8 +363,7 @@ export const eventApi = {
       body: JSON.stringify(request)
     })
     if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(errorText || `HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -378,7 +376,7 @@ export const eventApi = {
   async getCepStatus(): Promise<CEPStatus> {
     const response = await fetch(`${TEXT2SQL_BASE_URL}/events/cep/status`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -397,8 +395,7 @@ export const eventApi = {
       body: JSON.stringify(request)
     })
     if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(errorText || `HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -409,7 +406,7 @@ export const eventApi = {
   async getSimpleCepStatus(): Promise<SimpleCEPStatus> {
     const response = await fetch(`${TEXT2SQL_BASE_URL}/events/simple-cep/status`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -448,7 +445,7 @@ export const eventTemplateApi = {
     const params = category ? `?category=${encodeURIComponent(category)}` : ''
     const response = await fetch(`${TEXT2SQL_BASE_URL}/events/templates${params}`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -459,7 +456,7 @@ export const eventTemplateApi = {
   async listCategories(): Promise<{ categories: string[] }> {
     const response = await fetch(`${TEXT2SQL_BASE_URL}/events/templates/categories`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -470,7 +467,7 @@ export const eventTemplateApi = {
   async getTemplatesGrouped(): Promise<Record<string, EventTemplate[]>> {
     const response = await fetch(`${TEXT2SQL_BASE_URL}/events/templates/by-category`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -481,7 +478,7 @@ export const eventTemplateApi = {
   async getTemplate(templateId: string): Promise<EventTemplate> {
     const response = await fetch(`${TEXT2SQL_BASE_URL}/events/templates/${templateId}`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -506,7 +503,7 @@ export const eventTemplateApi = {
       method: 'POST'
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   }

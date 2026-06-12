@@ -45,7 +45,7 @@ export const agentsMdApi = {
   async getContext(objectTypeName: string): Promise<AgentContextResponse> {
     const response = await fetch(`${ONTOLOGY_BASE_URL}/object-types/${encodeURIComponent(objectTypeName)}/agent-context`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -59,7 +59,7 @@ export const agentsMdApi = {
       return null
     }
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -75,7 +75,7 @@ export const agentsMdApi = {
       body: JSON.stringify(body)
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -92,7 +92,7 @@ export const agentsMdApi = {
       body: JSON.stringify(body)
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -105,7 +105,7 @@ export const agentsMdApi = {
       method: 'DELETE'
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -206,7 +206,7 @@ export const nodeAgentSchedulerApi = {
   async listAgents(): Promise<NodeAgentState[]> {
     const response = await fetch(`${NODE_AGENT_SCHEDULER_URL}/agents`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -217,7 +217,7 @@ export const nodeAgentSchedulerApi = {
   async getAgentState(nodeType: string): Promise<NodeAgentState> {
     const response = await fetch(`${NODE_AGENT_SCHEDULER_URL}/agents/${encodeURIComponent(nodeType)}`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -230,7 +230,7 @@ export const nodeAgentSchedulerApi = {
       method: 'POST'
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -245,7 +245,7 @@ export const nodeAgentSchedulerApi = {
       body: JSON.stringify({ action })
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -260,7 +260,7 @@ export const nodeAgentSchedulerApi = {
       body: JSON.stringify({ content })
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -271,7 +271,7 @@ export const nodeAgentSchedulerApi = {
   async getLogs(nodeType: string, limit: number = 50): Promise<NodeAgentLog[]> {
     const response = await fetch(`${NODE_AGENT_SCHEDULER_URL}/agents/${encodeURIComponent(nodeType)}/logs?limit=${limit}`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -303,7 +303,7 @@ export const processGptApi = {
   async getProcessList(): Promise<ProcessGPTProcess[]> {
     const response = await fetch(`${AGENT_SCHEDULER_URL}/profiles/processgpt/processes`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     const data = await response.json()
     // The endpoint returns { success, processes } or { success, response (from ReAct agent) }

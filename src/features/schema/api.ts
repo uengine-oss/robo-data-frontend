@@ -1,5 +1,5 @@
 /** schema api — ERD/스키마 메타데이터 (Neo4j 직접 조회). 공유 http 코어(base URL) 사용. */
-import { ROBO_BASE_URL } from '@/shared/services/http'
+import { ROBO_BASE_URL, handleHttpError } from '@/shared/services/http'
 
 // ============================================================================
 // ROBO Schema API (ERD 모델링용 - Neo4j 직접 조회)
@@ -55,7 +55,7 @@ export const roboSchemaApi = {
     const response = await fetch(`${ROBO_BASE_URL}/schema/tables?${params}`)
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -73,7 +73,7 @@ export const roboSchemaApi = {
     const response = await fetch(`${ROBO_BASE_URL}/schema/tables/${tableName}/columns?${params}`)
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -86,7 +86,7 @@ export const roboSchemaApi = {
     const response = await fetch(`${ROBO_BASE_URL}/schema/relationships`)
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     const data = await response.json()
     // 백엔드가 배열을 직접 반환하므로 래핑
@@ -112,7 +112,7 @@ export const roboSchemaApi = {
     const response = await fetch(`${ROBO_BASE_URL}/graph/related-tables/${encodeURIComponent(tableName)}`)
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -142,7 +142,7 @@ export const roboSchemaApi = {
     const response = await fetch(`${ROBO_BASE_URL}/schema/tables/${encodeURIComponent(tableName)}/references?${params}`)
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -168,7 +168,7 @@ export const roboSchemaApi = {
     const response = await fetch(`${ROBO_BASE_URL}/schema/procedures/${encodeURIComponent(procedureName)}/statements?${params}`)
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -197,7 +197,7 @@ export const roboSchemaApi = {
     })
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -272,7 +272,7 @@ export const roboSchemaApi = {
     })
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   }

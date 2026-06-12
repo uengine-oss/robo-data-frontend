@@ -61,7 +61,7 @@ export const objectExplorerApi = {
   async getObjectTypes(): Promise<{ objectTypes: ObjectTypeInfo[]; total: number }> {
     const response = await fetch(`${ONTOLOGY_BASE_URL}/object-types`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -72,7 +72,7 @@ export const objectExplorerApi = {
   async getObjectTypeData(objectTypeName: string, limit: number = 100): Promise<ObjectTypeDataResponse> {
     const response = await fetch(`${ONTOLOGY_BASE_URL}/object-types/${encodeURIComponent(objectTypeName)}/data?limit=${limit}`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -87,7 +87,7 @@ export const objectExplorerApi = {
       body: JSON.stringify({ query, limit })
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -102,7 +102,7 @@ export const objectExplorerApi = {
       body: JSON.stringify({ parentType, parentId, parentProperties })
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -120,7 +120,7 @@ export const objectExplorerApi = {
   }> {
     const response = await fetch(`${ONTOLOGY_BASE_URL}/object-explorer/relationships/${encodeURIComponent(objectTypeName)}`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -144,7 +144,7 @@ export const objectExplorerApi = {
       body: JSON.stringify({ chartConfig })
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },

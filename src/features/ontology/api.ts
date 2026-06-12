@@ -1,6 +1,6 @@
 /** ontology api — 도메인 온톨로지 스키마 CRUD·생성·피드백. 공유 http 코어 사용. */
 import type { OntologySchema, GenerateSchemaRequest, GenerateSchemaResponse, ApplyFeedbackRequest, ApplyFeedbackResponse, NodeInstanceData } from '@/shared/types'
-import { ONTOLOGY_BASE_URL } from '@/shared/services/http'
+import { ONTOLOGY_BASE_URL, handleHttpError } from '@/shared/services/http'
 
 export interface SchemaListItem {
   id: string
@@ -31,7 +31,7 @@ export const ontologyApi = {
   async listSchemas(): Promise<SchemaListResponse> {
     const response = await fetch(`${ONTOLOGY_BASE_URL}/schemas`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -45,7 +45,7 @@ export const ontologyApi = {
       return null
     }
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -58,7 +58,7 @@ export const ontologyApi = {
       method: 'POST'
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -71,7 +71,7 @@ export const ontologyApi = {
       method: 'DELETE'
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -89,7 +89,7 @@ export const ontologyApi = {
       return null
     }
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -104,8 +104,7 @@ export const ontologyApi = {
       body: JSON.stringify(schema)
     })
     if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(errorText || `HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -184,8 +183,7 @@ export const ontologyApi = {
       body: JSON.stringify(request)
     })
     if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(errorText || `HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -200,8 +198,7 @@ export const ontologyApi = {
       body: JSON.stringify({ bpmnXml })
     })
     if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(errorText || `HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -213,7 +210,7 @@ export const ontologyApi = {
     const params = new URLSearchParams({ limit: limit.toString() })
     const response = await fetch(`${ONTOLOGY_BASE_URL}/nodes/${nodeId}/instances?${params}`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -228,8 +225,7 @@ export const ontologyApi = {
       body: JSON.stringify({ dataSource, schema })
     })
     if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(errorText || `HTTP ${response.status}`)
+      await handleHttpError(response)
     }
   },
 
@@ -241,7 +237,7 @@ export const ontologyApi = {
       method: 'DELETE'
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
   },
 
@@ -259,8 +255,7 @@ export const ontologyApi = {
       body: JSON.stringify({ viewName, refreshInterval })
     })
     if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(errorText || `HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -271,7 +266,7 @@ export const ontologyApi = {
   async getAvailableDataSources(): Promise<{ tables: Array<{ name: string; schema: string; description?: string }> }> {
     const response = await fetch(`${ONTOLOGY_BASE_URL}/datasources`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -284,7 +279,7 @@ export const ontologyApi = {
       method: 'POST'
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   }

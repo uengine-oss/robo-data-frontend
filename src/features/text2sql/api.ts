@@ -23,7 +23,7 @@ export const text2sqlApi = {
     
     const response = await fetch(`${TEXT2SQL_BASE_URL}/meta/tables?${params}`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -39,7 +39,7 @@ export const text2sqlApi = {
     params.append('datasource', datasource)
     const response = await fetch(`${TEXT2SQL_BASE_URL}/meta/tables/${tableName}/columns?${params}`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -55,7 +55,7 @@ export const text2sqlApi = {
     params.append('datasource', datasource)
     const response = await fetch(`${TEXT2SQL_BASE_URL}/meta/columns?${params}`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -75,8 +75,7 @@ export const text2sqlApi = {
       body: JSON.stringify({ name: tableName, schema, description })
     })
     if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(errorText || `HTTP ${response.status}`)
+      await handleHttpError(response)
     }
   },
 
@@ -104,8 +103,7 @@ export const text2sqlApi = {
       }
     )
     if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(errorText || `HTTP ${response.status}`)
+      await handleHttpError(response)
     }
   },
 
@@ -131,8 +129,7 @@ export const text2sqlApi = {
       body: JSON.stringify(relationship)
     })
     if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(errorText || `HTTP ${response.status}`)
+      await handleHttpError(response)
     }
   },
 
@@ -156,8 +153,7 @@ export const text2sqlApi = {
       headers
     })
     if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(errorText || `HTTP ${response.status}`)
+      await handleHttpError(response)
     }
   },
 
@@ -167,7 +163,7 @@ export const text2sqlApi = {
   async getUserRelationships(headers: Headers = {}): Promise<{ relationships: unknown[] }> {
     const response = await fetch(`${ROBO_BASE_URL}/schema/relationships`, { headers })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -329,7 +325,7 @@ export const text2sqlApi = {
   async healthCheck(): Promise<unknown> {
     const response = await fetch(`${TEXT2SQL_BASE_URL}/health`)
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -428,7 +424,7 @@ export const text2sqlApi = {
       })
     })
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -455,7 +451,7 @@ export const text2sqlApi = {
       { method: 'POST' }
     )
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   },
@@ -500,7 +496,7 @@ export const text2sqlApi = {
       `${TEXT2SQL_BASE_URL}/direct-sql/materialized-views?datasource=${encodeURIComponent(datasource)}&schema_name=${schemaName}`
     )
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      await handleHttpError(response)
     }
     return response.json()
   }
