@@ -5,7 +5,7 @@ import { computed, inject, ref, watch } from 'vue'
 import type { Text2SqlColumnInfo } from '@/types'
 import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
 import { useAnalyzerStore } from '@/stores/analyzer'
-import { roboSchemaApi } from '@/services/api'
+import { roboSchemaApi } from '@/features/schema/api'
 import { getDescriptionColor, getDescriptionSourceLabel } from '@/utils/descriptionColor'
 
 interface Behavior {
