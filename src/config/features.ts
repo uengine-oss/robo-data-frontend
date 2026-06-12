@@ -77,7 +77,7 @@ export const FEATURES: FeatureDef[] = [
   { id: 'text2sql', label: '자연어 질의', icon: IconMessageSquare, group: 'physical',
     component: lazy(() => import('@/components/text2sql/Text2SqlTab.vue')) },
   { id: 'security-guard', label: '보안관리자', icon: IconSecurity, group: 'physical',
-    component: lazy(() => import('@/components/security').then((m: any) => m.SecurityGuardTab)) },
+    component: lazy(() => import('@/features/security').then((m: any) => m.SecurityGuardTab)) },
 
   // ── 도메인 레이어 ──
   { id: 'schema-modeling', label: '도메인 스키마', icon: IconDatabase, group: 'domain',
@@ -85,7 +85,7 @@ export const FEATURES: FeatureDef[] = [
   { id: 'multi-layer-ontology', label: '온톨로지 관리', icon: IconLineage, group: 'domain',
     component: lazy(() => import('@/components/domain/MultiLayerOntologyViewer.vue')) },
   { id: 'object-explorer', label: '오브젝트 탐색기', icon: IconSearch, group: 'domain',
-    component: lazy(() => import('@/components/object-explorer/ObjectExplorerTab.vue')) },
+    component: lazy(() => import('@/features/object-explorer').then((m: any) => m.ObjectExplorerTab)) },
   { id: 'ontology-viewer', label: '온톨로지 뷰어', icon: IconEye, group: 'domain',
     component: lazy(() => import('@/components/domain/OntologyViewerRemote.vue')) },
   { id: 'domain-text2sql', label: '자연어 질의', icon: IconMessageSquare, group: 'domain',
@@ -97,17 +97,17 @@ export const FEATURES: FeatureDef[] = [
 
   // ── 다이나믹 레이어 ──
   { id: 'whatif', label: 'What-If 시뮬레이터', icon: IconWhatIf, group: 'dynamic',
-    component: lazy(() => import('@/components/whatif').then((m: any) => m.WhatIfSimulator)) },
+    component: lazy(() => import('@/features/whatif').then((m: any) => m.WhatIfSimulator)) },
   { id: 'data-quality', label: '데이터 품질', icon: IconDataQuality, group: 'dynamic',
-    component: lazy(() => import('@/components/observability').then((m: any) => m.DataQuality)) },
+    component: lazy(() => import('@/features/observability').then((m: any) => m.DataQuality)) },
   { id: 'incident-manager', label: '사고 관리자', icon: IconIncident, group: 'dynamic',
-    component: lazy(() => import('@/components/observability').then((m: any) => m.IncidentManager)) },
+    component: lazy(() => import('@/features/observability').then((m: any) => m.IncidentManager)) },
   { id: 'alerts', label: '알림들', icon: IconAlertConfig, group: 'dynamic',
-    component: lazy(() => import('@/components/observability').then((m: any) => m.AlertsPage)) },
+    component: lazy(() => import('@/features/observability').then((m: any) => m.AlertsPage)) },
   { id: 'event-detection', label: '이벤트 감지', icon: IconEventDetection, group: 'dynamic',
-    component: lazy(() => import('@/components/observability').then((m: any) => m.EventDetection)) },
+    component: lazy(() => import('@/features/observability').then((m: any) => m.EventDetection)) },
   { id: 'watch-agent', label: '감시 에이전트', icon: IconWatchAgent, group: 'dynamic',
-    component: lazy(() => import('@/components/observability').then((m: any) => m.WatchAgent)) },
+    component: lazy(() => import('@/features/observability').then((m: any) => m.WatchAgent)) },
 
   // ── 기준관리 ──
   { id: 'glossary', label: '용어 관리', icon: IconBook, group: 'standard',
