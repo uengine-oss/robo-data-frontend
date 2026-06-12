@@ -19,7 +19,7 @@ import ObjectDetailPanel from './ObjectDetailPanel.vue'
 import ChildSelectDialog from './ChildSelectDialog.vue'
 import ObjectChartPanel from './ObjectChartPanel.vue'
 import { useResize } from '@/composables/useResize'
-import { objectExplorerApi } from '@/services/api'
+import { objectExplorerApi } from '@/features/object-explorer/api'
 
 // ============================================================================
 // 타입 정의

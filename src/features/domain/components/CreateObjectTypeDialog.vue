@@ -14,7 +14,7 @@ import { Text2SqlTab } from '@/features/text2sql'
 import { useReactStore } from '@/stores/text2sql'
 import { useDatasourcesStore } from '@/stores/datasources'
 import { IconX, IconCheck, IconDatabase, IconLink, IconPlus, IconTrash } from '@/shared/icons'
-import { objectExplorerApi } from '@/services/api'
+import { objectExplorerApi } from '@/features/object-explorer/api'
 
 // 데이터 소스 타입
 type DataSourceType = 'natural-language' | 'direct-sql' | 'manual-input'

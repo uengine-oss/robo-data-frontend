@@ -14,6 +14,7 @@ export const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? '/api/gat
 export const ANTLR_BASE_URL = `${API_GATEWAY_URL}/antlr`
 export const ROBO_BASE_URL = `${API_GATEWAY_URL}/robo`
 export const TEXT2SQL_BASE_URL = `${API_GATEWAY_URL}/text2sql`
+export const ONTOLOGY_BASE_URL = `${API_GATEWAY_URL}/ontology`
 
 export type StreamCallback = (event: StreamEvent) => void
 export type Headers = Record<string, string>

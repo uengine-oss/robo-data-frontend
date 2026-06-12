@@ -8,8 +8,9 @@
  * even while editing.
  */
 import { ref, computed, watch, nextTick } from 'vue'
-import { agentsMdApi, processGptApi, objectExplorerApi } from '@/services/api'
-import type { AgentContextResponse, ProcessGPTProcess } from '@/services/api'
+import { agentsMdApi, processGptApi } from '@/features/domain/api'
+import { objectExplorerApi } from '@/features/object-explorer/api'
+import type { AgentContextResponse, ProcessGPTProcess } from '@/features/domain/api'
 
 interface BehaviorModel {
   modelId: string

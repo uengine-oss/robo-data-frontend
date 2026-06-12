@@ -8937,8 +8937,8 @@ function updateCytoscapeTheme() {
 // ============================================================================
 // Agent Activity Monitoring + Visual Effects
 // ============================================================================
-import { nodeAgentSchedulerApi, nodeVisualEffectsApi } from '@/services/api'
-import type { NodeAgentState, NodeAgentLog, NodeVisualEffects } from '@/services/api'
+import { nodeAgentSchedulerApi, nodeVisualEffectsApi } from '@/features/domain/api'
+import type { NodeAgentState, NodeAgentLog, NodeVisualEffects } from '@/features/domain/api'
 
 const agentStates = ref<Map<string, NodeAgentState>>(new Map())
 let agentPollInterval: ReturnType<typeof setInterval> | null = null
