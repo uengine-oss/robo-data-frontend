@@ -111,9 +111,9 @@ export const FEATURES: FeatureDef[] = [
 
   // ── 기준관리 ──
   { id: 'glossary', label: '용어 관리', icon: IconBook, group: 'standard',
-    component: lazy(() => import('@/components/glossary/GlossaryTab.vue')) },
+    component: lazy(() => import('@/features/glossary').then((m: any) => m.GlossaryTab)) },
   { id: 'business-calendar', label: '영업일 캘린더', icon: IconCalendar, group: 'standard',
-    component: lazy(() => import('@/components/glossary/BusinessDayCalendar.vue')) },
+    component: lazy(() => import('@/features/glossary').then((m: any) => m.BusinessDayCalendar)) },
 
   // ── 분석/도구 (그룹 헤더 없이 플랫) ──
   { id: 'lineage', label: '데이터 리니지', icon: IconLineage, group: 'bottom',
