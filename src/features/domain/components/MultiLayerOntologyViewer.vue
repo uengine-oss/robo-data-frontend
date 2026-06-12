@@ -2968,21 +2968,11 @@ async function runCausalAnalysisFromBrush(analysisType?: 'increase' | 'decrease'
     }
     console.log('서버 요청 본문:', requestBody)
     
-    const basePath = `/api/gateway/ontology/schemas/${encodeURIComponent(schemaId)}/nodes/${encodeURIComponent(node.id)}`
-    const streamUrl = `${basePath}/causal-analysis/stream`
-    let res = await fetch(streamUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
-    })
-    
+    let res = await objectExplorerApi.causalAnalysisStreamRequest(schemaId, node.id, requestBody)
+
     // 404면 스트림 미지원 백엔드 → 비스트림 엔드포인트로 폴백
     if (res.status === 404) {
-      res = await fetch(`${basePath}/causal-analysis`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
-      })
+      res = await objectExplorerApi.causalAnalysisRequest(schemaId, node.id, requestBody)
     }
     
     if (!res.ok) {
@@ -3431,15 +3421,19 @@ async function fetchNodeData(nodeId: string) {
     console.log(`[Filter] fetchNodeData(${nodeId}): effectiveFilters=`, effectiveFilters, `businessDayFilter=${businessDayFilterEnabled.value}`, `URL params: ${filterParams.toString()}`)
     
     // 1차: 백엔드 API 시도
-    const response = await fetch(`/api/gateway/ontology/ontology-nodes/${nodeId}/data?${filterParams.toString()}`)
-    
-    if (response.ok) {
-      const result = await response.json()
-      if (result.hasDataSource) {
-        nodeDataResult.value = result
-        
+    let result: any = null
+    try {
+      result = await objectExplorerApi.getNodeData(nodeId, filterParams.toString())
+    } catch (apiErr: any) {
+      console.error('백엔드 API 실패:', apiErr)
+      lastDataError.value = `백엔드 API 오류: ${apiErr?.message || '알 수 없는 오류'}`
+    }
+
+    if (result?.hasDataSource) {
+      nodeDataResult.value = result
+
     nodeDataLoading.value = false
-    
+
     // 차트 렌더링 (막대 차트와 라인 차트 모두 직접 렌더링)
     if (result.chartRecommendation?.type !== 'table') {
       await nextTick()
@@ -3449,25 +3443,12 @@ async function fetchNodeData(nodeId: string) {
       }, 100)
     }
     return
-      } else {
-        // 데이터 소스가 없거나 조회 실패
-        console.warn('백엔드 API: hasDataSource가 false', result)
-        if (result.message) {
-          console.warn('백엔드 API 메시지:', result.message)
-        }
+    } else if (result) {
+      // 데이터 소스가 없거나 조회 실패
+      console.warn('백엔드 API: hasDataSource가 false', result)
+      if (result.message) {
+        console.warn('백엔드 API 메시지:', result.message)
       }
-    } else {
-      // HTTP 에러 응답
-      const errorText = await response.text().catch(() => '')
-      let errorDetail = ''
-      try {
-        const errorJson = JSON.parse(errorText)
-        errorDetail = errorJson.detail || errorJson.message || errorText
-      } catch {
-        errorDetail = errorText || `HTTP ${response.status} ${response.statusText}`
-      }
-      console.error(`백엔드 API 실패 (${response.status}):`, errorDetail)
-      lastDataError.value = `백엔드 API 오류 (${response.status}): ${errorDetail}`
     }
     
     // 2차: 백엔드 API 실패 시 Text2SQL Direct SQL API 사용
@@ -4608,16 +4589,16 @@ async function fetchNodeColumns(nodeId: string): Promise<FetchColumnsResult> {
   }
 
   try {
-    const response = await fetch(`/api/gateway/ontology/ontology-nodes/${nodeId}/data?limit=1`)
-    if (!response.ok) {
+    let result: any
+    try {
+      result = await objectExplorerApi.getNodeData(nodeId, 'limit=1')
+    } catch {
       return {
         status: 'error',
         columns: [],
         error: `데이터 소스 '${node.dataSource}'의 컬럼 정보를 조회하지 못했습니다.`
       }
     }
-
-    const result = await response.json()
     const columns = normalizeColumnNames(result.columns)
     if (columns.length > 0) {
       return {
@@ -6866,15 +6847,8 @@ function formatSampleValue(value: any): string {
 
 async function confirmDataSourceMapping(nodeId: string, candidate: any) {
   try {
-    const response = await fetch('/api/gateway/ontology/confirm-datasource', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ node_id: nodeId, candidate })
-    })
-    
-    if (response.ok) {
-      const result = await response.json()
-      
+    const result = await objectExplorerApi.confirmDatasource({ node_id: nodeId, candidate })
+    {
       // 매핑 상태 업데이트
       if (dataSourceMappings.value[nodeId]) {
         dataSourceMappings.value[nodeId].status = 'confirmed'
@@ -7000,9 +6974,6 @@ async function confirmDataSourceMapping(nodeId: string, candidate: any) {
       
       // 성공 메시지 (간단하게)
       // console.log('✅ 데이터 소스 연결 완료:', result.message || `노드에 '${candidate.table_name}' 연결됨`)
-    } else {
-      const error = await response.json().catch(() => ({ detail: '알 수 없는 오류' }))
-      alert(`데이터 소스 확정 실패: ${error.detail || '알 수 없는 오류'}`)
     }
   } catch (err) {
     console.error('Confirm datasource error:', err)
@@ -7714,61 +7685,7 @@ async function generateOntology() {
     
     // Use streaming endpoint
     currentStep.value = '에이전트 실행 중'
-    const response = await fetch('/api/gateway/ontology/generate-multi-layer', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-      signal: abortController.signal
-    })
-    
-    if (!response.ok) {
-      let errMessage = `HTTP ${response.status}`
-      try {
-        const errBody = await response.json()
-        const detail = errBody.detail ?? errBody.message ?? errBody.error?.message
-        if (detail) errMessage = typeof detail === 'string' ? detail : JSON.stringify(detail)
-      } catch (_) {
-        const text = await response.text()
-        if (text) errMessage = text.slice(0, 500)
-      }
-      throw new Error(errMessage)
-    }
-    
-    // Process streaming response
-    const reader = response.body?.getReader()
-    if (!reader) throw new Error('No response body')
-    
-    const decoder = new TextDecoder()
-    let buffer = ''
-    
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-      
-      for (const line of lines) {
-        if (!line.trim()) continue
-        try {
-          const event = JSON.parse(line)
-          handleStreamEvent(event)
-        } catch (e) {
-          console.warn('Failed to parse stream event:', line)
-        }
-      }
-    }
-    
-    // Process any remaining buffer
-    if (buffer.trim()) {
-      try {
-        const event = JSON.parse(buffer)
-        handleStreamEvent(event)
-      } catch (e) {
-        console.warn('Failed to parse final event:', buffer)
-      }
-    }
+    await objectExplorerApi.generateMultiLayer(requestBody, handleStreamEvent, abortController.signal)
     
   } catch (error: any) {
     if (error.name === 'AbortError') {

@@ -297,6 +297,66 @@ export const objectExplorerApi = {
   /** 데이터소스 자동연결 (비스트림 폴백) — /auto-link-datasource */
   async autoLinkDatasource(body: unknown): Promise<{ mappings?: Record<string, any> } & Record<string, any>> {
     return postJson(`${ONTOLOGY_BASE_URL}/auto-link-datasource`, body, {})
+  },
+
+  /** 다층 온톨로지 생성 (NDJSON 스트림, abort 지원) — /generate-multi-layer */
+  async generateMultiLayer(body: unknown, onEvent: (event: any) => void, signal?: AbortSignal): Promise<void> {
+    const response = await fetch(`${ONTOLOGY_BASE_URL}/generate-multi-layer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal
+    })
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('No response body')
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          onEvent(JSON.parse(line))
+        } catch {
+          console.warn('Failed to parse stream event:', line)
+        }
+      }
+    }
+    if (buffer.trim()) {
+      try {
+        onEvent(JSON.parse(buffer))
+      } catch {
+        console.warn('Failed to parse final event:', buffer)
+      }
+    }
+  },
+
+  /**
+   * 노드 인과분석 스트림 요청 — /schemas/{id}/nodes/{n}/causal-analysis/stream.
+   * Response 를 반환(404 폴백·content-type 협상·NDJSON 파싱은 호출처가 오케스트레이션).
+   */
+  async causalAnalysisStreamRequest(schemaId: string, nodeId: string, body: unknown): Promise<Response> {
+    return fetch(`${ONTOLOGY_BASE_URL}/schemas/${encodeURIComponent(schemaId)}/nodes/${encodeURIComponent(nodeId)}/causal-analysis/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+  },
+
+  /** 노드 인과분석 (비스트림 폴백, Response 반환) — /schemas/{id}/nodes/{n}/causal-analysis */
+  async causalAnalysisRequest(schemaId: string, nodeId: string, body: unknown): Promise<Response> {
+    return fetch(`${ONTOLOGY_BASE_URL}/schemas/${encodeURIComponent(schemaId)}/nodes/${encodeURIComponent(nodeId)}/causal-analysis`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
   }
 }
 
