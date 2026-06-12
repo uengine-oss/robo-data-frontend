@@ -3,8 +3,6 @@ import { ref, watch } from 'vue'
 
 const STORAGE_KEY_THEME = 'robo-analyzer-theme'
 const STORAGE_KEY_API_KEY = 'robo-analyzer-api-key'
-const STORAGE_KEY_API_BASE = 'robo-analyzer-api-base'
-const STORAGE_KEY_LLM_MODEL = 'robo-analyzer-llm-model'
 const STORAGE_KEY_API_PROVIDER = 'robo-analyzer-api-provider'
 
 export type Theme = 'dark' | 'light'
@@ -30,12 +28,10 @@ export const useSessionStore = defineStore('session', () => {
   // LLM 설정 - 로컬스토리지에서 로드 (빈 값이면 서버 .env 사용)
   const apiKey = ref<string>(loadFromStorage(STORAGE_KEY_API_KEY, ''))
   const apiProvider = ref<ApiProvider>(loadFromStorage(STORAGE_KEY_API_PROVIDER, 'openai') as ApiProvider)
-  const apiBase = ref<string>(loadFromStorage(STORAGE_KEY_API_BASE, ''))
-  const llmModel = ref<string>(loadFromStorage(STORAGE_KEY_LLM_MODEL, ''))
-  
+
   // 현재 활성 탭 - 새로고침 시 항상 업로드 탭으로 시작
   const activeTab = ref<string>('upload')
-  
+
   // OLAP으로 전달할 SQL 정보
   interface OlapTransferData {
     question: string
@@ -43,7 +39,7 @@ export const useSessionStore = defineStore('session', () => {
     fromHistory?: boolean
   }
   const olapTransferData = ref<OlapTransferData | null>(null)
-  
+
   // 감시 에이전트로 전달할 쿼리 정보
   interface WatchAgentTransferData {
     question: string
@@ -52,13 +48,13 @@ export const useSessionStore = defineStore('session', () => {
     executionTimeMs?: number | null
   }
   const watchAgentTransferData = ref<WatchAgentTransferData | null>(null)
-  
+
   // 스키마 검색으로 전달할 검색어
   const pendingSchemaSearch = ref<string | null>(null)
-  
+
   // 자연어(Text2SQL) 검색으로 전달할 질문
   const pendingNLSearch = ref<string | null>(null)
-  
+
   // 소스 파일로 이동할 정보 (파일명 + 라인 번호 + 파일 경로)
   interface SourceNavigation {
     procedureName: string
@@ -67,7 +63,7 @@ export const useSessionStore = defineStore('session', () => {
     fileDirectory?: string
   }
   const pendingSourceNavigation = ref<SourceNavigation | null>(null)
-  
+
   // 온톨로지(도메인 스키마)로 전달할 SQL 정보
   interface OntologyTransferData {
     question: string
@@ -75,7 +71,6 @@ export const useSessionStore = defineStore('session', () => {
   }
   const ontologyTransferData = ref<OntologyTransferData | null>(null)
 
-  
   // 테마 적용 — 영속화 + DOM data-theme. 초기 마운트 포함 항상 실행.
   watch(theme, (newTheme) => {
     saveToStorage(STORAGE_KEY_THEME, newTheme)
@@ -90,27 +85,22 @@ export const useSessionStore = defineStore('session', () => {
     root.classList.add('theme-transitioning')
     setTimeout(() => root.classList.remove('theme-transitioning'), THEME_FADE_MS)
   })
-  
+
   // 새 세션 생성
   const createNewSession = () => {
     activeTab.value = 'upload'
   }
-  
-  // 세션 초기화
-  const clearSession = () => {
-    activeTab.value = 'upload'
-  }
-  
+
   // 탭 변경
   const setActiveTab = (tab: string) => {
     activeTab.value = tab
   }
-  
+
   // 홈으로 이동 (업로드 탭)
   const goHome = () => {
     activeTab.value = 'upload'
   }
-  
+
   // OLAP으로 SQL 전달하며 이동
   const navigateToOlapWithSQL = (question: string, sql: string) => {
     olapTransferData.value = {
@@ -120,56 +110,56 @@ export const useSessionStore = defineStore('session', () => {
     }
     activeTab.value = 'olap'
   }
-  
+
   // OLAP 전달 데이터 소비 (사용 후 초기화)
   const consumeOlapTransferData = () => {
     const data = olapTransferData.value
     olapTransferData.value = null
     return data
   }
-  
+
   // 감시 에이전트로 쿼리 정보 전달하며 이동
   const navigateToWatchAgentWithQuery = (data: WatchAgentTransferData) => {
     watchAgentTransferData.value = data
     activeTab.value = 'watch-agent'
   }
-  
+
   // 감시 에이전트 전달 데이터 소비 (사용 후 초기화)
   const consumeWatchAgentTransferData = () => {
     const data = watchAgentTransferData.value
     watchAgentTransferData.value = null
     return data
   }
-  
+
   // 스키마 검색으로 이동
   const navigateToSchemaSearch = (query: string) => {
     pendingSchemaSearch.value = query
     activeTab.value = 'graph'
   }
-  
+
   // 스키마 검색 데이터 소비 (사용 후 초기화)
   const consumeSchemaSearch = () => {
     const query = pendingSchemaSearch.value
     pendingSchemaSearch.value = null
     return query
   }
-  
+
   // 자연어(Text2SQL) 검색으로 이동
   const navigateToNLSearch = (query: string) => {
     pendingNLSearch.value = query
     activeTab.value = 'text2sql'
   }
-  
+
   // 자연어 검색 데이터 소비 (사용 후 초기화)
   const consumeNLSearch = () => {
     const query = pendingNLSearch.value
     pendingNLSearch.value = null
     return query
   }
-  
+
   // 소스 파일로 이동하며 특정 라인 하이라이팅
   const navigateToSourceWithLine = (
-    procedureName: string, 
+    procedureName: string,
     lineNumber: number,
     fileName?: string,
     fileDirectory?: string
@@ -182,14 +172,14 @@ export const useSessionStore = defineStore('session', () => {
     }
     activeTab.value = 'upload'
   }
-  
+
   // 소스 네비게이션 데이터 소비 (사용 후 초기화)
   const consumeSourceNavigation = () => {
     const data = pendingSourceNavigation.value
     pendingSourceNavigation.value = null
     return data
   }
-  
+
   // 온톨로지(도메인 스키마)로 SQL 전달하며 이동
   const navigateToOntologyWithSQL = (question: string, sql: string) => {
     ontologyTransferData.value = {
@@ -198,33 +188,28 @@ export const useSessionStore = defineStore('session', () => {
     }
     activeTab.value = 'schema-modeling'
   }
-  
+
   // 온톨로지 전달 데이터 소비 (사용 후 초기화)
   const consumeOntologyTransferData = () => {
     const data = ontologyTransferData.value
     ontologyTransferData.value = null
     return data
   }
-  
+
   // 테마 설정
   const setTheme = (newTheme: Theme) => {
     theme.value = newTheme
   }
-  
+
   // 테마 토글 (dark <-> light)
   const toggleTheme = () => {
     theme.value = theme.value === 'dark' ? 'light' : 'dark'
   }
-  
-  // LLM 설정
+
+  // LLM 설정 (apiKey 만 요청 헤더에 반영 — base/model 은 서버 .env 단일 진실)
   const setApiKey = (key: string) => {
     apiKey.value = key
     saveToStorage(STORAGE_KEY_API_KEY, key)
-  }
-
-  const setApiBase = (url: string) => {
-    apiBase.value = url
-    saveToStorage(STORAGE_KEY_API_BASE, url)
   }
 
   const setApiProvider = (provider: ApiProvider) => {
@@ -232,31 +217,22 @@ export const useSessionStore = defineStore('session', () => {
     saveToStorage(STORAGE_KEY_API_PROVIDER, provider)
   }
 
-  const setLlmModel = (model: string) => {
-    llmModel.value = model
-    saveToStorage(STORAGE_KEY_LLM_MODEL, model)
-  }
-
-  // 헤더 생성 (LLM 설정 포함 — 빈 값은 전송하지 않아 서버 .env 폴백)
+  // 헤더 생성 (apiKey 있으면 override, 없으면 서버 .env 폴백)
   const getHeaders = (): Record<string, string> => {
     const headers: Record<string, string> = {
       'Accept-Language': 'ko'
     }
 
     if (apiKey.value) headers['X-LLM-Api-Key'] = apiKey.value
-    if (apiBase.value) headers['X-LLM-Api-Base'] = apiBase.value
-    if (llmModel.value) headers['X-LLM-Model'] = llmModel.value
 
     return headers
   }
-  
+
   return {
     activeTab,
     theme,
     apiKey,
     apiProvider,
-    apiBase,
-    llmModel,
     olapTransferData,
     watchAgentTransferData,
     pendingSchemaSearch,
@@ -264,13 +240,10 @@ export const useSessionStore = defineStore('session', () => {
     pendingSourceNavigation,
     ontologyTransferData,
     createNewSession,
-    clearSession,
     setTheme,
     toggleTheme,
     setApiKey,
     setApiProvider,
-    setApiBase,
-    setLlmModel,
     setActiveTab,
     goHome,
     getHeaders,
@@ -288,4 +261,3 @@ export const useSessionStore = defineStore('session', () => {
     consumeOntologyTransferData,
   }
 })
-
