@@ -9,7 +9,7 @@ import { useSessionStore } from '@/stores/session'
 import { useAnalyzerStore } from '@/stores/analyzer'
 import { storeToRefs } from 'pinia'
 import SettingsModal from './SettingsModal.vue'
-import { IconSearch, IconBell, IconSettings } from '@/components/icons'
+import { IconSearch, IconBell, IconSettings } from '@/shared/icons'
 import { getAppTitle } from '@/config/appSettings'
 
 const sessionStore = useSessionStore()

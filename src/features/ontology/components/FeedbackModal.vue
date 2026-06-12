@@ -3,7 +3,7 @@
  * FeedbackModal.vue
  * 온톨로지 스키마 수정 피드백 모달
  */
-import { IconX } from '@/components/icons'
+import { IconX } from '@/shared/icons'
 
 const props = defineProps<{
   isOpen: boolean

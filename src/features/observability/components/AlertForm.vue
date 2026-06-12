@@ -4,7 +4,7 @@
  * 알림 생성/편집 폼
  */
 import { ref } from 'vue'
-import { IconPlus } from '@/components/icons'
+import { IconPlus } from '@/shared/icons'
 
 const emit = defineEmits<{
   (e: 'cancel'): void

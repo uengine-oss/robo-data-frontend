@@ -23,7 +23,7 @@ import {
   IconTrash,
   IconEdit,
   IconKey
-} from '@/components/icons'
+} from '@/shared/icons'
 import { getAppTitle, setAppTitle, DEFAULT_APP_TITLE } from '@/config/appSettings'
 
 // ============================================================================

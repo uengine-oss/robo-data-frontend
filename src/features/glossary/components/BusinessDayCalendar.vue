@@ -7,7 +7,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { businessCalendarApi, type BusinessDay } from '@/services/api'
-import { IconPlus, IconTrash, IconChevronLeft, IconChevronRight, IconCheck, IconCalendar } from '@/components/icons'
+import { IconPlus, IconTrash, IconChevronLeft, IconChevronRight, IconCheck, IconCalendar } from '@/shared/icons'
 
 const sessionStore = useSessionStore()
 

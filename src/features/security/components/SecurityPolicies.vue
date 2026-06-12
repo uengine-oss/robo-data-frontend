@@ -4,7 +4,7 @@
  * 보안 정책 관리 UI
  */
 import { ref, onMounted } from 'vue'
-import { IconEdit, IconX } from '@/components/icons'
+import { IconEdit, IconX } from '@/shared/icons'
 
 interface SecurityPolicy {
   name: string

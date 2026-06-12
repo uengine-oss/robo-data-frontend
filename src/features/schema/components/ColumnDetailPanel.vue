@@ -162,14 +162,14 @@
 <script setup lang="ts">
 import { ref, computed, watch, markRaw, type Component } from 'vue'
 import type { Text2SqlColumnInfo } from '@/types'
-import IconSearch from '@/components/icons/IconSearch.vue'
-import IconTable from '@/components/icons/IconTable.vue'
-import IconLayers from '@/components/icons/IconLayers.vue'
-import IconCheck from '@/components/icons/IconCheck.vue'
-import IconSettings from '@/components/icons/IconSettings.vue'
-import IconGrid from '@/components/icons/IconGrid.vue'
-import IconClipboard from '@/components/icons/IconClipboard.vue'
-import IconSecurity from '@/components/icons/IconSecurity.vue'
+import IconSearch from '@/shared/icons/IconSearch.vue'
+import IconTable from '@/shared/icons/IconTable.vue'
+import IconLayers from '@/shared/icons/IconLayers.vue'
+import IconCheck from '@/shared/icons/IconCheck.vue'
+import IconSettings from '@/shared/icons/IconSettings.vue'
+import IconGrid from '@/shared/icons/IconGrid.vue'
+import IconClipboard from '@/shared/icons/IconClipboard.vue'
+import IconSecurity from '@/shared/icons/IconSecurity.vue'
 
 const props = defineProps<{
   columns: Text2SqlColumnInfo[]

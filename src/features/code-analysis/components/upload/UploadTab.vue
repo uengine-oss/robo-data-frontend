@@ -8,10 +8,10 @@ import DropZone from './DropZone.vue'
 import UploadModal from './UploadModal.vue'
 import UploadTree from './UploadTree.vue'
 import JsonViewer from './JsonViewer.vue'
-import DataConfirmModal from '@/components/common/DataConfirmModal.vue'
-import type { DataAction } from '@/components/common/DataConfirmModal.vue'
+import DataConfirmModal from '@/shared/components/DataConfirmModal.vue'
+import type { DataAction } from '@/shared/components/DataConfirmModal.vue'
 import { buildUploadTreeFromUploadedFiles, uniqueFilesByRelPath } from '@/utils/upload'
-import { IconFolder, IconDatabase, IconFile, IconFolderOpen, IconLightbulb, IconSettings, IconX, IconPlay, IconTrash } from '@/components/icons'
+import { IconFolder, IconDatabase, IconFile, IconFolderOpen, IconLightbulb, IconSettings, IconX, IconPlay, IconTrash } from '@/shared/icons'
 
 const projectStore = useAnalyzerStore()
 const sessionStore = useSessionStore()

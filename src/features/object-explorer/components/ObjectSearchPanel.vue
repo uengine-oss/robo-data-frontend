@@ -5,7 +5,7 @@
  */
 
 import { ref, computed } from 'vue'
-import { IconSearch, IconRefresh, IconChevronRight } from '@/components/icons'
+import { IconSearch, IconRefresh, IconChevronRight } from '@/shared/icons'
 
 // ============================================================================
 // 타입 정의

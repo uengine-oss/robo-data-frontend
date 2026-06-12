@@ -4,7 +4,7 @@
  * 데이터 품질 관리 페이지
  */
 import { ref, computed } from 'vue'
-import { IconSearch, IconPlus, IconCheck, IconAlertTriangle, IconChevronDown, IconChevronRight } from '@/components/icons'
+import { IconSearch, IconPlus, IconCheck, IconAlertTriangle, IconChevronDown, IconChevronRight } from '@/shared/icons'
 import TestCaseModal from './TestCaseModal.vue'
 
 // 현재 탭

@@ -7,7 +7,7 @@ import { computed, inject } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSessionStore } from '@/stores/session'
 import { FEATURES } from '@/config/features'
-import AlarmToast from '@/components/common/AlarmToast.vue'
+import AlarmToast from '@/shared/components/AlarmToast.vue'
 
 const sessionStore = useSessionStore()
 const { activeTab } = storeToRefs(sessionStore)

@@ -12,7 +12,7 @@ import type { GraphNode } from '@/types'
 import { useAnalyzerStore } from '@/stores/analyzer'
 import { getRelationshipGroups, getAttachedByType } from '@/utils/nodeRelationships'
 import NodeDetailBase from './NodeDetailBase.vue'
-import TextViewer from '@/components/common/TextViewer.vue'
+import TextViewer from '@/shared/components/TextViewer.vue'
 
 interface Props {
   node: GraphNode

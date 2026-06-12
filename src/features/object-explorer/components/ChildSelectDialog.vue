@@ -5,7 +5,7 @@
  * 사용자가 그래프에 추가할 노드를 선택할 수 있음
  */
 import { ref, computed, watch } from 'vue'
-import { IconX, IconCheck, IconSearch } from '@/components/icons'
+import { IconX, IconCheck, IconSearch } from '@/shared/icons'
 
 interface ChildNode {
   id: string

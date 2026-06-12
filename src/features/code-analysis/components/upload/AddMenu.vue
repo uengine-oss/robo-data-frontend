@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { IconPlus, IconFile, IconFolder } from '@/components/icons'
+import { IconPlus, IconFile, IconFolder } from '@/shared/icons'
 
 interface Props {
   title?: string

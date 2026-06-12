@@ -4,7 +4,7 @@
  * 역할 및 권한 관리 UI (Neo4j 기반 실제 데이터)
  */
 import { ref, onMounted } from 'vue'
-import { IconPlus, IconEdit, IconTrash, IconCheck, IconX, IconRefresh } from '@/components/icons'
+import { IconPlus, IconEdit, IconTrash, IconCheck, IconX, IconRefresh } from '@/shared/icons'
 import { getRoles, createRole, deleteRole as apiDeleteRole, getPermissions } from '@/services/security-api'
 import type { Role, Permission } from '@/services/security-api'
 

@@ -5,7 +5,7 @@
  */
 import { ref, computed, watch, onMounted } from 'vue'
 import { Teleport } from 'vue'
-import { IconX, IconCheck, IconPlay } from '@/components/icons'
+import { IconX, IconCheck, IconPlay } from '@/shared/icons'
 import DmnEditor from './DmnEditor.vue'
 
 interface BehaviorConfig {

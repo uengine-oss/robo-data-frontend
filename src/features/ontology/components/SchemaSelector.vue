@@ -6,7 +6,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { ontologyApi, type SchemaListItem } from '@/services/api'
 import { useOntologyStore } from '@/stores/ontology'
-import { IconRefresh, IconTrash, IconCheck, IconPlus } from '@/components/icons'
+import { IconRefresh, IconTrash, IconCheck, IconPlus } from '@/shared/icons'
 
 const emit = defineEmits<{
   (e: 'new-schema'): void

@@ -6,7 +6,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { glossaryApi, type Term, type GlossaryDomain, type GlossaryOwner, type GlossaryTag } from '@/services/api'
-import { IconX, IconPlus } from '@/components/icons'
+import { IconX, IconPlus } from '@/shared/icons'
 
 const props = defineProps<{
   glossaryId: string

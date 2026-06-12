@@ -9,7 +9,7 @@ import { ref, computed, inject } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { useNavigatorStore } from '@/stores/navigator'
 import { storeToRefs } from 'pinia'
-import { IconChevronDown, IconFolder } from '@/components/icons'
+import { IconChevronDown, IconFolder } from '@/shared/icons'
 import {
   FEATURE_GROUPS,
   FEATURES,

@@ -8,8 +8,8 @@
  * - 우측에 미리보기 표시
  */
 import { ref, computed, watch, onMounted } from 'vue'
-import ChartRenderer from '@/components/charts/ChartRenderer.vue'
-import { IconCheck } from '@/components/icons'
+import ChartRenderer from '@/shared/charts/ChartRenderer.vue'
+import { IconCheck } from '@/shared/icons'
 
 export interface ChartConfig {
   chartType: 'bar' | 'line' | 'pie' | 'map' | 'none'

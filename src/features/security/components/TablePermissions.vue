@@ -18,7 +18,7 @@ import {
   IconSecurity,
   IconCheck,
   IconX
-} from '@/components/icons'
+} from '@/shared/icons'
 
 // Types
 type AccessLevel = 'none' | 'read' | 'write' | 'admin' | 'inherited'

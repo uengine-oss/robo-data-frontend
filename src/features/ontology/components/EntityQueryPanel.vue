@@ -8,7 +8,7 @@ import type { OntologyNode, ReactExecutionResult } from '@/types'
 import { useSessionStore } from '@/stores/session'
 import { useOntologyStore } from '@/stores/ontology'
 import { useDatasourcesStore } from '@/stores/datasources'
-import { IconPlay, IconRefresh, IconDatabase, IconSearch, IconLink, IconCheck } from '@/components/icons'
+import { IconPlay, IconRefresh, IconDatabase, IconSearch, IconLink, IconCheck } from '@/shared/icons'
 import { ResultTable } from '@/features/text2sql'
 
 const props = defineProps<{

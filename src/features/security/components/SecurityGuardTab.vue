@@ -9,7 +9,7 @@ import RoleManagement from './RoleManagement.vue'
 import TablePermissions from './TablePermissions.vue'
 import AuditLogs from './AuditLogs.vue'
 import SecurityPolicies from './SecurityPolicies.vue'
-import { IconSecurity } from '@/components/icons'
+import { IconSecurity } from '@/shared/icons'
 
 type SubTab = 'users' | 'roles' | 'tables' | 'policies' | 'audit'
 

@@ -10,7 +10,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useOntologyStore } from '@/stores/ontology'
 import { storeToRefs } from 'pinia'
 import OntologyCanvas from './OntologyCanvas.vue'
-import { IconUpload, IconRefresh, IconPlay, IconCheck } from '@/components/icons'
+import { IconUpload, IconRefresh, IconPlay, IconCheck } from '@/shared/icons'
 import { ontologyApi, type SchemaListItem } from '@/services/api'
 
 const emit = defineEmits<{

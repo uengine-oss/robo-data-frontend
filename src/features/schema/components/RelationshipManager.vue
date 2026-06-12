@@ -107,7 +107,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { text2sqlApi } from '@/services/api'
 import { useText2SqlSchemaStore } from '@/stores/text2sql'
 import type { Text2SqlTableInfo } from '@/types'
-import { IconLayers, IconRefresh, IconChevronRight, IconTrash, IconPlus } from '@/components/icons'
+import { IconLayers, IconRefresh, IconChevronRight, IconTrash, IconPlus } from '@/shared/icons'
 
 const schemaStore = useText2SqlSchemaStore()
 

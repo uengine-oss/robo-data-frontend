@@ -8,12 +8,12 @@ import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import TableNode from './nodes/TableNode.vue'
 import TableDetailPanel from './TableDetailPanel.vue'
-import TextViewer from '@/components/common/TextViewer.vue'
+import TextViewer from '@/shared/components/TextViewer.vue'
 import CardinalityModal, { type ConnectionInfo, type Cardinality, type MatchStrategy } from './CardinalityModal.vue'
 import EditRelationshipDialog from './EditRelationshipDialog.vue'
 import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
 import type { Text2SqlTableInfo } from '@/types'
-import { IconTable, IconSearch, IconRefresh, IconTrash, IconZoomIn, IconZoomOut, IconMaximize, IconLink, IconFolder, IconChevronRight, IconDatabase } from '@/components/icons'
+import { IconTable, IconSearch, IconRefresh, IconTrash, IconZoomIn, IconZoomOut, IconMaximize, IconLink, IconFolder, IconChevronRight, IconDatabase } from '@/shared/icons'
 
 // Props
 const props = withDefaults(defineProps<{

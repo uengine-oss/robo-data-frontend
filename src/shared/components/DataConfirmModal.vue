@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { IconX, IconTrash, IconPlus, IconAlertTriangle } from '@/components/icons'
+import { IconX, IconTrash, IconPlus, IconAlertTriangle } from '@/shared/icons'
 
 export type DataAction = 'delete' | 'append' | 'cancel'
 export type NameCaseOption = 'original' | 'uppercase' | 'lowercase'

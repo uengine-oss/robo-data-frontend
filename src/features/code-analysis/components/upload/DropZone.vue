@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { logger } from '@/utils/logger'
 import { ref } from 'vue'
-import { IconUpload } from '@/components/icons'
+import { IconUpload } from '@/shared/icons'
 
 const emit = defineEmits<{
   'files-drop': [files: File[]]

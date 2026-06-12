@@ -6,7 +6,7 @@ import AddMenu from './AddMenu.vue'
 import type { SourceType } from '@/types'
 import type { DetectTypesResponse } from '@/services/api'
 import { buildUploadTree, collectAllFolderPaths, forceWebkitRelativePath, getNormalizedUploadPath, getParentFolderRelPath, mapPickedFilesToTarget, moveRelPathToFolder, normalizeSlashes, resolveSelectedTargetFolder, splitPath, type UploadTreeNode, uniqueFilesByRelPath } from '@/utils/upload'
-import { IconFolder, IconX, IconCheck, IconAlertTriangle, IconLoader } from '@/components/icons'
+import { IconFolder, IconX, IconCheck, IconAlertTriangle, IconLoader } from '@/shared/icons'
 import { useDatasourcesStore, type DataSource } from '@/stores/datasources'
 
 interface Props {

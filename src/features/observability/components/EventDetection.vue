@@ -13,7 +13,7 @@ import {
   IconTrash,
   IconBell,
   IconCheck
-} from '@/components/icons'
+} from '@/shared/icons'
 import { eventApi } from '@/services/api'
 import type { EventRule as ApiEventRule, SimulationRequest, SimulationResult } from '@/services/api'
 

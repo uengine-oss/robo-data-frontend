@@ -519,7 +519,7 @@ import { getText2SqlStageLabelKo } from '@/utils/text2sqlProgress'
 import { text2sqlApi } from '@/services/api'
 import {
   IconPlay, IconUpload, IconSettings, IconChevronDown, IconCopy
-} from '@/components/icons'
+} from '@/shared/icons'
 
 // 연결된 ObjectType 정보 타입
 interface LinkedObjectType {

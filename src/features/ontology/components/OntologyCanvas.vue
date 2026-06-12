@@ -19,7 +19,7 @@ import ComponentNode from './nodes/ComponentNode.vue'
 import EventNode from './nodes/EventNode.vue'
 import InstanceNode from './nodes/InstanceNode.vue'
 
-import { IconZoomIn, IconZoomOut, IconMaximize, IconRefresh } from '@/components/icons'
+import { IconZoomIn, IconZoomOut, IconMaximize, IconRefresh } from '@/shared/icons'
 
 const ontologyStore = useOntologyStore()
 const { canvasInstances } = storeToRefs(ontologyStore)

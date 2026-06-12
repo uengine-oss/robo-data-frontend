@@ -6,7 +6,7 @@
  * SSE를 통해 서버에서 알람을 수신하여 화면 우측 상단에 표시합니다.
  */
 import { ref, onMounted, onUnmounted } from 'vue'
-import { IconBell, IconCheck } from '@/components/icons'
+import { IconBell, IconCheck } from '@/shared/icons'
 
 // 알람 타입
 interface Alarm {

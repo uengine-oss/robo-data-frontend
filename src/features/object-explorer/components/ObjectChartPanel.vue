@@ -5,8 +5,8 @@
  * 각 ObjectType의 chartConfig 설정에 따라 적절한 차트 렌더링
  */
 import { ref, computed } from 'vue'
-import ChartRenderer from '@/components/charts/ChartRenderer.vue'
-import { IconChevronDown, IconSettings } from '@/components/icons'
+import ChartRenderer from '@/shared/charts/ChartRenderer.vue'
+import { IconChevronDown, IconSettings } from '@/shared/icons'
 
 interface ObjectNode {
   id: string

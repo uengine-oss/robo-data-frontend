@@ -11,7 +11,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import LineageGraph from './LineageGraph.vue'
 import LineageDetailPanel from './LineageDetailPanel.vue'
-import { IconRefresh, IconUpload, IconSearch } from '@/components/icons'
+import { IconRefresh, IconUpload, IconSearch } from '@/shared/icons'
 
 // API Gateway URL for OLAP service
 const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? 'http://localhost:9000'

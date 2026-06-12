@@ -24,7 +24,7 @@ import {
   IconPlus,
   IconSettings,
   IconChevronRight
-} from '@/components/icons'
+} from '@/shared/icons'
 
 import SqlNode from './nodes/SqlNode.vue'
 import ConditionNode from './nodes/ConditionNode.vue'

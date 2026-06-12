@@ -32,7 +32,7 @@ import {
   IconCalendar,
   IconSettings,
   IconEye,
-} from '@/components/icons'
+} from '@/shared/icons'
 
 /** 메뉴 그룹 식별자. 'bottom' 은 그룹 헤더 없이 플랫 렌더(분석/도구). */
 export type FeatureGroupId = 'physical' | 'domain' | 'dynamic' | 'standard' | 'bottom'

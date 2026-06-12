@@ -100,7 +100,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { IconPlay, IconX, IconSettings, IconChevronDown, IconAlertTriangle, IconUpload } from '@/components/icons'
+import { IconPlay, IconX, IconSettings, IconChevronDown, IconAlertTriangle, IconUpload } from '@/shared/icons'
 
 export interface ReactStartOptions {
   maxToolCalls: number

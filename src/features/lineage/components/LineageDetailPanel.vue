@@ -4,7 +4,7 @@
  * 선택된 노드의 상세 정보 패널
  */
 import { computed, ref } from 'vue'
-import { IconX } from '@/components/icons'
+import { IconX } from '@/shared/icons'
 import * as olapApi from '@/services/olap-api'
 
 // 타입 정의

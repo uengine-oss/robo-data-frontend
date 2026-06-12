@@ -4,7 +4,7 @@
  * 테스트 케이스 추가 모달
  */
 import { ref, computed } from 'vue'
-import { IconX, IconSearch, IconEdit } from '@/components/icons'
+import { IconX, IconSearch, IconEdit } from '@/shared/icons'
 
 const emit = defineEmits<{
   (e: 'close'): void

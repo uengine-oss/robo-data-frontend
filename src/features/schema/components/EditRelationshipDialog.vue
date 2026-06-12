@@ -8,7 +8,7 @@
 import { logger } from '@/utils/logger'
 import { ref, computed, onMounted, watch } from 'vue'
 import { Teleport } from 'vue'
-import { IconX, IconCheck, IconLink, IconTrash, IconAlertTriangle } from '@/components/icons'
+import { IconX, IconCheck, IconLink, IconTrash, IconAlertTriangle } from '@/shared/icons'
 
 const props = defineProps<{
   visible: boolean

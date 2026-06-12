@@ -105,7 +105,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { ReactStepModel } from '@/types'
-import { IconChevronLeft, IconChevronRight, IconCopy, IconBrain } from '@/components/icons'
+import { IconChevronLeft, IconChevronRight, IconCopy, IconBrain } from '@/shared/icons'
 
 const props = defineProps<{
   steps: ReactStepModel[]

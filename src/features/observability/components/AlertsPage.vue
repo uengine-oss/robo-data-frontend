@@ -4,7 +4,7 @@
  * 알림 관리 페이지
  */
 import { ref } from 'vue'
-import { IconPlus, IconBell, IconEdit, IconTrash } from '@/components/icons'
+import { IconPlus, IconBell, IconEdit, IconTrash } from '@/shared/icons'
 import AlertForm from './AlertForm.vue'
 
 // 현재 보기 모드

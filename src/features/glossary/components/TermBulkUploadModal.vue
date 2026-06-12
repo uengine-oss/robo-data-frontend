@@ -13,7 +13,7 @@ import {
   type BulkTermCandidate,
   type BulkUploadResponse
 } from '@/services/api'
-import { IconAlertTriangle, IconCheck, IconChevronDown, IconRefresh, IconUpload, IconX } from '@/components/icons'
+import { IconAlertTriangle, IconCheck, IconChevronDown, IconRefresh, IconUpload, IconX } from '@/shared/icons'
 
 const props = defineProps<{
   glossaryId: string

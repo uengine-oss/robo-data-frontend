@@ -4,7 +4,7 @@
  * 감사 로그 조회 UI (파일 시스템 기반 실제 데이터)
  */
 import { ref, onMounted, computed } from 'vue'
-import { IconSearch, IconRefresh, IconEye, IconX } from '@/components/icons'
+import { IconSearch, IconRefresh, IconEye, IconX } from '@/shared/icons'
 import { getAuditLogs } from '@/services/security-api'
 import type { AuditLog } from '@/services/security-api'
 

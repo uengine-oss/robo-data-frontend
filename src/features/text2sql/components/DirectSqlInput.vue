@@ -161,7 +161,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { IconPlay } from '@/components/icons'
+import { IconPlay } from '@/shared/icons'
 import ResultTable from './ResultTable.vue'
 import type { ReactExecutionResult } from '@/types'
 import { useDatasourcesStore } from '@/stores/datasources'

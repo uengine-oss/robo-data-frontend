@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import type { GraphNode } from '@/types'
 import NodeDetailBase from './NodeDetailBase.vue'
-import TextViewer from '@/components/common/TextViewer.vue'
+import TextViewer from '@/shared/components/TextViewer.vue'
 
 interface Props { node: GraphNode }
 const props = defineProps<Props>()

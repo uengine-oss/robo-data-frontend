@@ -6,7 +6,7 @@
  * - 차트 탭: 차트 설정
  */
 import { ref, computed, watch } from 'vue'
-import { IconX, IconEdit, IconCheck, IconBarChart } from '@/components/icons'
+import { IconX, IconEdit, IconCheck, IconBarChart } from '@/shared/icons'
 import ChartConfigTab from './ChartConfigTab.vue'
 
 export interface ChartConfig {

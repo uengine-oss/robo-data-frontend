@@ -90,7 +90,7 @@
 import { computed } from 'vue'
 import ResultTable from './ResultTable.vue'
 import type { ReactExecutionResult, ReactStepModel } from '@/types'
-import { IconCopy, IconAlertTriangle } from '@/components/icons'
+import { IconCopy, IconAlertTriangle } from '@/shared/icons'
 
 const props = defineProps<{
   status: 'idle' | 'running' | 'needs_user_input' | 'completed' | 'error'

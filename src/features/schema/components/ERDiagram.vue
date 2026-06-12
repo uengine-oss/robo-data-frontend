@@ -45,7 +45,7 @@ import { logger } from '@/utils/logger'
 import mermaid from 'mermaid'
 import { computed, onMounted, ref, watch } from 'vue'
 import type { Text2SqlTableInfo, Text2SqlColumnInfo } from '@/types'
-import { IconLayers, IconSearch, IconRefresh } from '@/components/icons'
+import { IconLayers, IconSearch, IconRefresh } from '@/shared/icons'
 
 const props = defineProps<{
   tables: Text2SqlTableInfo[]

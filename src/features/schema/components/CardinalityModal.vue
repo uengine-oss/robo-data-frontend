@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { IconX } from '@/components/icons'
+import { IconX } from '@/shared/icons'
 
 export interface ConnectionInfo {
   fromTable: string

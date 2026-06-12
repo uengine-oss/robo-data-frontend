@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, inject } from 'vue'
 import { storeToRefs } from 'pinia'
-import TopToolbar from '@/components/common/TopToolbar.vue'
-import SideNav from '@/components/common/SideNav.vue'
+import TopToolbar from '@/shared/components/TopToolbar.vue'
+import SideNav from '@/shared/components/SideNav.vue'
 import { NavigatorPanel } from '@/features/code-analysis'
-import FloatingProgressPanel from '@/components/common/FloatingProgressPanel.vue'
+import FloatingProgressPanel from '@/shared/components/FloatingProgressPanel.vue'
 import { RouterView } from 'vue-router'
 import { useAnalyzerStore } from '@/stores/analyzer'
 import { useSessionStore } from '@/stores/session'

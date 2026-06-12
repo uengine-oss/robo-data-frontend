@@ -94,10 +94,10 @@
 <script setup lang="ts">
 import { ref, computed, reactive, watch } from 'vue'
 import type { Text2SqlTableInfo } from '@/types'
-import IconChevronRight from '@/components/icons/IconChevronRight.vue'
-import IconDatabase from '@/components/icons/IconDatabase.vue'
-import IconFolder from '@/components/icons/IconFolder.vue'
-import IconTable from '@/components/icons/IconTable.vue'
+import IconChevronRight from '@/shared/icons/IconChevronRight.vue'
+import IconDatabase from '@/shared/icons/IconDatabase.vue'
+import IconFolder from '@/shared/icons/IconFolder.vue'
+import IconTable from '@/shared/icons/IconTable.vue'
 
 const props = defineProps<{
   tables: Text2SqlTableInfo[]
