@@ -516,7 +516,7 @@ import DirectSqlInput from './DirectSqlInput.vue'
 import type { ReactExecutionResult } from '@/types'
 import { buildSqlLineDiff, type PreviousSqlLine, type SqlDiffLine } from '@/utils/sqlLineDiff'
 import { getText2SqlStageLabelKo } from '@/utils/text2sqlProgress'
-import { text2sqlApi } from '@/services/api'
+import { text2sqlApi } from '@/features/text2sql/api'
 import {
   IconPlay, IconUpload, IconSettings, IconChevronDown, IconCopy
 } from '@/shared/icons'
