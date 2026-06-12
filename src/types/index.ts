@@ -34,6 +34,7 @@ export interface BackendRequestMetadata {
   datasourceName?: string | null  // 타겟 데이터 소스 이름
   inferFkRelations?: boolean  // FK 관계 자동 추론 여부 (기본: false)
   targetFolder?: string  // source/ 아래 강제 배치할 폴더 prefix (폴더 픽커로 안 올린 단일 파일에만 적용)
+  project_root?: string  // Electron 경로 모드: 분석할 로컬 폴더 절대경로. 미전달=업로드 모드(서버 data/source)
 }
 
 // ============================================================================
@@ -146,7 +147,9 @@ export interface ClassInfo {
 export type StreamMessageType = 'message' | 'error' | 'data' | 'status'
 
 /** 스트림 이벤트 타입 */
-export type StreamEventType = 'message' | 'data' | 'status' | 'complete' | 'error' | 'phase_event' | 'canvas_update'
+// NOTE: 코드분석 스트림은 별도 AnalyzeEvent 사용. 이 union 은 그 외 도메인(text2sql/olap/glossary 등)용.
+//       2단계에서 도메인별로 마저 분리 예정.
+export type StreamEventType = 'message' | 'data' | 'status' | 'complete' | 'error' | 'phase_event'
 
 /** 스트림 메시지 (UI 표시용) */
 export interface StreamMessage {
@@ -193,6 +196,52 @@ export interface StreamEvent {
   errorType?: string
   traceId?: string
   summary?: string
+}
+
+// ============================================================================
+// 코드분석 스트림 이벤트 (antlr + robo /analyze NDJSON) — 백엔드 wire 와 1:1
+//   진짜 필요한 6종만: 정보·에러·타겟감지·진행·그래프노드·그래프엣지 (의미 중복 없음)
+// ============================================================================
+
+/** 코드분석 스트림이 보내는 이벤트 종류(현재 백엔드 실제 방출분만). */
+export type AnalyzeEventType =
+  | 'message'             // antlr 파싱 단계 텍스트 로그
+  | 'error'               // 콘솔 에러
+  | 'warning'             // 비치명 경고 (콘솔 표시)
+  | 'detected'            // antlr 언어 자동감지 → sourceType (content=JSON)
+  | 'phase_event'         // analyzer 진행 단계 (구조화 progress)
+  | 'node_event'          // 그래프 노드 (op:merge)
+  | 'relationship_event'  // 그래프 엣지 (op:merge)
+// 백엔드가 더 보내지만(tool_event·todo_update·processing_event) 프론트 미렌더 → 2단계 진행강화.
+// stream_end 는 스트림 종료로 대체되어 불필요.
+
+/** relationship_event 의 끝점. Table 끝점은 id 대신 name 으로 온다. */
+export interface AnalyzeGraphRef {
+  label: string
+  id?: string
+  name?: string
+  rule_id?: string
+}
+
+/** 코드분석 NDJSON 한 줄. 필드는 type 별로만 채워진다(판별 유니온의 평탄 버전). */
+export interface AnalyzeEvent {
+  type: AnalyzeEventType
+  content?: string                              // message·error·detected(JSON 문자열)
+  // phase_event
+  phase?: number
+  name?: string
+  status?: 'started' | 'in_progress' | 'completed' | 'skipped' | 'error'
+  progress?: number
+  details?: Record<string, unknown>
+  // node_event
+  op?: 'merge'
+  label?: string
+  id?: string
+  props?: Record<string, unknown>
+  // relationship_event
+  rel_type?: string
+  from?: AnalyzeGraphRef
+  to?: AnalyzeGraphRef
 }
 
 // ============================================================================

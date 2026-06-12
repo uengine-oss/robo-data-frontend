@@ -11,9 +11,6 @@ import JsonViewer from './JsonViewer.vue'
 import DataConfirmModal from '@/components/common/DataConfirmModal.vue'
 import type { DataAction } from '@/components/common/DataConfirmModal.vue'
 import { buildUploadTreeFromUploadedFiles, uniqueFilesByRelPath } from '@/utils/upload'
-import { roboApi, type DetectTypesResponse } from '@/services/api'
-import type { FileTypeResult } from '@/services/api'
-void (0 as unknown as FileTypeResult) // suppress unused warning
 import { IconFolder, IconDatabase, IconFile, IconFolderOpen, IconLightbulb, IconSettings, IconX, IconPlay, IconTrash } from '@/components/icons'
 
 const projectStore = useAnalyzerStore()
@@ -23,7 +20,9 @@ const {
   uploadedDdlFiles,
   isProcessing,
   showDataConfirmModal,
-  pendingNodeCount
+  pendingNodeCount,
+  isPathMode,
+  projectRoot
 } = storeToRefs(projectStore)
 
 // 인제스천 재시작
@@ -32,6 +31,15 @@ const handleRestartPipeline = async () => {
     await projectStore.restartPipeline()
   } catch (error) {
     logger.error('인제스천 실패:', error)
+  }
+}
+
+// 경로 모드(Electron): host가 준 로컬 폴더를 바로 분석
+const handleAnalyzePath = async () => {
+  try {
+    await projectStore.analyzeProjectPath()
+  } catch (error) {
+    logger.error('경로 분석 실패:', error)
   }
 }
 
@@ -54,10 +62,6 @@ const selectedRelPath = ref<string | null>(null)
 const showModal = ref(false)
 const pendingFiles = ref<File[]>([])
 
-// 자동 감지 결과
-const detectedTypes = ref<DetectTypesResponse | null>(null)
-const isDetecting = ref(false)
-
 // 열린 탭 관리
 interface OpenTab {
   id: string
@@ -75,7 +79,6 @@ const activeTab = computed(() =>
 
 // 하이라이팅할 라인 번호
 const highlightedLine = ref<number | null>(null)
-const highlightedLineRef = ref<HTMLElement | null>(null)
 
 // JSON 파일 여부 확인
 const isJsonFile = computed(() => 
@@ -92,73 +95,10 @@ const handleOpenModal = () => {
   showModal.value = true
 }
 
-// 파일 내용 읽기 유틸리티
-const readFileContent = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = () => reject(reader.error)
-    reader.readAsText(file)
-  })
-}
-
-// 분석 대상 확장자 목록 (DDL은 .txt 등 다양한 확장자 가능)
-const ANALYZABLE_EXTENSIONS = ['.java', '.c', '.h', '.sql', '.pls', '.pck', '.pkb', '.pks', '.trg', '.fnc', '.prc', '.py', '.xml', '.txt', '.ddl']
-
-// 파일 드롭 시 - 파일 분석 후 모달 열기 (자동 타입 감지 포함)
-const handleFilesDrop = async (files: File[]) => {
+// 파일 드롭 시 - 모달 열기 (언어는 파싱 단계에서 antlr 가 자동 감지)
+const handleFilesDrop = (files: File[]) => {
   pendingFiles.value = files
-  detectedTypes.value = null
-  
-  // 모달 먼저 열기 (로딩 표시)
-  isDetecting.value = true
   showModal.value = true
-  
-  try {
-    // [주석] 타입 감지 API 비활성화 — 업로드는 그대로 동작, 소스 타입은 사용자가 직접 선택
-    // const analyzableFiles = files.filter(f => {
-    //   const ext = f.name.toLowerCase().match(/\.[^.]+$/)?.[0] || ''
-    //   return ANALYZABLE_EXTENSIONS.includes(ext)
-    // })
-    // if (analyzableFiles.length > 0) {
-    //   const filesToAnalyze = analyzableFiles.slice(0, 100)
-    //   const fileContents = await Promise.all(
-    //     filesToAnalyze.map(async (file) => {
-    //       try {
-    //         const content = await readFileContent(file)
-    //         return {
-    //           fileName: file.webkitRelativePath || file.name,
-    //           content: content.slice(0, 50000)
-    //         }
-    //       } catch {
-    //         return { fileName: file.name, content: '' }
-    //       }
-    //     })
-    //   )
-    //   const result = await roboApi.detectTypes(fileContents)
-    //   detectedTypes.value = result
-    //   const ddlFileNames = new Set(
-    //     result.files
-    //       .filter(f => f.fileType === 'oracle_ddl' || f.fileType === 'postgresql_ddl')
-    //       .map(f => f.fileName)
-    //   )
-    //   if (ddlFileNames.size > 0) {
-    //     pendingFiles.value = pendingFiles.value.map(file => {
-    //       const filePath = file.webkitRelativePath || file.name
-    //       if (filePath.toLowerCase().startsWith('ddl/') || filePath.toLowerCase().includes('/ddl/')) return file
-    //       if (ddlFileNames.has(filePath)) {
-    //         const fileName = filePath.split('/').pop() || file.name
-    //         Object.defineProperty(file, 'webkitRelativePath', { value: `ddl/${fileName}`, writable: false, configurable: true })
-    //       }
-    //       return file
-    //     })
-    //   }
-    // }
-  } catch (error) {
-    logger.error('[UploadTab] 파일 타입 감지 실패:', error)
-  } finally {
-    isDetecting.value = false
-  }
 }
 
 // 모달에서 파일 추가 시
@@ -173,17 +113,14 @@ const handleFilesUpdated = (updatedFiles: File[]) => {
 }
 
 // 업로드 확인
-const handleUploadConfirm = async (metadata: { sourceType: import('@/types').SourceType; datasource?: any; inferFkRelations?: boolean }) => {
+const handleUploadConfirm = async (metadata: { datasource?: any; inferFkRelations?: boolean }) => {
   showModal.value = false
-  
+
   if (pendingFiles.value.length === 0) {
     alert('업로드할 파일이 없습니다. 파일을 먼저 추가해주세요.')
     return
   }
-  
-  // 모달에서 선택한 소스 타입을 store에 설정
-  projectStore.setSourceType(metadata.sourceType)
-  
+
   // 데이터 소스 이름 설정 (있는 경우)
   if (metadata.datasource) {
     projectStore.setDatasourceName(metadata.datasource.name)
@@ -477,11 +414,31 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
 <template>
   <div class="upload-tab">
     <div class="upload-main">
-      <!-- 좌측: 드롭존 또는 파일/DDL 목록 -->
+      <!-- 좌측: (경로 모드) 폴더 분석 / (업로드 모드) 드롭존 또는 파일·DDL 목록 -->
       <div class="upload-left">
-        <template v-if="!hasUploadedFiles">
-          <DropZone 
-            @files-drop="handleFilesDrop" 
+        <!-- 경로 모드(Electron): host가 준 로컬 폴더를 업로드 없이 바로 분석 -->
+        <template v-if="isPathMode">
+          <div class="path-mode-panel">
+            <div class="path-mode-header">
+              <IconFolder :size="18" />
+              <span>로컬 폴더 분석</span>
+            </div>
+            <div class="path-mode-path" :title="projectRoot || ''">{{ projectRoot }}</div>
+            <button
+              class="btn btn--primary path-mode-btn"
+              @click="handleAnalyzePath"
+              :disabled="isProcessing"
+            >
+              <IconPlay :size="16" />
+              <span>{{ isProcessing ? '분석 중...' : '분석 시작' }}</span>
+            </button>
+            <p class="path-mode-hint">이 폴더를 직접 분석합니다 (업로드 없음 · 언어 자동 감지).</p>
+          </div>
+        </template>
+
+        <template v-else-if="!hasUploadedFiles">
+          <DropZone
+            @files-drop="handleFilesDrop"
             @open-modal="handleOpenModal"
           />
           
@@ -649,11 +606,9 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
     </div>
     
     <!-- 업로드 모달 -->
-    <UploadModal 
+    <UploadModal
       v-if="showModal"
       :initial-files="pendingFiles"
-      :detected-types="detectedTypes"
-      :is-detecting="isDetecting"
       @confirm="handleUploadConfirm"
       @cancel="showModal = false"
       @add-files="handleAddFiles"
@@ -680,6 +635,44 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
   overflow: hidden;
   background: var(--color-bg);
   position: relative;
+}
+
+.path-mode-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  height: 100%;
+  padding: 40px;
+  text-align: center;
+}
+
+.path-mode-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.path-mode-path {
+  max-width: 100%;
+  padding: 10px 14px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: monospace;
+  font-size: 13px;
+  color: var(--color-text-light);
+  word-break: break-all;
+}
+
+.path-mode-hint {
+  font-size: 12px;
+  color: var(--color-text-light);
+  margin: 0;
 }
 
 .upload-main {

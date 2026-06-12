@@ -30,10 +30,10 @@ import type {
   Neo4jRelationship,
   StreamMessage,
   NameCaseOption,
+  AnalyzeEvent,
 } from '@/types'
 import { useSessionStore } from './session'
-import { useSchemaCanvasStore } from './schemaCanvas'
-import { antlrApi, roboApi, type PipelineStatus, type PipelinePhaseInfo } from '@/services/api'
+import { antlrApi, roboApi } from '@/services/api'
 
 // ============================================================================
 // 라벨 분류 — 멀티라벨에서 sub-label 우선 (역할 라벨은 후순위)
@@ -129,6 +129,8 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const sourceType = ref<SourceType>('java')
   const ddl = ref<string[]>([])
   const nameCaseOption = ref<'original' | 'uppercase' | 'lowercase'>('original')
+  // Electron 경로 모드: host(architect)가 넘긴 로컬 폴더 절대경로. null이면 브라우저 업로드 모드.
+  const projectRoot = ref<string | null>(null)
 
   // ----- 파일 -----
   const uploadedFiles = ref<UploadedFile[]>([])
@@ -240,19 +242,6 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     linkMap.value = new Map()
   }
 
-  function deleteNodeAndRelationships(nodeId: string): void {
-    const newNodeMap = new Map(nodeMap.value)
-    const newLinkMap = new Map(linkMap.value)
-    newNodeMap.delete(nodeId)
-    for (const [linkId, link] of linkMap.value.entries()) {
-      if (link.source === nodeId || link.target === nodeId) {
-        newLinkMap.delete(linkId)
-      }
-    }
-    nodeMap.value = newNodeMap
-    linkMap.value = newLinkMap
-  }
-
   // ----- 콘솔 메시지 -----
   const consoleMessages = ref<StreamMessage[]>([])
 
@@ -287,33 +276,51 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     graphEventIdCounter = 0
   }
 
-  function lookupInBatch(nodes: Neo4jNode[], nodeId: string): string {
-    const found = nodes.find(n => String(n['Node ID']) === nodeId)
-    if (!found) return nodeId
-    return resolveNodeName(found['Properties'] || {}, found['Labels'] || [], nodeId)
+  /**
+   * 스트림 단건 그래프 노드 병합 (node_event). nodeMap 갱신 + 이벤트 피드 추가.
+   * 백엔드가 함수 단위로 node_event 를 누적 emit → 라이브 렌더.
+   */
+  function mergeStreamNode(label: string, id: string, props: Record<string, unknown>): void {
+    const labels = label ? [label] : []
+    const node: GraphNode = { id, labels, properties: props }
+    const next = new Map(nodeMap.value)
+    next.set(id, node)
+    nodeMap.value = next
+
+    const nodeName = resolveNodeName(props, labels, id)
+    nodeNameCache.set(id, nodeName)
+    addGraphEvent({ type: 'node', action: 'created', nodeType: extractSubLabel(labels), nodeName })
   }
 
-  function extractAndAddGraphEvents(nodes: Neo4jNode[], relationships: Neo4jRelationship[]): void {
-    for (const node of nodes) {
-      const labels = node['Labels'] || []
-      const properties = node['Properties'] || {}
-      const nodeType = extractSubLabel(labels) || (properties.type as string) || 'Unknown'
-      const nodeId = String(node['Node ID'])
-      const nodeName = resolveNodeName(properties, labels, nodeId)
-      nodeNameCache.set(nodeId, nodeName)
-      addGraphEvent({ type: 'node', action: 'created', nodeType, nodeName })
+  /**
+   * 스트림 단건 그래프 엣지 병합 (relationship_event). Table 끝점은 id 대신 name 으로 온다.
+   * hidden 타입/끝점이면 적재하지 않는다(graphData 표시 정책과 동일).
+   */
+  function mergeStreamRelationship(
+    relType: string,
+    from: { id: string; rule_id?: string },
+    to: { id?: string; name?: string; rule_id?: string },
+    props: Record<string, unknown>,
+  ): void {
+    const target = to.id ?? to.name
+    if (!target) return
+    const link: GraphLink = {
+      id: `${relType}|${from.id}|${target}|${from.rule_id ?? ''}|${to.rule_id ?? ''}`,
+      source: from.id,
+      target,
+      type: relType,
+      properties: props,
     }
+    if (isHiddenLink(link, nodeMap.value)) return
+    const next = new Map(linkMap.value)
+    next.set(link.id, link)
+    linkMap.value = next
 
-    for (const rel of relationships) {
-      const relType = rel['Type'] || 'Unknown'
-      const startId = String(rel['Start Node ID'])
-      const endId = String(rel['End Node ID'])
-
-      const sourceName = nodeNameCache.get(startId) ?? lookupInBatch(nodes, startId)
-      const targetName = nodeNameCache.get(endId) ?? lookupInBatch(nodes, endId)
-
-      addGraphEvent({ type: 'relationship', action: 'created', relType, source: sourceName, target: targetName })
-    }
+    addGraphEvent({
+      type: 'relationship', action: 'created', relType,
+      source: nodeNameCache.get(from.id) ?? from.id,
+      target: nodeNameCache.get(target) ?? target,
+    })
   }
 
   // ----- 프로세스 상태 -----
@@ -333,11 +340,8 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const pendingUploadMeta = ref<BackendRequestMetadata | null>(null)
   const pendingAction = ref<'upload' | 'restart' | null>(null)
 
-  // ----- 파이프라인 제어 -----
-  const pipelineStatus = ref<PipelineStatus | null>(null)
+  // ----- 파이프라인 제어 (진행 상태는 분석 NDJSON 스트림의 phase_event 단일 채널) -----
   const isPipelinePaused = ref(false)
-  const isPipelineStopped = ref(false)
-  const pipelinePhases = ref<PipelinePhaseInfo[]>([])
 
   // ----- 메타데이터 -----
   const datasourceName = ref<string | null>(null)
@@ -354,17 +358,16 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     nameCase: nameCaseOption.value,
     datasourceName: datasourceName.value,
     inferFkRelations: inferFkRelations.value,
+    project_root: projectRoot.value || undefined,   // 경로 모드면 antlr·robo 둘 다 이 경로 사용
   }))
 
-  const isValidConfig = computed(() =>
-    Boolean(uploadedFiles.value.length > 0 || uploadedDdlFiles.value.length > 0)
-  )
+  /** host가 projectRoot를 넘겼는가 = Electron 경로 모드(업로드 없이 로컬 폴더 분석). */
+  const isPathMode = computed(() => !!projectRoot.value)
 
   // ----- Setters -----
-  function setSourceType(type: SourceType): void { sourceType.value = type }
+  function setProjectRoot(p: string | null): void { projectRoot.value = p }
   function setDatasourceName(name: string | null): void { datasourceName.value = name }
   function setInferFkRelations(value: boolean): void { inferFkRelations.value = value }
-  function setDdl(d: string[]): void { ddl.value = d }
 
   // ----- 개별 단계 함수 -----
 
@@ -392,18 +395,99 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
       analyzeMeta.value,
       sessionStore.getHeaders(),
       (event) => {
-        if ((event.type as string) === 'system_log') return
-        if (event.content) {
-          addMessage(event.type === 'error' ? 'error' : 'message', event.content)
-        }
-        const graph = event.graph
-        if (graph?.Nodes || graph?.Relationships) {
-          updateGraphData(graph.Nodes || [], graph.Relationships || [])
+        switch (event.type) {
+          case 'detected': applyDetected(event.content); break
+          case 'message':
+          case 'error':
+          case 'warning': logToConsole(event); break
+          // antlr 'complete'·system_log 등은 무시(스트림 종료로 처리)
         }
       }
     )
 
     addMessage('message', '✅ 파싱 완료')
+  }
+
+  /**
+   * antlr 가 자동 감지한 언어를 sourceType 에 반영 — 사용자가 수동 선택하지 않아도 자동.
+   * sourceType 이 analyzeMeta(strategy/target) 와 UML 탭 노출을 파생하므로, 이것만 세팅하면
+   * 이어지는 doAnalyze(robo) 가 올바른 strategy 를 받는다.
+   */
+  function applyDetected(content?: string): void {
+    if (!content) return
+    try {
+      const detected = JSON.parse(content) as { target?: SourceType }
+      if (detected.target) {
+        sourceType.value = detected.target
+        saveToStorage()
+      }
+    } catch (e) {
+      logger.warn('[analyzer] detected 이벤트 파싱 실패:', e)
+    }
+  }
+
+  // ----- 스트림 이벤트 핸들러 (콜백은 type 별로 이 함수들에 디스패치만) -----
+
+  /** message·error·warning → 콘솔 메시지 피드. */
+  function logToConsole(event: AnalyzeEvent): void {
+    if (event.content) addMessage(event.type === 'error' ? 'error' : 'message', event.content)
+  }
+
+  /** phase_event(analyzer 진행) → 진행 상태 refs 갱신. */
+  function applyPhaseEvent(event: AnalyzeEvent): void {
+    const phaseNum = event.phase ?? 0
+    const phaseName = event.name || ''
+    const phaseProgress = event.progress ?? 0
+    const details = event.details || {}
+    const prefix = `[${phaseNum + 1}/${totalPhases.value}] ${phaseName}`
+
+    if (event.status === 'started') {
+      if (typeof details.totalPhases === 'number') totalPhases.value = details.totalPhases
+      currentPhase.value = phaseNum
+      currentPhaseName.value = phaseName
+      currentPhaseProgress.value = 0
+      currentStep.value = `${prefix} 시작...`
+      if (!dynamicSteps.value.some(s => s.num === phaseNum)) {
+        dynamicSteps.value = [...dynamicSteps.value, { num: phaseNum, name: phaseName }]
+      }
+    } else if (event.status === 'in_progress') {
+      if (phaseNum === currentPhase.value) {
+        currentPhaseProgress.value = Math.max(currentPhaseProgress.value, phaseProgress)
+      } else {
+        currentPhase.value = phaseNum
+        currentPhaseName.value = phaseName
+        currentPhaseProgress.value = phaseProgress
+      }
+      if (details.step) {
+        const stepDetail = details.done && details.total
+          ? `${details.step} (${details.done}/${details.total})`
+          : details.step
+        currentStep.value = `${prefix} - ${stepDetail} (${phaseProgress}%)`
+      } else if (details.completed && details.total) {
+        currentStep.value = `${prefix} (${details.completed}/${details.total}) ${phaseProgress}%`
+      } else {
+        currentStep.value = `${prefix} 진행 중... (${phaseProgress}%)`
+      }
+    } else if (event.status === 'completed') {
+      currentPhaseProgress.value = 100
+      currentStep.value = `${prefix} 완료 ✓`
+    } else if (event.status === 'skipped') {
+      currentStep.value = `${prefix} 건너뜀`
+    }
+  }
+
+  /** node_event/relationship_event(라이브 그래프) → 그래프 병합. */
+  function applyGraphEvent(event: AnalyzeEvent): void {
+    if (event.type === 'node_event' && event.id) {
+      mergeStreamNode(event.label ?? '', event.id, event.props ?? {})
+    } else if (event.type === 'relationship_event' && event.from?.id && event.to && event.rel_type) {
+      mergeStreamRelationship(
+        event.rel_type,
+        { id: event.from.id, rule_id: event.from.rule_id },
+        event.to,
+        event.props ?? {},
+      )
+    }
   }
 
   async function doAnalyze(): Promise<void> {
@@ -412,145 +496,18 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     dynamicSteps.value = []
     addMessage('message', '🔍 분석 시작...')
 
-    const schemaCanvasStore = useSchemaCanvasStore()
-
     await roboApi.analyze(
       analyzeMeta.value,
       sessionStore.getHeaders(),
       (event) => {
-        // backend 가 'system_log' 도 보내지만 StreamEventType 에는 정의되지 않음 — 사용자 콘솔에 노출 X
-        if ((event.type as string) === 'system_log') return
-        if (event.content) {
-          addMessage(event.type === 'error' ? 'error' : 'message', event.content)
-        }
-
-        if (event.type === 'phase_event') {
-          const phaseNum = event.phase as number
-          const phaseName = event.name || ''
-          const phaseProgress = (event.progress as number) || 0
-          const details = event.details || {}
-
-          if (event.status === 'started') {
-            if (details.totalPhases && typeof details.totalPhases === 'number') {
-              totalPhases.value = details.totalPhases
-            }
-            currentPhase.value = phaseNum
-            currentPhaseName.value = phaseName
-            currentPhaseProgress.value = 0
-            currentStep.value = `[${phaseNum + 1}/${totalPhases.value}] ${phaseName} 시작...`
-            if (!dynamicSteps.value.some(s => s.num === phaseNum)) {
-              dynamicSteps.value = [...dynamicSteps.value, { num: phaseNum, name: phaseName }]
-            }
-          } else if (event.status === 'in_progress') {
-            if (phaseNum === currentPhase.value) {
-              currentPhaseProgress.value = Math.max(currentPhaseProgress.value, phaseProgress)
-            } else {
-              currentPhase.value = phaseNum
-              currentPhaseName.value = phaseName
-              currentPhaseProgress.value = phaseProgress
-            }
-
-            if (details.step) {
-              const stepDetail = details.done && details.total
-                ? `${details.step} (${details.done}/${details.total})`
-                : details.step
-              currentStep.value = `[${phaseNum + 1}/${totalPhases.value}] ${phaseName} - ${stepDetail} (${phaseProgress}%)`
-            } else if (details.completed && details.total) {
-              currentStep.value = `[${phaseNum + 1}/${totalPhases.value}] ${phaseName} (${details.completed}/${details.total}) ${phaseProgress}%`
-            } else {
-              currentStep.value = `[${phaseNum + 1}/${totalPhases.value}] ${phaseName} 진행 중... (${phaseProgress}%)`
-            }
-          } else if (event.status === 'completed') {
-            currentPhaseProgress.value = 100
-            currentStep.value = `[${phaseNum + 1}/${totalPhases.value}] ${phaseName} 완료 ✓`
-          } else if (event.status === 'skipped') {
-            currentStep.value = `[${phaseNum + 1}/${totalPhases.value}] ${phaseName} 건너뜀`
-          }
-        }
-
-        if (event.type === 'canvas_update' && event.updateType && event.tableName) {
-          schemaCanvasStore.handleCanvasUpdate({
-            updateType: event.updateType,
-            tableName: event.tableName,
-            schema: event.schema,
-            field: event.field,
-            changes: event.changes,
-          })
-        }
-
-        const graph = event.graph
-        if (graph?.Nodes || graph?.Relationships) {
-          updateGraphData(graph.Nodes || [], graph.Relationships || [])
-          extractAndAddGraphEvents(graph.Nodes || [], graph.Relationships || [])
-
-          for (const node of graph.Nodes || []) {
-            const labels = node.Labels || []
-            const props = node.Properties || {}
-
-            if (labels.includes('Table') && props.name) {
-              const tableName = props.name as string
-              const schema = (props.schema as string) || 'public'
-
-              schemaCanvasStore.handleCanvasUpdate({
-                updateType: 'table_added',
-                tableName,
-                schema,
-                changes: {
-                  description: props.description || props.analyzed_description,
-                  column_count: props.column_count,
-                },
-              })
-
-              if (props.description || props.analyzed_description) {
-                schemaCanvasStore.handleCanvasUpdate({
-                  updateType: 'table_description',
-                  tableName,
-                  schema,
-                  changes: {
-                    description: props.description || props.analyzed_description,
-                  },
-                })
-              }
-            }
-
-            if (labels.includes('Column') && props.name && props.table_name) {
-              schemaCanvasStore.handleCanvasUpdate({
-                updateType: 'column_description',
-                tableName: props.table_name as string,
-                field: props.name as string,
-                changes: {
-                  description: props.description || props.analyzed_description,
-                  dtype: props.dtype,
-                  nullable: props.nullable,
-                },
-              })
-            }
-          }
-
-          for (const rel of graph.Relationships || []) {
-            const relType = rel.Type || ''
-            const relProps = rel.Properties || {}
-
-            if (relType === 'FK_TO_TABLE') {
-              const fromTable = (relProps.from_table as string) || ''
-              const toTable = (relProps.to_table as string) || ''
-              const sourceColumn = (relProps.sourceColumn as string) || (relProps.source_column as string) || ''
-              const targetColumn = (relProps.targetColumn as string) || (relProps.target_column as string) || ''
-
-              if (fromTable && toTable) {
-                schemaCanvasStore.handleCanvasUpdate({
-                  updateType: 'relationship_added',
-                  tableName: fromTable,
-                  changes: {
-                    from_column: sourceColumn,
-                    to_table: toTable,
-                    to_column: targetColumn,
-                    source: relProps.source || 'procedure',
-                  },
-                })
-              }
-            }
-          }
+        switch (event.type) {
+          case 'phase_event': applyPhaseEvent(event); break
+          case 'node_event':
+          case 'relationship_event': applyGraphEvent(event); break
+          case 'message':
+          case 'error':
+          case 'warning': logToConsole(event); break
+          // system_log·tool_event·todo_update·processing_event 등 미렌더 타입은 무시
         }
       }
     )
@@ -751,7 +708,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     clearMessages()
 
     try {
-      addMessage('message', `🔄 인제스천 재시작... (타입: ${sourceType.value})`)
+      addMessage('message', '🔄 인제스천 시작...')
       await doParse()
       await doAnalyze()
 
@@ -765,6 +722,15 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     } finally {
       isProcessing.value = false
     }
+  }
+
+  /** 경로 모드(Electron): 업로드 없이 host가 준 로컬 폴더를 바로 파싱→분석(antlr·robo가 그 경로 직접 읽음). */
+  async function analyzeProjectPath(): Promise<void> {
+    if (!projectRoot.value) {
+      addMessage('error', '❌ 분석할 폴더 경로가 없습니다.')
+      return
+    }
+    await executeRestartPipeline()
   }
 
   function removeFile(relPath: string, type: 'file' | 'ddl' = 'file'): void {
@@ -797,28 +763,9 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     addMessage('message', `🗑️ ${deletedCount}개 파일 전체 삭제됨`)
   }
 
-  async function fetchPipelineStatus(): Promise<void> {
-    try {
-      pipelineStatus.value = await roboApi.getPipelineStatus(sessionStore.getHeaders())
-      isPipelinePaused.value = pipelineStatus.value?.isPaused || false
-      isPipelineStopped.value = pipelineStatus.value?.isStopped || false
-    } catch (error) {
-      logger.error('파이프라인 상태 조회 실패:', error)
-    }
-  }
-
-  async function fetchPipelinePhases(): Promise<void> {
-    try {
-      pipelinePhases.value = await roboApi.getPipelinePhases()
-    } catch (error) {
-      logger.error('파이프라인 단계 정보 조회 실패:', error)
-    }
-  }
-
   async function pausePipeline(): Promise<void> {
     try {
       const result = await roboApi.controlPipeline('pause', sessionStore.getHeaders())
-      pipelineStatus.value = result.status
       isPipelinePaused.value = result.status.isPaused
       if (result.success) addMessage('message', '⏸️ 파이프라인 일시정지 요청됨')
     } catch (error) {
@@ -829,22 +776,10 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   async function resumePipeline(): Promise<void> {
     try {
       const result = await roboApi.controlPipeline('resume', sessionStore.getHeaders())
-      pipelineStatus.value = result.status
       isPipelinePaused.value = result.status.isPaused
       if (result.success) addMessage('message', '▶️ 파이프라인 재개됨')
     } catch (error) {
       addMessage('error', `▶️ 재개 실패: ${error}`)
-    }
-  }
-
-  async function stopPipeline(): Promise<void> {
-    try {
-      const result = await roboApi.controlPipeline('stop', sessionStore.getHeaders())
-      pipelineStatus.value = result.status
-      isPipelineStopped.value = result.status.isStopped
-      if (result.success) addMessage('message', '⏹️ 파이프라인 중단됨')
-    } catch (error) {
-      addMessage('error', `⏹️ 중단 실패: ${error}`)
     }
   }
 
@@ -900,20 +835,18 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     pendingNodeCount,
 
     // 파이프라인 제어
-    pipelineStatus,
     isPipelinePaused,
-    isPipelineStopped,
-    pipelinePhases,
 
     metadata,
     analyzeMeta,
-    isValidConfig,
+    projectRoot,
+    isPathMode,
+    setProjectRoot,
+    analyzeProjectPath,
 
     // Setters
-    setSourceType,
     setDatasourceName,
     setInferFkRelations,
-    setDdl,
 
     // Messages
     addMessage,
@@ -932,15 +865,11 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     clearAllFiles,
 
     // Pipeline control
-    fetchPipelineStatus,
-    fetchPipelinePhases,
     pausePipeline,
     resumePipeline,
-    stopPipeline,
 
     // Misc
     deleteAllData,
-    deleteNodeAndRelationships,
     reset,
   }
 })

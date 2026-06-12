@@ -1,36 +1,22 @@
 <script setup lang="ts">
 /**
- * SideNav.vue
- * 왼쪽 아이콘 사이드바 네비게이션
+ * SideNav.vue — 왼쪽 아이콘 사이드바.
+ * 메뉴는 features.config 단일 진실원천에서 파생한다(하드코딩 그룹/중복 함수 제거).
+ *   - 임베드(host=architect) → embeddable 핵심만 플랫 렌더
+ *   - 단독 실행            → 그룹 메뉴(확장 가능) + 분석/도구(bottom) 플랫
  */
-import { ref } from 'vue'
+import { ref, computed, inject } from 'vue'
 import { useSessionStore } from '@/stores/session'
-import { storeToRefs } from 'pinia'
-import {
-  IconFolder,
-  IconDatabase,
-  IconMessageSquare,
-  IconLineage,
-  IconBook,
-  IconBarChart,
-  IconObservability,
-  IconDataQuality,
-  IconIncident,
-  IconAlertConfig,
-  IconEventDetection,
-  IconWatchAgent,
-  IconChevronDown,
-  IconOntology,
-  IconSearch,
-  IconWhatIf,
-  IconSecurity,
-  IconCalendar,
-  IconSettings,
-  IconEye
-} from '@/components/icons'
-import type { Component } from 'vue'
-
 import { useNavigatorStore } from '@/stores/navigator'
+import { storeToRefs } from 'pinia'
+import { IconChevronDown, IconFolder } from '@/components/icons'
+import {
+  FEATURE_GROUPS,
+  FEATURES,
+  EMBEDDED_FEATURES,
+  type FeatureDef,
+  type FeatureGroupId,
+} from '@/config/features'
 
 const sessionStore = useSessionStore()
 const navigatorStore = useNavigatorStore()
@@ -38,244 +24,76 @@ const { activeTab } = storeToRefs(sessionStore)
 const { isPanelOpen: isNavigatorPanelOpen, activeView: graphActiveView }
   = storeToRefs(navigatorStore)
 
-const toggleNavigator = () => {
-  navigatorStore.setPanelOpen(!isNavigatorPanelOpen.value)
-}
+const isEmbedded = inject<boolean>('isEmbedded', false)
 
-// 메뉴 확장 상태
-const isPhysicalLayerExpanded = ref(true)  // 피지컬 레이어 기본 펼침
-const isDomainLayerExpanded = ref(false)
-const isDynamicLayerExpanded = ref(false)
-const isStandardMgmtExpanded = ref(false)  // 기준관리 그룹
+// 표시 대상(임베드=핵심만) + 메뉴 숨김(hidden) 제외.
+const visibleFeatures = computed<FeatureDef[]>(() =>
+  (isEmbedded ? EMBEDDED_FEATURES : FEATURES).filter(f => !f.hidden)
+)
 
-interface NavItem {
-  id: string
-  label: string
-  icon: Component
-}
+// 그룹 헤더가 있는 그룹(비어있는 그룹 제외). 'bottom' 은 헤더 없이 플랫.
+const groups = computed(() =>
+  FEATURE_GROUPS
+    .map(g => ({ ...g, children: visibleFeatures.value.filter(f => f.group === g.id) }))
+    .filter(g => g.children.length > 0)
+)
+const bottomItems = computed(() => visibleFeatures.value.filter(f => f.group === 'bottom'))
 
-interface NavGroup {
-  id: string
-  label: string
-  icon: Component
-  children: NavItem[]
-}
+// 그룹 펼침 상태 — defaultExpanded 로 초기화. (그룹별 중복 ref/함수 → 단일 맵으로 일반화)
+const expanded = ref<Record<string, boolean>>(
+  Object.fromEntries(FEATURE_GROUPS.map(g => [g.id, !!g.defaultExpanded]))
+)
+const toggleGroup = (id: FeatureGroupId) => { expanded.value[id] = !expanded.value[id] }
+const isGroupActive = (children: FeatureDef[]) => children.some(c => c.id === activeTab.value)
 
-// 피지컬 레이어 그룹 (코드 + 데이터 소스 + 스키마 관리 + 자연어 질의 + Security Guard)
-const physicalLayerGroup: NavGroup = {
-  id: 'physical-layer',
-  label: '피지컬 레이어',
-  icon: IconDatabase,
-  children: [
-    { id: 'upload', label: '코드', icon: IconFolder },
-    { id: 'datasources', label: '데이터 소스', icon: IconDatabase },
-    { id: 'graph', label: '스키마 관리', icon: IconDatabase },
-    { id: 'text2sql', label: '자연어 질의', icon: IconMessageSquare },
-    { id: 'security-guard', label: '보안관리자', icon: IconSecurity }
-  ]
-}
-
-// 도메인 레이어 그룹 (도메인 스키마 + 온톨로지 관리 + 오브젝트 탐색기 + 자연어 질의)
-// 참고: '문서에서 스키마 추출' (id: 'ontology')은 숨김 처리
-const domainLayerGroup: NavGroup = {
-  id: 'domain-layer',
-  label: '도메인 레이어',
-  icon: IconOntology,
-  children: [
-    { id: 'schema-modeling', label: '도메인 스키마', icon: IconDatabase },
-    { id: 'multi-layer-ontology', label: '온톨로지 관리', icon: IconLineage },
-    { id: 'object-explorer', label: '오브젝트 탐색기', icon: IconSearch },
-    { id: 'ontology-viewer', label: '온톨로지 뷰어', icon: IconEye },
-    // { id: 'ontology', label: '문서에서 스키마 추출', icon: IconOntology },  // 임시 숨김
-    { id: 'domain-text2sql', label: '자연어 질의', icon: IconMessageSquare }
-  ]
-}
-
-// 다이나믹 레이어 그룹 (What-If 시뮬레이터 + 관찰 가능성)
-const dynamicLayerGroup: NavGroup = {
-  id: 'dynamic-layer',
-  label: '다이나믹 레이어',
-  icon: IconObservability,
-  children: [
-    { id: 'whatif', label: 'What-If 시뮬레이터', icon: IconWhatIf },
-    { id: 'data-quality', label: '데이터 품질', icon: IconDataQuality },
-    { id: 'incident-manager', label: '사고 관리자', icon: IconIncident },
-    { id: 'alerts', label: '알림들', icon: IconAlertConfig },
-    { id: 'event-detection', label: '이벤트 감지', icon: IconEventDetection },
-    { id: 'watch-agent', label: '감시 에이전트', icon: IconWatchAgent }
-  ]
-}
-
-// 기준관리 그룹 (용어 관리 + 영업일 캘린더)
-const standardMgmtGroup: NavGroup = {
-  id: 'standard-mgmt',
-  label: '기준관리',
-  icon: IconSettings,
-  children: [
-    { id: 'glossary', label: '용어 관리', icon: IconBook },
-    { id: 'business-calendar', label: '영업일 캘린더', icon: IconCalendar }
-  ]
-}
-
-// 하단 메뉴 (분석/도구) - 용어 관리를 기준관리 그룹으로 이동
-const bottomNavItems: NavItem[] = [
-  { id: 'lineage', label: '데이터 리니지', icon: IconLineage },
-  { id: 'olap', label: 'OLAP 분석', icon: IconBarChart }
-]
-
-const setActiveTab = (tabId: string) => {
-  sessionStore.setActiveTab(tabId)
-}
-
-// 피지컬 레이어 그룹 토글
-const togglePhysicalLayer = () => {
-  isPhysicalLayerExpanded.value = !isPhysicalLayerExpanded.value
-}
-
-const isPhysicalLayerActive = () => {
-  return physicalLayerGroup.children.some(child => activeTab.value === child.id)
-}
-
-// 도메인 레이어 그룹 토글
-const toggleDomainLayer = () => {
-  isDomainLayerExpanded.value = !isDomainLayerExpanded.value
-}
-
-const isDomainLayerActive = () => {
-  return domainLayerGroup.children.some(child => activeTab.value === child.id)
-}
-
-// 다이나믹 레이어 그룹 토글
-const toggleDynamicLayer = () => {
-  isDynamicLayerExpanded.value = !isDynamicLayerExpanded.value
-}
-
-const isDynamicLayerActive = () => {
-  return dynamicLayerGroup.children.some(child => activeTab.value === child.id)
-}
-
-// 기준관리 그룹 토글
-const toggleStandardMgmt = () => {
-  isStandardMgmtExpanded.value = !isStandardMgmtExpanded.value
-}
-
-const isStandardMgmtActive = () => {
-  return standardMgmtGroup.children.some(child => activeTab.value === child.id)
-}
+const setActiveTab = (id: string) => sessionStore.setActiveTab(id)
+const toggleNavigator = () => navigatorStore.setPanelOpen(!isNavigatorPanelOpen.value)
 </script>
 
 <template>
   <nav class="side-nav">
     <div class="nav-items">
-      <!-- 피지컬 레이어 그룹 (코드 + 데이터 소스 + 스키마 관리 + 자연어 질의) -->
-      <div class="nav-group" :class="{ expanded: isPhysicalLayerExpanded, active: isPhysicalLayerActive() }">
-        <button class="nav-item nav-group-header" :class="{ active: isPhysicalLayerActive() }"
-          @click="togglePhysicalLayer" :title="physicalLayerGroup.label">
-          <span class="nav-icon">
-            <component :is="physicalLayerGroup.icon" :size="20" />
-          </span>
-          <span class="nav-label">{{ physicalLayerGroup.label }}</span>
-          <span class="nav-chevron" :class="{ rotated: isPhysicalLayerExpanded }">
-            <IconChevronDown :size="14" />
-          </span>
+      <!-- 임베드: 핵심 메뉴 플랫 렌더 -->
+      <template v-if="isEmbedded">
+        <button v-for="f in visibleFeatures" :key="f.id" class="nav-item"
+          :class="{ active: activeTab === f.id }" @click="setActiveTab(f.id)" :title="f.label">
+          <span class="nav-icon"><component :is="f.icon" :size="20" /></span>
+          <span class="nav-label">{{ f.label }}</span>
         </button>
+      </template>
 
-        <div class="nav-group-children" v-show="isPhysicalLayerExpanded">
-          <button v-for="child in physicalLayerGroup.children" :key="child.id" class="nav-item nav-child"
-            :class="{ active: activeTab === child.id }" @click="setActiveTab(child.id)" :title="child.label">
-            <span class="nav-icon">
-              <component :is="child.icon" :size="18" />
-            </span>
-            <span class="nav-label">{{ child.label }}</span>
-          </button>
-        </div>
-      </div>
+      <!-- 단독: 그룹 메뉴 + 분석/도구 -->
+      <template v-else>
+        <template v-for="g in groups" :key="g.id">
+          <div v-if="g.dividerBefore" class="nav-divider"></div>
+          <div class="nav-group" :class="{ expanded: expanded[g.id], active: isGroupActive(g.children) }">
+            <button class="nav-item nav-group-header" :class="{ active: isGroupActive(g.children) }"
+              @click="toggleGroup(g.id)" :title="g.label">
+              <span class="nav-icon"><component :is="g.icon" :size="20" /></span>
+              <span class="nav-label">{{ g.label }}</span>
+              <span class="nav-chevron" :class="{ rotated: expanded[g.id] }">
+                <IconChevronDown :size="14" />
+              </span>
+            </button>
+            <div class="nav-group-children" v-show="expanded[g.id]">
+              <button v-for="child in g.children" :key="child.id" class="nav-item nav-child"
+                :class="{ active: activeTab === child.id }" @click="setActiveTab(child.id)" :title="child.label">
+                <span class="nav-icon"><component :is="child.icon" :size="18" /></span>
+                <span class="nav-label">{{ child.label }}</span>
+              </button>
+            </div>
+          </div>
+        </template>
 
-      <!-- 도메인 레이어 그룹 (확장 가능) -->
-      <div class="nav-group" :class="{ expanded: isDomainLayerExpanded, active: isDomainLayerActive() }">
-        <button class="nav-item nav-group-header" :class="{ active: isDomainLayerActive() }"
-          @click="toggleDomainLayer" :title="domainLayerGroup.label">
-          <span class="nav-icon">
-            <component :is="domainLayerGroup.icon" :size="20" />
-          </span>
-          <span class="nav-label">{{ domainLayerGroup.label }}</span>
-          <span class="nav-chevron" :class="{ rotated: isDomainLayerExpanded }">
-            <IconChevronDown :size="14" />
-          </span>
+        <!-- 분석/도구 (그룹 헤더 없이 플랫) -->
+        <button v-for="item in bottomItems" :key="item.id" class="nav-item"
+          :class="{ active: activeTab === item.id }" @click="setActiveTab(item.id)" :title="item.label">
+          <span class="nav-icon"><component :is="item.icon" :size="20" /></span>
+          <span class="nav-label">{{ item.label }}</span>
         </button>
+      </template>
 
-        <div class="nav-group-children" v-show="isDomainLayerExpanded">
-          <button v-for="child in domainLayerGroup.children" :key="child.id" class="nav-item nav-child"
-            :class="{ active: activeTab === child.id }" @click="setActiveTab(child.id)" :title="child.label">
-            <span class="nav-icon">
-              <component :is="child.icon" :size="18" />
-            </span>
-            <span class="nav-label">{{ child.label }}</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- 다이나믹 레이어 그룹 (확장 가능) -->
-      <div class="nav-group" :class="{ expanded: isDynamicLayerExpanded, active: isDynamicLayerActive() }">
-        <button class="nav-item nav-group-header" :class="{ active: isDynamicLayerActive() }"
-          @click="toggleDynamicLayer" :title="dynamicLayerGroup.label">
-          <span class="nav-icon">
-            <component :is="dynamicLayerGroup.icon" :size="20" />
-          </span>
-          <span class="nav-label">{{ dynamicLayerGroup.label }}</span>
-          <span class="nav-chevron" :class="{ rotated: isDynamicLayerExpanded }">
-            <IconChevronDown :size="14" />
-          </span>
-        </button>
-
-        <div class="nav-group-children" v-show="isDynamicLayerExpanded">
-          <button v-for="child in dynamicLayerGroup.children" :key="child.id" class="nav-item nav-child"
-            :class="{ active: activeTab === child.id }" @click="setActiveTab(child.id)" :title="child.label">
-            <span class="nav-icon">
-              <component :is="child.icon" :size="18" />
-            </span>
-            <span class="nav-label">{{ child.label }}</span>
-          </button>
-        </div>
-      </div>
-      
-      <!-- 구분선 -->
-      <div class="nav-divider"></div>
-
-      <!-- 기준관리 그룹 (용어 관리 + 영업일 캘린더) -->
-      <div class="nav-group" :class="{ expanded: isStandardMgmtExpanded, active: isStandardMgmtActive() }">
-        <button class="nav-item nav-group-header" :class="{ active: isStandardMgmtActive() }"
-          @click="toggleStandardMgmt" :title="standardMgmtGroup.label">
-          <span class="nav-icon">
-            <component :is="standardMgmtGroup.icon" :size="20" />
-          </span>
-          <span class="nav-label">{{ standardMgmtGroup.label }}</span>
-          <span class="nav-chevron" :class="{ rotated: isStandardMgmtExpanded }">
-            <IconChevronDown :size="14" />
-          </span>
-        </button>
-
-        <div class="nav-group-children" v-show="isStandardMgmtExpanded">
-          <button v-for="child in standardMgmtGroup.children" :key="child.id" class="nav-item nav-child"
-            :class="{ active: activeTab === child.id }" @click="setActiveTab(child.id)" :title="child.label">
-            <span class="nav-icon">
-              <component :is="child.icon" :size="18" />
-            </span>
-            <span class="nav-label">{{ child.label }}</span>
-          </button>
-        </div>
-      </div>
-      
-      <!-- 하단 메뉴: 분석/도구 -->
-      <button v-for="item in bottomNavItems" :key="item.id" class="nav-item" :class="{ active: activeTab === item.id }"
-        @click="setActiveTab(item.id)" :title="item.label">
-        <span class="nav-icon">
-          <component :is="item.icon" :size="20" />
-        </span>
-        <span class="nav-label">{{ item.label }}</span>
-      </button>
-
-      <!-- Navigator 패널 토글 (GraphTab 의 Graph 하위 뷰일 때만 노출) -->
+      <!-- Navigator 패널 토글 (GraphTab 의 Graph 하위 뷰일 때만) -->
       <template v-if="activeTab === 'graph' && graphActiveView === 'graph'">
         <div class="nav-divider"></div>
         <button class="nav-item" :class="{ active: isNavigatorPanelOpen }"

@@ -1,65 +1,27 @@
 <script setup lang="ts">
-import UploadTab from '@/components/upload/UploadTab.vue'
-import GraphTab from '@/components/graph/GraphTab.vue'
-import LineageTab from '@/components/lineage/LineageTab.vue'
-import GlossaryTab from '@/components/glossary/GlossaryTab.vue'
-import BusinessDayCalendar from '@/components/glossary/BusinessDayCalendar.vue'
-import Text2SqlTab from '@/components/text2sql/Text2SqlTab.vue'
-import LangChainTab from '@/components/langchain-text2sql/LangChainTab.vue'
-import { OlapTab } from '@/components/olap'
-import { DataQuality, IncidentManager, AlertsPage, EventDetection, WatchAgent } from '@/components/observability'
-import { OntologyTab } from '@/components/ontology'
-import ObjectTypeModeler from '@/components/domain/ObjectTypeModeler.vue'
-import MultiLayerOntologyViewer from '@/components/domain/MultiLayerOntologyViewer.vue'
-import ObjectExplorerTab from '@/components/object-explorer/ObjectExplorerTab.vue'
-import OntologyViewerRemote from '@/components/domain/OntologyViewerRemote.vue'
-import DataSourcesTab from '@/components/datasources/DataSourcesTab.vue'
-import AlarmToast from '@/components/common/AlarmToast.vue'
-import { WhatIfSimulator } from '@/components/whatif'
-import { SecurityGuardTab } from '@/components/security'
-import { useSessionStore } from '@/stores/session'
+/**
+ * HomeView — 활성 탭의 기능 컴포넌트 하나를 렌더.
+ * 탭→컴포넌트 매핑은 features.config 단일 진실원천에서 파생(하드코딩 사다리 제거).
+ */
+import { computed, inject } from 'vue'
 import { storeToRefs } from 'pinia'
+import { useSessionStore } from '@/stores/session'
+import { FEATURES } from '@/config/features'
+import AlarmToast from '@/components/common/AlarmToast.vue'
 
 const sessionStore = useSessionStore()
 const { activeTab } = storeToRefs(sessionStore)
+const isEmbedded = inject<boolean>('isEmbedded', false)
+
+// 활성 탭의 기능 — 없으면 첫 기능(코드)으로 폴백.
+const activeFeature = computed(() => FEATURES.find(f => f.id === activeTab.value) ?? FEATURES[0])
 </script>
 
 <template>
   <div class="home-view">
-    <!-- 현재 활성 탭에 따라 컴포넌트 표시 -->
-    <UploadTab v-if="activeTab === 'upload'" />
-    <DataSourcesTab v-else-if="activeTab === 'datasources'" />
-    <GraphTab v-else-if="activeTab === 'graph'" />
-    <LineageTab v-else-if="activeTab === 'lineage'" />
-    <GlossaryTab v-else-if="activeTab === 'glossary'" />
-    <BusinessDayCalendar v-else-if="activeTab === 'business-calendar'" />
-    <OlapTab v-else-if="activeTab === 'olap'" />
-    <Text2SqlTab v-else-if="activeTab === 'text2sql'" />
-    <Text2SqlTab v-else-if="activeTab === 'domain-text2sql'" :domain-layer-mode="true" />
-    <LangChainTab v-else-if="activeTab === 'langchain'" />
-    
-    <!-- Observability 탭들 -->
-    <DataQuality v-else-if="activeTab === 'data-quality'" />
-    <IncidentManager v-else-if="activeTab === 'incident-manager'" />
-    <AlertsPage v-else-if="activeTab === 'alerts'" />
-    <EventDetection v-else-if="activeTab === 'event-detection'" />
-    <WatchAgent v-else-if="activeTab === 'watch-agent'" />
-    
-    <!-- 도메인 레이어 뷰어 -->
-    <ObjectTypeModeler v-else-if="activeTab === 'schema-modeling'" />
-    <MultiLayerOntologyViewer v-else-if="activeTab === 'multi-layer-ontology'" />
-    <ObjectExplorerTab v-else-if="activeTab === 'object-explorer'" />
-    <OntologyViewerRemote v-else-if="activeTab === 'ontology-viewer'" />
-    <OntologyTab v-else-if="activeTab === 'ontology'" />
-    
-    <!-- What-If 시뮬레이터 -->
-    <WhatIfSimulator v-else-if="activeTab === 'whatif'" />
-    
-    <!-- Security Guard -->
-    <SecurityGuardTab v-else-if="activeTab === 'security-guard'" />
-    
-    <!-- 실시간 알람 토스트 (항상 표시) -->
-    <AlarmToast />
+    <component :is="activeFeature.component" v-bind="activeFeature.props" />
+    <!-- 실시간 알람 토스트 (단독 실행 시에만) -->
+    <AlarmToast v-if="!isEmbedded" />
   </div>
 </template>
 

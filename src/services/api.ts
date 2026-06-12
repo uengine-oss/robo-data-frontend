@@ -13,6 +13,7 @@ import type {
   FileUploadResponse, 
   ParseResponse,
   StreamEvent,
+  AnalyzeEvent,
   Text2SqlTableInfo,
   Text2SqlColumnInfo,
   ReactRequest,
@@ -428,13 +429,13 @@ export const antlrApi = {
   async parseStream(
     metadata: BackendRequestMetadata,
     headers: Headers,
-    onEvent: StreamCallback
+    onEvent: (event: AnalyzeEvent) => void
   ): Promise<void> {
     await streamFetch(
       `${ANTLR_BASE_URL}/parsing`,
       metadata,
       headers,
-      onEvent
+      onEvent as unknown as StreamCallback
     )
   }
 }
@@ -442,12 +443,6 @@ export const antlrApi = {
 // ============================================================================
 // ROBO Analyzer API
 // ============================================================================
-
-/** 파일 타입 감지 요청 항목 */
-interface FileContentForDetection {
-  fileName: string
-  content: string
-}
 
 /** 파일 타입 감지 결과 항목 */
 export interface FileTypeResult {
@@ -497,13 +492,13 @@ export const roboApi = {
   async analyze(
     metadata: BackendRequestMetadata,
     headers: Headers,
-    onEvent: StreamCallback
+    onEvent: (event: AnalyzeEvent) => void
   ): Promise<void> {
     await streamFetch(
-      `${ROBO_BASE_URL}/analyze/`,
+      `${ROBO_BASE_URL}/analyze`,
       metadata,
       headers,
-      onEvent
+      onEvent as unknown as StreamCallback
     )
   },
   
@@ -565,37 +560,7 @@ export const roboApi = {
   },
 
   // ========== 파이프라인 제어 API ==========
-
-  /**
-   * 파이프라인 상태 조회
-   */
-  async getPipelineStatus(headers: Headers): Promise<PipelineStatus> {
-    const response = await fetch(`${ROBO_BASE_URL}/pipeline/status`, {
-      method: 'GET',
-      headers
-    })
-    
-    if (!response.ok) {
-      await handleHttpError(response)
-    }
-    
-    return response.json()
-  },
-
-  /**
-   * 파이프라인 단계 정보 조회
-   */
-  async getPipelinePhases(): Promise<PipelinePhaseInfo[]> {
-    const response = await fetch(`${ROBO_BASE_URL}/pipeline/phases`, {
-      method: 'GET'
-    })
-    
-    if (!response.ok) {
-      await handleHttpError(response)
-    }
-    
-    return response.json()
-  },
+  // 진행 상태는 분석 NDJSON 스트림의 phase_event 단일 채널 — 별도 폴링 엔드포인트(/pipeline/*) 없음.
 
   /**
    * 파이프라인 제어 (일시정지/재개/중단)
