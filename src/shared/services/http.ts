@@ -13,7 +13,7 @@ import type { StreamEvent } from '@/shared/types'
 export const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? '/api/gateway'
 export const ANTLR_BASE_URL = `${API_GATEWAY_URL}/antlr`
 export const ROBO_BASE_URL = `${API_GATEWAY_URL}/robo`
-export const TEXT2SQL_BASE_URL = `${API_GATEWAY_URL}/text2sql`
+export const TEXT2SQL_BASE_URL = import.meta.env.VITE_TEXT2SQL_API_URL || `${API_GATEWAY_URL}/text2sql`
 export const ONTOLOGY_BASE_URL = `${API_GATEWAY_URL}/ontology`
 
 export type StreamCallback = (event: StreamEvent) => void
@@ -24,7 +24,50 @@ export type Headers = Record<string, string>
 // ============================================================================
 
 /**
- * HTTP 에러 처리 — 서버 JSON 오류 응답을 파싱해 정확한 메시지 추출 + 서비스별 안내.
+ * 서비스 다운(404/502/503) 시 안내할 메시지 — URL 매칭 기반 dispatch.
+ * if/else-if 체인 대신 테이블로 두어, 서비스 추가 시 한 항목만 늘린다.
+ */
+const SERVICE_DOWN_STATUSES = new Set([404, 502, 503])
+const SERVICE_DOWN_GUIDANCE: ReadonlyArray<{ match: string; message: string }> = [
+  {
+    match: '/antlr/',
+    message:
+      '🔧 ANTLR 파서 서비스가 동작하지 않습니다.\n\n' +
+      '다음을 확인해주세요:\n' +
+      '• ANTLR 서비스가 실행 중인지 확인 (포트 8081)\n' +
+      '• API Gateway가 정상 동작하는지 확인 (포트 9000)\n\n' +
+      '서비스 시작 명령어:\n' +
+      'cd antlr-code-parser && mvn spring-boot:run'
+  },
+  {
+    match: '/robo/',
+    message:
+      '🔧 ROBO Analyzer 서비스가 동작하지 않습니다.\n\n' +
+      '다음을 확인해주세요:\n' +
+      '• robo-analyzer 서비스가 실행 중인지 확인 (포트 5502)\n' +
+      '• API Gateway가 정상 동작하는지 확인 (포트 9000)'
+  },
+  {
+    match: '/text2sql/',
+    message:
+      '🔧 Text2SQL 서비스가 동작하지 않습니다.\n\n' +
+      '다음을 확인해주세요:\n' +
+      '• neo4j-text2sql 서비스가 실행 중인지 확인 (포트 8000)\n' +
+      '• API Gateway가 정상 동작하는지 확인 (포트 9000)'
+  },
+  {
+    match: '/whatif/',
+    message:
+      '🔧 What-If 시뮬레이터 서비스가 동작하지 않습니다.\n\n' +
+      '다음을 확인해주세요:\n' +
+      '• What-If 서비스가 실행 중인지 확인 (포트 8005)\n' +
+      '• API Gateway가 정상 동작하는지 확인 (포트 9000)'
+  }
+]
+
+/**
+ * HTTP 에러 처리 — 서비스 다운이면 친절 안내, 아니면 서버 JSON 오류에서 메시지 추출.
+ * 모든 도메인 api 가 공유하는 단일 에러 핸들러(중복 정의 금지).
  */
 export async function handleHttpError(response: Response): Promise<never> {
   const errorText = await response.text().catch(() => '')
@@ -33,65 +76,34 @@ export async function handleHttpError(response: Response): Promise<never> {
   console.error(`[API Error] URL: ${response.url}`)
   console.error(`[API Error] Response body:`, errorText)
 
-  const url = response.url
-
-  // ANTLR 서비스 관련 에러 처리
-  if (url.includes('/antlr/')) {
-    if (response.status === 404 || response.status === 502 || response.status === 503) {
-      throw new Error(
-        '🔧 ANTLR 파서 서비스가 동작하지 않습니다.\n\n' +
-        '다음을 확인해주세요:\n' +
-        '• ANTLR 서비스가 실행 중인지 확인 (포트 8081)\n' +
-        '• API Gateway가 정상 동작하는지 확인 (포트 9000)\n\n' +
-        '서비스 시작 명령어:\n' +
-        'cd antlr-code-parser && mvn spring-boot:run'
-      )
+  // 1) 서비스 다운(404/502/503) — URL 매칭 안내
+  if (SERVICE_DOWN_STATUSES.has(response.status)) {
+    const guidance = SERVICE_DOWN_GUIDANCE.find(g => response.url.includes(g.match))
+    if (guidance) {
+      throw new Error(guidance.message)
     }
   }
 
-  // ROBO Analyzer 서비스 관련 에러 처리
-  if (url.includes('/robo/')) {
-    if (response.status === 404 || response.status === 502 || response.status === 503) {
-      throw new Error(
-        '🔧 ROBO Analyzer 서비스가 동작하지 않습니다.\n\n' +
-        '다음을 확인해주세요:\n' +
-        '• robo-analyzer 서비스가 실행 중인지 확인 (포트 5502)\n' +
-        '• API Gateway가 정상 동작하는지 확인 (포트 9000)'
-      )
-    }
-  }
+  // 2) 서버 JSON 오류 응답에서 detail/message 추출
+  throw new Error(parseErrorMessage(errorText, response.status))
+}
 
-  // Text2SQL 서비스 관련 에러 처리
-  if (url.includes('/text2sql/')) {
-    if (response.status === 404 || response.status === 502 || response.status === 503) {
-      throw new Error(
-        '🔧 Text2SQL 서비스가 동작하지 않습니다.\n\n' +
-        '다음을 확인해주세요:\n' +
-        '• neo4j-text2sql 서비스가 실행 중인지 확인 (포트 8000)\n' +
-        '• API Gateway가 정상 동작하는지 확인 (포트 9000)'
-      )
-    }
-  }
-
-  // JSON 응답에서 detail 필드 추출 시도
-  let errorMessage = `HTTP ${response.status}`
+/** 서버 오류 본문에서 사람이 읽을 메시지 추출 (내부) */
+function parseErrorMessage(errorText: string, status: number): string {
   try {
     const errorJson = JSON.parse(errorText)
     if (errorJson.detail) {
-      errorMessage = errorJson.detail
-      if (errorJson.error_type) {
-        errorMessage = `[${errorJson.error_type}] ${errorMessage}`
-      }
-    } else if (errorJson.message) {
-      errorMessage = errorJson.message
-    } else {
-      errorMessage = errorText || `HTTP ${response.status}`
+      return errorJson.error_type
+        ? `[${errorJson.error_type}] ${errorJson.detail}`
+        : errorJson.detail
+    }
+    if (errorJson.message) {
+      return errorJson.message
     }
   } catch {
-    errorMessage = errorText || `HTTP ${response.status}`
+    // JSON 아님 — 원문 또는 상태코드로 폴백
   }
-
-  throw new Error(errorMessage)
+  return errorText || `HTTP ${status}`
 }
 
 /** JSON POST 요청 */

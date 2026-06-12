@@ -12,7 +12,8 @@
 
 // API Gateway를 통한 접근
 // Gateway: /api/gateway/whatif/** -> http://localhost:8005/api/**
-const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? '/api/gateway'
+import { API_GATEWAY_URL, handleHttpError } from '@/shared/services/http'
+
 const WHATIF_BASE_URL = `${API_GATEWAY_URL}/whatif`
 
 // ============================================================================
@@ -218,29 +219,6 @@ export interface PresentationSlide {
   bullets: string[]
   notes: string
   chart_suggestion: string
-}
-
-// ============================================================================
-// HTTP 유틸리티
-// ============================================================================
-
-async function handleHttpError(response: Response): Promise<never> {
-  const errorText = await response.text().catch(() => '')
-  
-  console.error(`[WhatIF API Error] ${response.status} ${response.statusText}`)
-  console.error(`[WhatIF API Error] URL: ${response.url}`)
-  console.error(`[WhatIF API Error] Response body:`, errorText)
-  
-  // JSON 응답에서 detail 필드 추출 시도
-  let errorMessage = `HTTP ${response.status}`
-  try {
-    const errorJson = JSON.parse(errorText)
-    errorMessage = errorJson.detail || errorJson.message || errorText
-  } catch {
-    errorMessage = errorText || `HTTP ${response.status}`
-  }
-  
-  throw new Error(errorMessage)
 }
 
 // ============================================================================

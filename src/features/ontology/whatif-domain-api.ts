@@ -6,7 +6,7 @@
  * API Gateway 경로: /api/gateway/ontology/../whatif/* → 8002/whatif/*
  */
 
-const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? '/api/gateway'
+import { API_GATEWAY_URL } from '@/shared/services/http'
 
 // domain-layer의 whatif 경로
 // Gateway 라우트: /api/gateway/domain-whatif/** → http://127.0.0.1:8002/whatif/**

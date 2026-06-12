@@ -3,8 +3,9 @@
  * API Gateway를 통해 연결됨
  */
 
-// API Gateway URL - 모든 마이크로서비스 요청의 단일 진입점
-const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? 'http://localhost:9000'
+// API Gateway URL - 모든 마이크로서비스 요청의 단일 진입점(공유 코어)
+import { API_GATEWAY_URL } from '@/shared/services/http'
+
 const LANGCHAIN_API_URL = `${API_GATEWAY_URL}/langchain/api`
 
 export interface LangChainRequest {

@@ -4,8 +4,9 @@
  * API Gateway를 통해 연결됨
  */
 
-// API Gateway URL - 모든 마이크로서비스 요청의 단일 진입점
-const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? 'http://localhost:9000'
+// API Gateway URL - 모든 마이크로서비스 요청의 단일 진입점(공유 코어)
+import { API_GATEWAY_URL } from '@/shared/services/http'
+
 const OLAP_API_BASE = `${API_GATEWAY_URL}/olap/api`
 
 async function fetchJson(url: string, options?: RequestInit) {

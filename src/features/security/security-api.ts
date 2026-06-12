@@ -3,8 +3,8 @@
  * API Gateway를 통해 data-secure-guard에 연결
  */
 
-// API Gateway를 통해 접근 (기본 포트 9000)
-const API_GATEWAY = import.meta.env.VITE_API_GATEWAY_URL || 'http://localhost:9000'
+// API Gateway 단일 진입점(공유 코어). /api/gateway/security/** → 게이트웨이 rewrite → 8006/api/security/**
+import { API_GATEWAY_URL as API_GATEWAY } from '@/shared/services/http'
 
 // Types
 export interface User {
@@ -97,7 +97,7 @@ export interface EffectiveAccess {
  * 사용자 목록 조회 (Neo4j)
  */
 export async function getUsers(): Promise<User[]> {
-  const response = await fetch(`${API_GATEWAY}/api/security/users`)
+  const response = await fetch(`${API_GATEWAY}/security/users`)
   if (!response.ok) {
     console.error('Failed to fetch users:', response.status)
     return []
@@ -109,7 +109,7 @@ export async function getUsers(): Promise<User[]> {
  * 사용자 생성
  */
 export async function createUser(user: UserCreate): Promise<User> {
-  const response = await fetch(`${API_GATEWAY}/api/security/users`, {
+  const response = await fetch(`${API_GATEWAY}/security/users`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(user)
@@ -122,7 +122,7 @@ export async function createUser(user: UserCreate): Promise<User> {
  * 사용자 수정
  */
 export async function updateUser(uid: string, updates: UserUpdate): Promise<User> {
-  const response = await fetch(`${API_GATEWAY}/api/security/users/${uid}`, {
+  const response = await fetch(`${API_GATEWAY}/security/users/${uid}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates)
@@ -135,7 +135,7 @@ export async function updateUser(uid: string, updates: UserUpdate): Promise<User
  * 사용자 삭제
  */
 export async function deleteUser(uid: string): Promise<void> {
-  const response = await fetch(`${API_GATEWAY}/api/security/users/${uid}`, {
+  const response = await fetch(`${API_GATEWAY}/security/users/${uid}`, {
     method: 'DELETE'
   })
   if (!response.ok) throw new Error('Failed to delete user')
@@ -150,7 +150,7 @@ export async function deleteUser(uid: string): Promise<void> {
  * 역할 목록 조회 (Neo4j)
  */
 export async function getRoles(): Promise<Role[]> {
-  const response = await fetch(`${API_GATEWAY}/api/security/roles`)
+  const response = await fetch(`${API_GATEWAY}/security/roles`)
   if (!response.ok) {
     console.error('Failed to fetch roles:', response.status)
     return []
@@ -162,7 +162,7 @@ export async function getRoles(): Promise<Role[]> {
  * 역할 생성
  */
 export async function createRole(role: RoleCreate): Promise<Role> {
-  const response = await fetch(`${API_GATEWAY}/api/security/roles`, {
+  const response = await fetch(`${API_GATEWAY}/security/roles`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(role)
@@ -175,7 +175,7 @@ export async function createRole(role: RoleCreate): Promise<Role> {
  * 역할 삭제
  */
 export async function deleteRole(name: string): Promise<void> {
-  const response = await fetch(`${API_GATEWAY}/api/security/roles/${name}`, {
+  const response = await fetch(`${API_GATEWAY}/security/roles/${name}`, {
     method: 'DELETE'
   })
   if (!response.ok) throw new Error('Failed to delete role')
@@ -190,7 +190,7 @@ export async function deleteRole(name: string): Promise<void> {
  * 권한 목록 조회
  */
 export async function getPermissions(): Promise<Permission[]> {
-  const response = await fetch(`${API_GATEWAY}/api/security/permissions`)
+  const response = await fetch(`${API_GATEWAY}/security/permissions`)
   if (!response.ok) {
     console.error('Failed to fetch permissions:', response.status)
     return []
@@ -217,7 +217,7 @@ export async function getAuditLogs(filter?: {
     if (filter.status) params.append('status', filter.status)
     if (filter.limit) params.append('limit', String(filter.limit))
   }
-  const response = await fetch(`${API_GATEWAY}/api/security/audit-logs?${params}`)
+  const response = await fetch(`${API_GATEWAY}/security/audit-logs?${params}`)
   if (!response.ok) {
     console.error('Failed to fetch audit logs:', response.status)
     return []
@@ -229,7 +229,7 @@ export async function getAuditLogs(filter?: {
  * 감사 로그 기록
  */
 export async function createAuditLog(entry: AuditLogCreate): Promise<AuditLog> {
-  const response = await fetch(`${API_GATEWAY}/api/security/audit-logs`, {
+  const response = await fetch(`${API_GATEWAY}/security/audit-logs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(entry)
@@ -253,7 +253,7 @@ export async function getTables(): Promise<Array<{
   description?: string
   column_count: number
 }>> {
-  const response = await fetch(`${API_GATEWAY}/api/security/tables`)
+  const response = await fetch(`${API_GATEWAY}/security/tables`)
   if (!response.ok) {
     console.error('Failed to fetch tables:', response.status)
     return []
@@ -271,7 +271,7 @@ export async function getTables(): Promise<Array<{
  */
 export async function getAccessRules(path?: string): Promise<AccessRule[]> {
   const params = path ? `?path=${encodeURIComponent(path)}` : ''
-  const response = await fetch(`${API_GATEWAY}/api/security/access-rules${params}`)
+  const response = await fetch(`${API_GATEWAY}/security/access-rules${params}`)
   if (!response.ok) {
     console.error('Failed to fetch access rules:', response.status)
     return []
@@ -283,7 +283,7 @@ export async function getAccessRules(path?: string): Promise<AccessRule[]> {
  * 접근 규칙 저장
  */
 export async function saveAccessRule(rule: AccessRule): Promise<void> {
-  const response = await fetch(`${API_GATEWAY}/api/security/access-rules`, {
+  const response = await fetch(`${API_GATEWAY}/security/access-rules`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(rule)
@@ -300,7 +300,7 @@ export async function deleteAccessRule(path: string, targetType: string, targetN
     target_type: targetType,
     target_name: targetName
   })
-  const response = await fetch(`${API_GATEWAY}/api/security/access-rules?${params}`, {
+  const response = await fetch(`${API_GATEWAY}/security/access-rules?${params}`, {
     method: 'DELETE'
   })
   if (!response.ok) throw new Error('Failed to delete access rule')
@@ -319,7 +319,7 @@ export async function getEffectiveAccess(
     target_type: targetType,
     target_name: targetName
   })
-  const response = await fetch(`${API_GATEWAY}/api/security/effective-access?${params}`)
+  const response = await fetch(`${API_GATEWAY}/security/effective-access?${params}`)
   if (!response.ok) throw new Error('Failed to get effective access')
   return response.json()
 }
