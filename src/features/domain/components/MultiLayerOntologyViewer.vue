@@ -3540,18 +3540,8 @@ async function fetchDataViaText2SQL(node: OntologyNode, nodeId: string) {
     if (!ds) {
       throw new Error('데이터소스를 선택해주세요')
     }
-    const response = await fetch('/api/gateway/text2sql/direct-sql', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sql, datasource: ds })
-    })
-    
-    if (!response.ok) {
-      throw new Error('Text2SQL API 호출 실패')
-    }
-    
-    const result = await response.json()
-    
+    const result = await text2sqlApi.directSql({ sql, datasource: ds })
+
     // Text2SQL 응답 형식에 맞게 변환
     const columns = result.columns || []
     const rows = result.data || result.rows || []
@@ -4289,17 +4279,9 @@ async function loadFilterDistinctValues(node: OntologyNode) {
   
   try {
     const columnsParam = selectColumns.join(',')
-    const response = await fetch(
-      `/api/gateway/ontology/ontology-nodes/${node.id}/filter-values?columns=${encodeURIComponent(columnsParam)}`
-    )
-    
-    if (response.ok) {
-      const result = await response.json()
-      if (result.distinctValues) {
-        filterDistinctValues.value = result.distinctValues
-      }
-    } else {
-      console.warn('필터 DISTINCT 값 로드 실패:', response.status)
+    const result = await objectExplorerApi.getNodeFilterValues(node.id, columnsParam)
+    if (result.distinctValues) {
+      filterDistinctValues.value = result.distinctValues
     }
   } catch (error) {
     console.warn('필터 DISTINCT 값 로드 오류:', error)
@@ -5163,24 +5145,13 @@ async function createMeasureObjectType() {
   nodeDataLoading.value = true
   
   try {
-    const response = await fetch(`/api/gateway/ontology/ontology-nodes/${node.id}/create-objecttype`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        node_id: node.id,
-        node_name: node.name,
-        description: node.description,
-        unit: node.unit
-      })
+    const result = await objectExplorerApi.createObjectTypeFromNode(node.id, {
+      node_id: node.id,
+      node_name: node.name,
+      description: node.description,
+      unit: node.unit
     })
-    
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.detail || 'ObjectType 생성 실패')
-    }
-    
-    const result = await response.json()
-    
+
     // 노드 업데이트
     node.dataSource = result.objectTypeName
     
@@ -7143,24 +7114,12 @@ async function probeRowCounts(runId: number) {
       try {
         const tableRef = normalizeTableRef(candidate.table_name, candidate.datasource || '')
         const sql = `SELECT * FROM ${tableRef} LIMIT ${PROBE_LIMIT}`
-        const response = await fetch('/api/gateway/text2sql/direct-sql', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sql,
-            datasource: candidate.datasource,
-            max_sql_seconds: 15,
-            format_with_ai: false
-          })
+        const result = await text2sqlApi.directSql({
+          sql,
+          datasource: candidate.datasource || '',
+          max_sql_seconds: 15,
+          format_with_ai: false
         })
-
-        if (!response.ok) {
-          candidate.row_count = -1
-          candidate.row_count_approx = false
-          return
-        }
-
-        const result = await response.json()
         const rowsRaw = result.rows || result.data || []
         const columns = result.columns || []
         const hasMoreThanTen = rowsRaw.length >= PROBE_LIMIT
@@ -7189,32 +7148,22 @@ async function loadSampleData(candidate: any) {
       // 자연어 검색 결과 후보는 노드 미확정 상태일 수 있으므로 후보 자체로 직접 조회
       const tableRef = normalizeTableRef(candidate.table_name, candidate.datasource)
       const sql = `SELECT * FROM ${tableRef} LIMIT 10`
-      const response = await fetch('/api/gateway/text2sql/direct-sql', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sql,
-          datasource: candidate.datasource,
-          max_sql_seconds: 30,
-          format_with_ai: false
-        })
+      const result = await text2sqlApi.directSql({
+        sql,
+        datasource: candidate.datasource,
+        max_sql_seconds: 30,
+        format_with_ai: false
       })
-      if (response.ok) {
-        const result = await response.json()
-        const rowsRaw = result.rows || result.data || []
-        const columns = result.columns || []
-        sampleData.value = toObjectRows(rowsRaw, columns)
-      }
+      const rowsRaw = result.rows || result.data || []
+      const columns = result.columns || []
+      sampleData.value = toObjectRows(rowsRaw, columns)
     } else {
       // API 호출하여 샘플 데이터 가져오기
-      const response = await fetch(`/api/gateway/ontology/node/${selectedMappingNodeId.value}/sample-data?limit=10`)
-      if (response.ok) {
-        const result = await response.json()
-        const nested = result.data || {}
-        const rowsRaw = nested.data || nested.rows || []
-        const columns = nested.columns || []
-        sampleData.value = toObjectRows(rowsRaw, columns)
-      }
+      const result = await objectExplorerApi.getNodeSampleData(selectedMappingNodeId.value || '', 10)
+      const nested = result.data || {}
+      const rowsRaw = nested.data || nested.rows || []
+      const columns = nested.columns || []
+      sampleData.value = toObjectRows(rowsRaw, columns)
     }
   } catch (err) {
     console.error('Load sample data error:', err)
@@ -7482,19 +7431,12 @@ async function loadDatasources() {
   selectedSchema.value = ''
   
   try {
-    const response = await fetch('/api/gateway/text2sql/meta/datasources')
-    
-    if (response.ok) {
-      const datasources = await response.json()
-      availableDatasources.value = datasources
-      // 단일 데이터소스 환경에서는 자연어 검색 첫 클릭 동작을 위해 자동 선택
-      if (datasources.length === 1) {
-        selectedDatasource.value = datasources[0]
-        await loadSchemasForDatasource(selectedDatasource.value)
-      }
-    } else {
-      const error = await response.json().catch(() => ({ detail: '데이터 소스 목록 조회 실패' }))
-      console.error('데이터 소스 목록 조회 실패:', error)
+    const datasources = await text2sqlApi.getDatasources()
+    availableDatasources.value = datasources
+    // 단일 데이터소스 환경에서는 자연어 검색 첫 클릭 동작을 위해 자동 선택
+    if (datasources.length === 1) {
+      selectedDatasource.value = datasources[0]
+      await loadSchemasForDatasource(selectedDatasource.value)
     }
   } catch (error) {
     console.error('데이터 소스 목록 로드 오류:', error)
@@ -7523,15 +7465,7 @@ async function loadSchemasForDatasource(datasource: string) {
   selectedSchema.value = ''
   
   try {
-    const response = await fetch(`/api/gateway/text2sql/meta/datasources/${encodeURIComponent(datasource)}/schemas`)
-    
-    if (response.ok) {
-      const schemas = await response.json()
-      availableSchemas.value = schemas
-    } else {
-      const error = await response.json().catch(() => ({ detail: '스키마 목록 조회 실패' }))
-      console.error('스키마 목록 조회 실패:', error)
-    }
+    availableSchemas.value = await text2sqlApi.getDatasourceSchemas(datasource)
   } catch (error) {
     console.error('스키마 목록 로드 오류:', error)
   } finally {
@@ -7550,11 +7484,8 @@ async function loadTablesForSchema(datasource: string, schema: string) {
   availableTables.value = []
   
   try {
-    const response = await fetch(`/api/gateway/text2sql/meta/datasources/${encodeURIComponent(datasource)}/schemas/${encodeURIComponent(schema)}/tables?limit=500`)
-    
-    if (response.ok) {
-      const tables = await response.json()
-      
+    const tables = await text2sqlApi.getSchemaTables(datasource, schema, 500)
+    {
       tables.forEach((t: any) => {
         const tableSchema = t.schema || 'public'
         const tableDatasource = t.datasource || ''
@@ -7577,9 +7508,6 @@ async function loadTablesForSchema(datasource: string, schema: string) {
           columnCount: t.column_count || 0
         })
       })
-    } else {
-      const error = await response.json().catch(() => ({ detail: '테이블 목록 조회 실패' }))
-      console.error('테이블 목록 조회 실패:', error)
     }
   } catch (error) {
     console.error('테이블 목록 로드 오류:', error)
@@ -7599,11 +7527,8 @@ async function loadObjectTypes() {
     if (!selectedDatasource.value) {
       return
     }
-    const response = await fetch(`/api/gateway/text2sql/meta/objecttypes?datasource=${encodeURIComponent(selectedDatasource.value)}&limit=500`)
-    
-    if (response.ok) {
-      const objectTypes = await response.json()
-      
+    const objectTypes = await text2sqlApi.getMetaObjectTypes(selectedDatasource.value, 500)
+    {
       objectTypes.forEach((ot: any) => {
         const schema = ot.schema || 'dw'
         // ObjectType의 경우 materialized_view 값을 데이터 소스로 사용
@@ -7622,9 +7547,6 @@ async function loadObjectTypes() {
           materializedView: materializedView  // Materialized View 이름 저장
         })
       })
-    } else {
-      const error = await response.json().catch(() => ({ detail: 'ObjectType 목록 조회 실패' }))
-      console.error('ObjectType 목록 조회 실패:', error)
     }
   } catch (error) {
     console.error('ObjectType 목록 로드 오류:', error)
@@ -7724,15 +7646,9 @@ async function confirmNodeDataSource() {
       try {
         const schema = table.schema || 'public'
         if (selectedDatasource.value !== '__ontology__') {
-          const colUrl = `/api/gateway/text2sql/meta/tables/${table.name}/columns?datasource=${encodeURIComponent(selectedDatasource.value)}&schema=${schema}`
-          const colResponse = await fetch(colUrl)
-          if (colResponse.ok) {
-            const columns = await colResponse.json()
-            candidate.columns = columns.map((c: any) => c.name)
-            console.log(`✅ 컬럼 정보 조회 성공: ${candidate.columns.length}개 컬럼 (테이블: ${cleanTableName})`)
-          } else {
-            console.warn('컬럼 정보 조회 실패:', await colResponse.text())
-          }
+          const columns = await text2sqlApi.getTableColumns(selectedDatasource.value, table.name, schema)
+          candidate.columns = columns.map((c: any) => c.name)
+          console.log(`✅ 컬럼 정보 조회 성공: ${candidate.columns.length}개 컬럼 (테이블: ${cleanTableName})`)
         }
       } catch (err) {
         console.warn('컬럼 정보 조회 오류:', err)
