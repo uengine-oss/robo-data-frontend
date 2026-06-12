@@ -119,10 +119,10 @@ export const FEATURES: FeatureDef[] = [
   { id: 'lineage', label: '데이터 리니지', icon: IconLineage, group: 'bottom',
     component: lazy(() => import('@/features/lineage').then((m: any) => m.LineageTab)) },
   { id: 'olap', label: 'OLAP 분석', icon: IconBarChart, group: 'bottom',
-    component: lazy(() => import('@/components/olap').then((m: any) => m.OlapTab)) },
+    component: lazy(() => import('@/features/olap').then((m: any) => m.OlapTab)) },
   // 메뉴 없음(HomeView 에만 있던 탭) → hidden 으로 보존
   { id: 'langchain', label: 'LangChain', icon: IconMessageSquare, group: 'bottom', hidden: true,
-    component: lazy(() => import('@/components/langchain-text2sql/LangChainTab.vue')) },
+    component: lazy(() => import('@/features/langchain').then((m: any) => m.LangChainTab)) },
 ]
 
 /** 임베드(host=architect) 노출 대상 = embeddable 표시된 코드분석 핵심. */
