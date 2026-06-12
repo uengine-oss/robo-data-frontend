@@ -11,7 +11,7 @@ import { useOntologyStore } from '@/stores/ontology'
 import { storeToRefs } from 'pinia'
 import OntologyCanvas from './OntologyCanvas.vue'
 import { IconUpload, IconRefresh, IconPlay, IconCheck } from '@/shared/icons'
-import { ontologyApi, type SchemaListItem } from '@/services/api'
+import { ontologyApi, type SchemaListItem } from '@/features/ontology/api'
 
 const emit = defineEmits<{
   (e: 'open-feedback'): void

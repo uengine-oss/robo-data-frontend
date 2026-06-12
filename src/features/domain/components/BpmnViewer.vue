@@ -19,7 +19,7 @@ import { applyAutoLayout } from './autoLayout/bpmnAutoLayout.js'
 import customBpmnModule from './customBpmn/index.js'
 
 // API
-import { ontologyApi } from '@/services/api'
+import { ontologyApi } from '@/features/ontology/api'
 
 const props = defineProps<{
   modelValue?: string  // BPMN XML

@@ -4,7 +4,7 @@
  * 저장된 온톨로지 스키마 목록 및 선택기
  */
 import { ref, onMounted, computed } from 'vue'
-import { ontologyApi, type SchemaListItem } from '@/services/api'
+import { ontologyApi, type SchemaListItem } from '@/features/ontology/api'
 import { useOntologyStore } from '@/stores/ontology'
 import { IconRefresh, IconTrash, IconCheck, IconPlus } from '@/shared/icons'
 

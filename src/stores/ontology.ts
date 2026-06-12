@@ -5,7 +5,7 @@
 
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { ontologyApi } from '@/services/api'
+import { ontologyApi } from '@/features/ontology/api'
 import type {
   OntologySchema,
   OntologyNode,
