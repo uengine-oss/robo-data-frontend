@@ -81,19 +81,19 @@ export const FEATURES: FeatureDef[] = [
 
   // ── 도메인 레이어 ──
   { id: 'schema-modeling', label: '도메인 스키마', icon: IconDatabase, group: 'domain',
-    component: lazy(() => import('@/components/domain/ObjectTypeModeler.vue')) },
+    component: lazy(() => import('@/features/domain').then((m: any) => m.ObjectTypeModeler)) },
   { id: 'multi-layer-ontology', label: '온톨로지 관리', icon: IconLineage, group: 'domain',
-    component: lazy(() => import('@/components/domain/MultiLayerOntologyViewer.vue')) },
+    component: lazy(() => import('@/features/domain').then((m: any) => m.MultiLayerOntologyViewer)) },
   { id: 'object-explorer', label: '오브젝트 탐색기', icon: IconSearch, group: 'domain',
     component: lazy(() => import('@/features/object-explorer').then((m: any) => m.ObjectExplorerTab)) },
   { id: 'ontology-viewer', label: '온톨로지 뷰어', icon: IconEye, group: 'domain',
-    component: lazy(() => import('@/components/domain/OntologyViewerRemote.vue')) },
+    component: lazy(() => import('@/features/domain').then((m: any) => m.OntologyViewerRemote)) },
   { id: 'domain-text2sql', label: '자연어 질의', icon: IconMessageSquare, group: 'domain',
     props: { domainLayerMode: true },
     component: lazy(() => import('@/features/text2sql').then((m: any) => m.Text2SqlTab)) },
   // 메뉴 숨김(원래 SideNav 에서 주석 처리)이나 activeTab 라우팅은 보존
   { id: 'ontology', label: '문서에서 스키마 추출', icon: IconOntology, group: 'domain', hidden: true,
-    component: lazy(() => import('@/components/ontology').then((m: any) => m.OntologyTab)) },
+    component: lazy(() => import('@/features/ontology').then((m: any) => m.OntologyTab)) },
 
   // ── 다이나믹 레이어 ──
   { id: 'whatif', label: 'What-If 시뮬레이터', icon: IconWhatIf, group: 'dynamic',
