@@ -69,11 +69,11 @@ const lazy = (loader: () => Promise<unknown>): Component => defineAsyncComponent
 export const FEATURES: FeatureDef[] = [
   // ── 피지컬 레이어 ── (임베드 노출 = 코드분석 핵심 3개)
   { id: 'upload', label: '코드', icon: IconFolder, group: 'physical', embeddable: true,
-    component: lazy(() => import('@/components/upload/UploadTab.vue')) },
+    component: lazy(() => import('@/features/code-analysis').then((m: any) => m.UploadTab)) },
   { id: 'datasources', label: '데이터 소스', icon: IconDatabase, group: 'physical', embeddable: true,
-    component: lazy(() => import('@/components/datasources/DataSourcesTab.vue')) },
+    component: lazy(() => import('@/features/datasources').then((m: any) => m.DataSourcesTab)) },
   { id: 'graph', label: '스키마 관리', icon: IconDatabase, group: 'physical', embeddable: true,
-    component: lazy(() => import('@/components/graph/GraphTab.vue')) },
+    component: lazy(() => import('@/features/code-analysis').then((m: any) => m.GraphTab)) },
   { id: 'text2sql', label: '자연어 질의', icon: IconMessageSquare, group: 'physical',
     component: lazy(() => import('@/features/text2sql').then((m: any) => m.Text2SqlTab)) },
   { id: 'security-guard', label: '보안관리자', icon: IconSecurity, group: 'physical',
