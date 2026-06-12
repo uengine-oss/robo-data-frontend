@@ -12,7 +12,7 @@ import {
   type BulkJoinRule,
   type BulkTermCandidate,
   type BulkUploadResponse
-} from '@/services/api'
+} from '@/features/glossary/api'
 import { IconAlertTriangle, IconCheck, IconChevronDown, IconRefresh, IconUpload, IconX } from '@/shared/icons'
 
 const props = defineProps<{

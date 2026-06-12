@@ -5,7 +5,7 @@
  */
 import { ref, computed, onMounted, watch } from 'vue'
 import { useSessionStore } from '@/stores/session'
-import { glossaryApi, type Glossary, type Term } from '@/services/api'
+import { glossaryApi, type Glossary, type Term } from '@/features/glossary/api'
 import { IconPlus, IconSearch, IconEdit, IconTrash, IconCheck, IconChevronDown, IconBook } from '@/shared/icons'
 import TermModal from './TermModal.vue'
 import GlossaryModal from './GlossaryModal.vue'

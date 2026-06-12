@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useSessionStore } from '@/stores/session'
-import { glossaryApi } from '@/services/api'
+import { glossaryApi } from '@/features/glossary/api'
 
 interface SynonymSuggestion {
   termId: string
