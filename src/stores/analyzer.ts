@@ -33,7 +33,7 @@ import type {
   AnalyzeEvent,
 } from '@/types'
 import { useSessionStore } from './session'
-import { antlrApi, roboApi } from '@/services/api'
+import { antlrApi, roboApi } from '@/features/code-analysis/api'
 
 // ============================================================================
 // 라벨 분류 — 멀티라벨에서 sub-label 우선 (역할 라벨은 후순위)
