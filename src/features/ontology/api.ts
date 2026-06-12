@@ -11,6 +11,8 @@ export interface SchemaListItem {
   updatedAt?: string
   version?: number
   nodeCount?: number
+  hasSchemaJson?: boolean
+  schemaJson?: unknown
 }
 
 export interface SchemaListResponse {

@@ -291,6 +291,39 @@ export const text2sqlApi = {
   },
 
   /**
+   * 스키마의 테이블 목록 — /text2sql/meta/datasources/{ds}/schemas/{schema}/tables
+   */
+  async getSchemaTables(datasource: string, schema: string, limit: number = 500): Promise<any> {
+    const response = await fetch(
+      `${TEXT2SQL_BASE_URL}/meta/datasources/${encodeURIComponent(datasource)}/schemas/${encodeURIComponent(schema)}/tables?limit=${limit}`
+    )
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    return response.json()
+  },
+
+  /**
+   * 데이터소스의 ObjectType(머티리얼라이즈드뷰) 목록 — /text2sql/meta/objecttypes
+   */
+  async getMetaObjectTypes(datasource: string, limit: number = 500): Promise<any> {
+    const response = await fetch(
+      `${TEXT2SQL_BASE_URL}/meta/objecttypes?datasource=${encodeURIComponent(datasource)}&limit=${limit}`
+    )
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    return response.json()
+  },
+
+  /**
+   * Direct SQL 실행 (단발, 비스트림) — /text2sql/direct-sql
+   */
+  async directSql(body: { sql: string; datasource: string; max_sql_seconds?: number; format_with_ai?: boolean }): Promise<Record<string, any>> {
+    return postJson(`${TEXT2SQL_BASE_URL}/direct-sql`, body, {})
+  },
+
+  /**
    * 헬스체크
    */
   async healthCheck(): Promise<unknown> {

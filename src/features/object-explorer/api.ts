@@ -200,6 +200,61 @@ export const objectExplorerApi = {
   /** DB 스키마로부터 온톨로지 생성 — /ontology/generate-from-schema. 응답은 {success, error?, tablesProcessed, relationshipsInferred, schema} 형태(필드 옵셔널이라 any 로 노출). */
   async generateFromSchema(body: unknown): Promise<Record<string, any>> {
     return postJson(`${ONTOLOGY_BASE_URL}/generate-from-schema`, body, {})
+  },
+
+  /** 온톨로지 노드 데이터 조회 — /ontology-nodes/{id}/data (query 예: 'limit=1') */
+  async getNodeData(nodeId: string, query: string = ''): Promise<Record<string, any>> {
+    const response = await fetch(`${ONTOLOGY_BASE_URL}/ontology-nodes/${encodeURIComponent(nodeId)}/data${query ? `?${query}` : ''}`)
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    return response.json()
+  },
+
+  /** 노드 컬럼 distinct 값 — /ontology-nodes/{id}/filter-values?columns=... */
+  async getNodeFilterValues(nodeId: string, columnsParam: string): Promise<Record<string, any>> {
+    const response = await fetch(`${ONTOLOGY_BASE_URL}/ontology-nodes/${encodeURIComponent(nodeId)}/filter-values?columns=${encodeURIComponent(columnsParam)}`)
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    return response.json()
+  },
+
+  /** 노드 샘플 데이터 — /node/{id}/sample-data?limit=... */
+  async getNodeSampleData(nodeId: string, limit: number = 10): Promise<Record<string, any>> {
+    const response = await fetch(`${ONTOLOGY_BASE_URL}/node/${encodeURIComponent(nodeId)}/sample-data?limit=${limit}`)
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    return response.json()
+  },
+
+  /** 노드로부터 ObjectType 생성 — /ontology-nodes/{id}/create-objecttype */
+  async createObjectTypeFromNode(nodeId: string, body: unknown): Promise<any> {
+    return postJson(`${ONTOLOGY_BASE_URL}/ontology-nodes/${encodeURIComponent(nodeId)}/create-objecttype`, body, {})
+  },
+
+  /** 노드 incoming 네트워크 — /schemas/{id}/nodes/{nodeId}/incoming-network */
+  async getIncomingNetwork(schemaId: string, nodeId: string, body: unknown): Promise<Record<string, any>> {
+    return postJson(`${ONTOLOGY_BASE_URL}/schemas/${encodeURIComponent(schemaId)}/nodes/${encodeURIComponent(nodeId)}/incoming-network`, body, {})
+  },
+
+  /** 데이터소스 매핑 확정 — /confirm-datasource */
+  async confirmDatasource(body: unknown): Promise<any> {
+    return postJson(`${ONTOLOGY_BASE_URL}/confirm-datasource`, body, {})
+  },
+
+  /** 스키마 부분 수정 — /schemas/{id} (PATCH) */
+  async updateSchema(schemaId: string, body: unknown): Promise<any> {
+    const response = await fetch(`${ONTOLOGY_BASE_URL}/schemas/${encodeURIComponent(schemaId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    return response.json().catch(() => ({}))
   }
 }
 

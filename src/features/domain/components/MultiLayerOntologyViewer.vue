@@ -2024,6 +2024,9 @@ import SynonymSuggestionModal from '@/features/domain/components/SynonymSuggesti
 import SchemaBasedGenerator from '@/features/ontology/components/SchemaBasedGenerator.vue'
 import { glossaryApi, type Glossary } from '@/features/glossary/api'
 import { text2sqlApi } from '@/features/text2sql/api'
+import { ontologyApi } from '@/features/ontology/api'
+import { objectExplorerApi } from '@/features/object-explorer/api'
+import { whatifDomainApi } from '@/features/ontology/whatif-domain-api'
 import { useSessionStore } from '@/shared/stores/session'
 import type { ReactRequest, ReactStreamEvent } from '@/shared/types'
 
@@ -8342,35 +8345,20 @@ async function saveSchemaName(schemaId: string) {
   }
   
   try {
-    const response = await fetch(`/api/gateway/ontology/schemas/${schemaId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newName })
-    })
-    
-    if (response.ok) {
-      const result = await response.json()
-      console.log('[saveSchemaName] 업데이트 성공:', result)
-      
-      // 로컬 상태 업데이트
-      schema.name = newName
-      schema.updatedAt = new Date().toISOString()
-      
-      // 현재 로드된 스키마의 이름도 업데이트
-      if (currentSchemaId.value === schemaId) {
-        schemaName.value = newName
-      }
-      
-      // 성공 메시지 (선택적)
-      // console.log(`✅ 스키마 이름이 '${newName}'으로 변경되었습니다.`)
-    } else {
-      const error = await response.json().catch(() => ({ detail: '이름 변경 실패' }))
-      console.error('[saveSchemaName] 업데이트 실패:', error)
-      alert(`이름 변경 실패: ${error.detail || '알 수 없는 오류'}`)
+    const result = await objectExplorerApi.updateSchema(schemaId, { name: newName })
+    console.log('[saveSchemaName] 업데이트 성공:', result)
+
+    // 로컬 상태 업데이트
+    schema.name = newName
+    schema.updatedAt = new Date().toISOString()
+
+    // 현재 로드된 스키마의 이름도 업데이트
+    if (currentSchemaId.value === schemaId) {
+      schemaName.value = newName
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('스키마 이름 변경 오류:', error)
-    alert('이름 변경 중 오류가 발생했습니다.')
+    alert(`이름 변경 실패: ${error?.message || '알 수 없는 오류'}`)
   } finally {
     editingSchemaId.value = null
   }
@@ -8396,12 +8384,7 @@ async function confirmDeleteSchema() {
   if (!schemaToDelete.value) return
   const { id, name } = schemaToDelete.value
   try {
-    const response = await fetch(`/api/gateway/ontology/schemas/${encodeURIComponent(id)}`, { method: 'DELETE' })
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}))
-      alert(`삭제 실패: ${err.detail || response.status}`)
-      return
-    }
+    await ontologyApi.deleteSchemaById(id)
     removeRecentSchemaId(id)
     if (currentSchemaId.value === id) {
       currentSchemaId.value = null
@@ -8448,9 +8431,8 @@ async function loadOntologyList(options: { autoLoadRecent?: boolean } = {}) {
   loadingSchemalist.value = true
   
   try {
-    const response = await fetch('/api/gateway/ontology/schemas')
-    if (response.ok) {
-      const result = await response.json()
+    const result = await ontologyApi.listSchemas()
+    {
       // API 응답: {"schemas": [...], "activeSchemaId": "..."}
       const schemas = result.schemas || []
       
@@ -8512,10 +8494,6 @@ async function loadOntologyList(options: { autoLoadRecent?: boolean } = {}) {
           await loadSchema(recentSchemaId)
         }
       }
-    } else {
-      const errorText = await response.text()
-      console.error('스키마 목록 조회 실패:', errorText)
-      savedSchemas.value = []
     }
   } catch (error) {
     console.error('Neo4j 스키마 목록 조회 오류:', error)
@@ -8725,9 +8703,7 @@ async function loadNodeBehaviors(nodeId: string) {
   behaviorLoading.value = true
   nodeBehaviors.value = []
   try {
-    const resp = await fetch(`/api/gateway/domain-whatif/models/${currentSchemaId.value}`)
-    if (!resp.ok) return
-    const data = await resp.json()
+    const data = await whatifDomainApi.listModels(currentSchemaId.value)
     const allModels = data.models || []
 
     // 이 노드와 연결된 모델 필터 + 역할(input/output) 판별
@@ -8757,7 +8733,7 @@ async function loadNodeBehaviors(nodeId: string) {
 async function deleteBehaviorModel(modelId: string) {
   if (!currentSchemaId.value || !confirm('이 모델을 삭제하시겠습니까?')) return
   try {
-    await fetch(`/api/gateway/domain-whatif/models/${currentSchemaId.value}/${modelId}`, { method: 'DELETE' })
+    await whatifDomainApi.deleteModel(currentSchemaId.value, modelId)
     nodeBehaviors.value = nodeBehaviors.value.filter(b => b.modelId !== modelId)
   } catch (e) { console.warn('모델 삭제 실패:', e) }
 }
@@ -8774,16 +8750,13 @@ async function toggleModelOverlay() {
   showModelOverlay.value = !showModelOverlay.value
   if (showModelOverlay.value && currentSchemaId.value) {
     try {
-      const resp = await fetch(`/api/gateway/domain-whatif/models/${currentSchemaId.value}`)
-      if (resp.ok) {
-        const data = await resp.json()
-        modelOverlayData.value = (data.models || []).map((m: any) => ({
-          modelId: m.modelId, name: m.name, status: m.status,
-          inputs: (m.inputs || []).map((i: any) => ({ sourceId: i.sourceId, field: i.field })),
-          outputs: (m.outputs || []).map((o: any) => ({ targetId: o.targetId, field: o.field })),
-        }))
-        addModelNodesToCytoscape()
-      }
+      const data = await whatifDomainApi.listModels(currentSchemaId.value)
+      modelOverlayData.value = (data.models || []).map((m: any) => ({
+        modelId: m.modelId, name: m.name, status: m.status,
+        inputs: (m.inputs || []).map((i: any) => ({ sourceId: i.sourceId, field: i.field })),
+        outputs: (m.outputs || []).map((o: any) => ({ targetId: o.targetId, field: o.field })),
+      }))
+      addModelNodesToCytoscape()
     } catch (e) { console.warn('모델 로드 실패:', e) }
   } else {
     removeModelNodesFromCytoscape()
@@ -8851,7 +8824,7 @@ async function deleteModelFromOverlay(modelId: string) {
   if (!currentSchemaId.value) return
   if (!confirm('이 모델을 삭제하시겠습니까?')) return
   try {
-    await fetch(`/api/gateway/domain-whatif/models/${currentSchemaId.value}/${modelId}`, { method: 'DELETE' })
+    await whatifDomainApi.deleteModel(currentSchemaId.value, modelId)
     modelOverlayData.value = modelOverlayData.value.filter(m => m.modelId !== modelId)
     if (cy) {
       cy.getElementById(`model-${modelId}`).remove()
