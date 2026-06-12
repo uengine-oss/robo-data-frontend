@@ -14,8 +14,8 @@ import {
   IconBell,
   IconCheck
 } from '@/shared/icons'
-import { eventApi } from '@/services/api'
-import type { EventRule as ApiEventRule, SimulationRequest, SimulationResult } from '@/services/api'
+import { eventApi } from '@/features/observability/api'
+import type { EventRule as ApiEventRule, SimulationRequest, SimulationResult } from '@/features/observability/api'
 
 // 대화 메시지 타입
 interface ChatMessage {
