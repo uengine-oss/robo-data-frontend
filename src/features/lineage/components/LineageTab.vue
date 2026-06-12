@@ -7,15 +7,12 @@
  * 1. robo-analyzer의 Neo4j 리니지 데이터
  * 2. data-platform-olap의 ETL 설정 데이터
  */
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useSessionStore } from '@/shared/stores/session'
 import LineageGraph from './LineageGraph.vue'
 import LineageDetailPanel from './LineageDetailPanel.vue'
 import { IconRefresh, IconUpload, IconSearch } from '@/shared/icons'
-
-// API Gateway URL for OLAP service
-const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? 'http://localhost:9000'
-const OLAP_API_BASE = `${API_GATEWAY_URL}/olap/api`
+import { lineageApi } from '@/features/lineage/api'
 
 // 스토어
 const sessionStore = useSessionStore()
@@ -96,9 +93,8 @@ async function loadLineageData() {
   try {
     // 1. OLAP ETL 설정에서 리니지 데이터 가져오기
     try {
-      const olapResponse = await fetch(`${OLAP_API_BASE}/etl/lineage/overview`)
-      if (olapResponse.ok) {
-        const olapData = await olapResponse.json()
+      const olapData = await lineageApi.getOlapOverview()
+      if (olapData) {
         
         // 소스 테이블 변환
         for (const src of olapData.source_tables || []) {
@@ -168,14 +164,9 @@ async function loadLineageData() {
     
     // 2. Neo4j 리니지 데이터 가져오기
     try {
-      const headers = sessionStore.getHeaders()
-      const response = await fetch(
-        `/robo/lineage/`,
-        { headers }
-      )
-        
-        if (response.ok) {
-          const data = await response.json()
+      const data = await lineageApi.getNeo4jLineage(sessionStore.getHeaders())
+
+        if (data) {
           
           // 중복 제거하면서 노드 추가
           for (const node of data.nodes || []) {
@@ -232,25 +223,10 @@ async function analyzeEtlCode(sqlContent: string, fileName: string = '') {
   error.value = null
   
   try {
-    const headers = sessionStore.getHeaders()
-    const response = await fetch('/robo/lineage/analyze/', {
-      method: 'POST',
-      headers: {
-        ...headers,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        sqlContent,
-        fileName,
-        dbms: 'oracle'
-      })
-    })
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
-    
-    await response.json()
+    await lineageApi.analyzeEtlCode(
+      { sqlContent, fileName, dbms: 'oracle' },
+      sessionStore.getHeaders()
+    )
     // 분석 후 데이터 새로고침
     await loadLineageData()
   } catch (e) {

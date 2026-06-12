@@ -371,3 +371,132 @@ export const behaviorApi = {
     return postJson(`${ONTOLOGY_BASE_URL}/save-result-to-table`, body, {})
   }
 }
+
+// ============================================================================
+// Agent-Scheduler API — /agent-scheduler/* (그래프 pipelines 신 시스템 + profiles 레거시 폴백)
+// ============================================================================
+
+export const agentSchedulerApi = {
+  // --- pipelines (그래프 기반) ---
+  async listPipelines(): Promise<any[]> {
+    const response = await fetch(`${AGENT_SCHEDULER_URL}/pipelines`)
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    return response.json()
+  },
+
+  async createPipeline(body: unknown): Promise<any> {
+    return postJson(`${AGENT_SCHEDULER_URL}/pipelines`, body, {})
+  },
+
+  async deletePipeline(id: string): Promise<void> {
+    const response = await fetch(`${AGENT_SCHEDULER_URL}/pipelines/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+  },
+
+  async togglePipeline(id: string): Promise<void> {
+    const response = await fetch(`${AGENT_SCHEDULER_URL}/pipelines/${encodeURIComponent(id)}/toggle`, { method: 'POST' })
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+  },
+
+  async savePositions(
+    pipelineId: string,
+    positions: Array<{ step_id: string; position_x: number; position_y: number }>
+  ): Promise<void> {
+    const response = await fetch(`${AGENT_SCHEDULER_URL}/pipelines/${encodeURIComponent(pipelineId)}/positions`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ positions })
+    })
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+  },
+
+  // --- profiles (레거시 폴백) ---
+  async listProfiles(): Promise<any[]> {
+    const response = await fetch(`${AGENT_SCHEDULER_URL}/profiles`)
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    return response.json()
+  },
+
+  async deleteProfile(id: string): Promise<void> {
+    const response = await fetch(`${AGENT_SCHEDULER_URL}/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+  },
+
+  async toggleProfile(id: string): Promise<void> {
+    const response = await fetch(`${AGENT_SCHEDULER_URL}/profiles/${encodeURIComponent(id)}/toggle`, { method: 'POST' })
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+  },
+
+  async testProfile(profileId: string): Promise<any> {
+    const response = await fetch(`${AGENT_SCHEDULER_URL}/profiles/${encodeURIComponent(profileId)}/test`, { method: 'POST' })
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    return response.json()
+  },
+
+  // --- ProcessGPT 실행 (SSE 스트림, POST — EventSource 미지원) ---
+  async executeProcessGptStream(
+    body: { process_name: string; process_id: string; form_values: Record<string, any>; dry_run: boolean },
+    onEvent: (event: string, data: any) => void
+  ): Promise<void> {
+    const response = await fetch(`${AGENT_SCHEDULER_URL}/profiles/processgpt/execute-stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    if (!response.ok) {
+      let errorDetail = `HTTP ${response.status}`
+      try {
+        const errorBody = await response.json()
+        if (response.status === 500 && errorBody?.path?.includes('agent-scheduler')) {
+          errorDetail = 'agent-scheduler 서비스가 실행되지 않고 있습니다 (포트 8089). 서비스를 먼저 시작해주세요.'
+        } else if (errorBody?.error) {
+          errorDetail = `HTTP ${response.status}: ${errorBody.error}`
+        }
+      } catch { /* ignore parse error */ }
+      throw new Error(errorDetail)
+    }
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('No response body')
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let currentEvent = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          currentEvent = line.substring(7)
+        } else if (line.startsWith('data: ')) {
+          const currentData = line.substring(6)
+          if (currentEvent && currentData) {
+            try {
+              onEvent(currentEvent, JSON.parse(currentData))
+            } catch (e) {
+              console.warn('SSE 파싱 오류:', e)
+            }
+            currentEvent = ''
+          }
+        }
+      }
+    }
+  }
+}

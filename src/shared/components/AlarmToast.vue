@@ -6,7 +6,8 @@
  * SSE를 통해 서버에서 알람을 수신하여 화면 우측 상단에 표시합니다.
  */
 import { ref, onMounted, onUnmounted } from 'vue'
-import { IconBell, IconCheck } from '@/shared/icons'
+import { IconCheck } from '@/shared/icons'
+import { eventApi } from '@/features/observability/api'
 
 // 알람 타입
 interface Alarm {
@@ -32,8 +33,7 @@ const connectSSE = () => {
     eventSource.value.close()
   }
   
-  const baseUrl = '/api/gateway/text2sql'
-  eventSource.value = new EventSource(`${baseUrl}/events/stream/alarms`)
+  eventSource.value = eventApi.createAlarmStream()
   
   eventSource.value.addEventListener('connected', (event) => {
     console.log('알람 스트림 연결됨:', event.data)

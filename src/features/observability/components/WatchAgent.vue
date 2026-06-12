@@ -14,6 +14,8 @@ import { VueFlow, useVueFlow, Position, MarkerType } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { useSessionStore } from '@/shared/stores/session'
+import { agentSchedulerApi } from '@/features/domain/api'
+import { whatifDomainApi } from '@/features/ontology/whatif-domain-api'
 import { 
   IconPlay, 
   IconRefresh,
@@ -194,11 +196,7 @@ const saveNodePositions = async () => {
   }))
   
   try {
-    await fetch(`/api/gateway/agent-scheduler/pipelines/${selectedProfile.value.id}/positions`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ positions: positionUpdates })
-    })
+    await agentSchedulerApi.savePositions(selectedProfile.value.id, positionUpdates)
     console.log('노드 위치 저장 완료')
   } catch (error) {
     console.error('노드 위치 저장 오류:', error)
@@ -333,16 +331,10 @@ const selectedNodeType = computed(() => {
 })
 
 // What-If 시나리오 프로필 로드
-const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? '/api/gateway'
 const loadWhatifScenarios = async () => {
   isLoadingScenarios.value = true
   try {
-    const response = await fetch(`${API_GATEWAY_URL}/domain-whatif/scenarios`)
-    if (response.ok) {
-      const data = await response.json()
-      // 배열 또는 {scenarios: [...]} 형식 모두 지원
-      whatifScenarios.value = Array.isArray(data) ? data : (data.scenarios ?? [])
-    }
+    whatifScenarios.value = await whatifDomainApi.listScenarioProfiles()
   } catch (error) {
     console.error('What-If 시나리오 로드 실패:', error)
   } finally {
@@ -879,120 +871,55 @@ const executeProcessGPTStream = async (
   processId: string, 
   formValues: Record<string, any>
 ): Promise<{ success: boolean; message?: string; error?: string; rawResponse?: string }> => {
-  return new Promise((resolve) => {
-    const requestBody = JSON.stringify({
-      process_name: processName,
-      process_id: processId,
-      form_values: formValues,
-      dry_run: false
-    })
-    
-    // fetch를 사용한 SSE 처리 (EventSource는 POST를 지원하지 않음)
-    fetch('/api/gateway/agent-scheduler/profiles/processgpt/execute-stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: requestBody
-    }).then(async (response) => {
-      if (!response.ok) {
-        let errorDetail = `HTTP ${response.status}`
-        try {
-          const errorBody = await response.json()
-          if (response.status === 500 && errorBody?.path?.includes('agent-scheduler')) {
-            errorDetail = `agent-scheduler 서비스가 실행되지 않고 있습니다 (포트 8089). 서비스를 먼저 시작해주세요.`
-          } else if (errorBody?.error) {
-            errorDetail = `HTTP ${response.status}: ${errorBody.error}`
+  let finalSuccess = false
+  let finalError = ''
+  let allData = ''
+  try {
+    await agentSchedulerApi.executeProcessGptStream(
+      { process_name: processName, process_id: processId, form_values: formValues, dry_run: false },
+      (event, data) => {
+        allData += JSON.stringify(data) + '\n'
+
+        // token 이벤트는 별도 로그로 추가하지 않고 응답에만 누적
+        if (event === 'token') {
+          if (data.content) {
+            streamingFinalResponse.value += data.content
           }
-        } catch { /* ignore parse error */ }
-        resolve({ success: false, error: errorDetail })
-        return
-      }
-      
-      const reader = response.body?.getReader()
-      if (!reader) {
-        resolve({ success: false, error: 'No response body' })
-        return
-      }
-      
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let finalSuccess = false
-      let finalError = ''
-      let allData = ''
-      
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        
-        buffer += decoder.decode(value, { stream: true })
-        
-        // SSE 이벤트 파싱
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''  // 마지막 불완전한 라인은 버퍼에 유지
-        
-        let currentEvent = ''
-        let currentData = ''
-        
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            currentEvent = line.substring(7)
-          } else if (line.startsWith('data: ')) {
-            currentData = line.substring(6)
-            
-            if (currentEvent && currentData) {
-              try {
-                const data = JSON.parse(currentData)
-                allData += currentData + '\n'
-                
-                // token 이벤트는 별도 로그로 추가하지 않고 응답에만 누적
-                if (currentEvent === 'token') {
-                  if (data.content) {
-                    streamingFinalResponse.value += data.content
-                  }
-                } else {
-                  // 다른 이벤트는 로그로 추가
-                  const logEntry: StreamLog = {
-                    id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                    event: currentEvent,
-                    message: getEventMessage(currentEvent, data),
-                    data: data,
-                    timestamp: new Date().toISOString()
-                  }
-                  streamingLogs.value.push(logEntry)
-                }
-                
-                // 이벤트별 추가 처리
-                if (currentEvent === 'response' && data.content) {
-                  streamingFinalResponse.value += data.content
-                }
-                if (currentEvent === 'done') {
-                  finalSuccess = data.success !== false
-                }
-                if (currentEvent === 'error') {
-                  finalError = data.error || 'Unknown error'
-                  finalSuccess = false
-                }
-              } catch (e) {
-                console.warn('SSE 파싱 오류:', e)
-              }
-              
-              currentEvent = ''
-              currentData = ''
-            }
+        } else {
+          // 다른 이벤트는 로그로 추가
+          const logEntry: StreamLog = {
+            id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            event,
+            message: getEventMessage(event, data),
+            data,
+            timestamp: new Date().toISOString()
           }
+          streamingLogs.value.push(logEntry)
+        }
+
+        // 이벤트별 추가 처리
+        if (event === 'response' && data.content) {
+          streamingFinalResponse.value += data.content
+        }
+        if (event === 'done') {
+          finalSuccess = data.success !== false
+        }
+        if (event === 'error') {
+          finalError = data.error || 'Unknown error'
+          finalSuccess = false
         }
       }
-      
-      resolve({
-        success: finalSuccess,
-        message: streamingFinalResponse.value,
-        error: finalError || undefined,
-        rawResponse: allData
-      })
-      
-    }).catch((error) => {
-      resolve({ success: false, error: error.message })
-    })
-  })
+    )
+
+    return {
+      success: finalSuccess,
+      message: streamingFinalResponse.value,
+      error: finalError || undefined,
+      rawResponse: allData
+    }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
 }
 
 // SSE 이벤트를 사용자 친화적 메시지로 변환
@@ -1017,34 +944,28 @@ const simulateStep = async (step: string): Promise<any> => {
   
   if (profileId && step === 'sql') {
     try {
-      const response = await fetch(`/api/gateway/agent-scheduler/profiles/${profileId}/test`, {
-        method: 'POST'
-      })
-      
-      if (response.ok) {
-        const result = await response.json()
-        
-        // ResultTable용 데이터 저장
-        if (result.sample_data && result.sample_data.length > 0) {
-          const columns = Object.keys(result.sample_data[0])
-          const rows = result.sample_data.map((row: any) => columns.map(col => row[col]))
-          
-          sqlExecutionResult.value = {
-            row_count: result.row_count,
-            execution_time_ms: result.execution_time_ms,
-            columns,
-            rows
-          }
+      const result = await agentSchedulerApi.testProfile(profileId)
+
+      // ResultTable용 데이터 저장
+      if (result.sample_data && result.sample_data.length > 0) {
+        const columns = Object.keys(result.sample_data[0])
+        const rows = result.sample_data.map((row: any) => columns.map(col => row[col]))
+
+        sqlExecutionResult.value = {
+          row_count: result.row_count,
+          execution_time_ms: result.execution_time_ms,
+          columns,
+          rows
         }
-        
-        return {
-          success: result.success,
-          message: result.success 
-            ? `쿼리 실행 완료: ${result.row_count}행 반환`
-            : `쿼리 실행 실패: ${result.error}`,
-          data: result.sample_data,
-          duration_ms: result.execution_time_ms
-        }
+      }
+
+      return {
+        success: result.success,
+        message: result.success
+          ? `쿼리 실행 완료: ${result.row_count}행 반환`
+          : `쿼리 실행 실패: ${result.error}`,
+        data: result.sample_data,
+        duration_ms: result.execution_time_ms
       }
     } catch (error) {
       console.error('API 호출 실패, 데모 데이터 사용:', error)
@@ -1273,53 +1194,42 @@ const saveAgent = async () => {
   ]
   
   try {
-    const response = await fetch('/api/gateway/agent-scheduler/pipelines', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: newAgentConfig.value.name,
-        description: isWhatif 
-          ? `What-If 시뮬레이션: ${newAgentConfig.value.whatifScenarioName}` 
-          : newAgentConfig.value.question,
-        natural_language_query: newAgentConfig.value.question,
-        check_interval_minutes: newAgentConfig.value.checkIntervalMinutes,
-        steps: pipelineSteps,
-        connections: connections,
-        start_step_id: dataSourceStepId,
-        // What-If 관련 필드 (프로필 저장용)
-        data_source_type: newAgentConfig.value.dataSourceType,
-        whatif_scenario_id: newAgentConfig.value.whatifScenarioId,
-        whatif_scenario_name: newAgentConfig.value.whatifScenarioName,
-        whatif_output_field: newAgentConfig.value.whatifOutputField,
-      })
+    const savedPipeline = await agentSchedulerApi.createPipeline({
+      name: newAgentConfig.value.name,
+      description: isWhatif
+        ? `What-If 시뮬레이션: ${newAgentConfig.value.whatifScenarioName}`
+        : newAgentConfig.value.question,
+      natural_language_query: newAgentConfig.value.question,
+      check_interval_minutes: newAgentConfig.value.checkIntervalMinutes,
+      steps: pipelineSteps,
+      connections: connections,
+      start_step_id: dataSourceStepId,
+      // What-If 관련 필드 (프로필 저장용)
+      data_source_type: newAgentConfig.value.dataSourceType,
+      whatif_scenario_id: newAgentConfig.value.whatifScenarioId,
+      whatif_scenario_name: newAgentConfig.value.whatifScenarioName,
+      whatif_output_field: newAgentConfig.value.whatifOutputField,
     })
-    
-    if (response.ok) {
-      const savedPipeline = await response.json()
-      
-      // 성공 메시지 표시
-      saveMessage.value = {
-        type: 'success',
-        text: `✅ "${newAgentConfig.value.name}" 에이전트가 Neo4j에 저장되었습니다! (ID: ${savedPipeline.id})`
-      }
-      
-      await refreshProfiles()
-      isCreatingNew.value = false
-      
-      // 저장된 프로필 선택
-      const saved = profiles.value.find(p => p.id === savedPipeline.id)
-      if (saved) {
-        selectProfile(saved)
-      }
-      
-      // 3초 후 메시지 숨김
-      setTimeout(() => {
-        saveMessage.value = null
-      }, 5000)
-    } else {
-      const errorData = await response.json().catch(() => ({}))
-      throw new Error(errorData.detail || `저장 실패 (${response.status})`)
+
+    // 성공 메시지 표시
+    saveMessage.value = {
+      type: 'success',
+      text: `✅ "${newAgentConfig.value.name}" 에이전트가 Neo4j에 저장되었습니다! (ID: ${savedPipeline.id})`
     }
+
+    await refreshProfiles()
+    isCreatingNew.value = false
+
+    // 저장된 프로필 선택
+    const saved = profiles.value.find(p => p.id === savedPipeline.id)
+    if (saved) {
+      selectProfile(saved)
+    }
+
+    // 3초 후 메시지 숨김
+    setTimeout(() => {
+      saveMessage.value = null
+    }, 5000)
   } catch (error: any) {
     console.error('파이프라인 저장 오류:', error)
     
@@ -1364,12 +1274,15 @@ const saveAgent = async () => {
 const refreshProfiles = async () => {
   isLoadingProfiles.value = true
   try {
-    // 먼저 그래프 기반 파이프라인 조회 시도
-    let response = await fetch('/api/gateway/agent-scheduler/pipelines')
-    
-    if (response.ok) {
-      const pipelines = await response.json()
-      
+    // 먼저 그래프 기반 파이프라인 조회 시도, 실패 시 레거시 프로필 API 폴백
+    let pipelines: any[] | null = null
+    try {
+      pipelines = await agentSchedulerApi.listPipelines()
+    } catch {
+      pipelines = null
+    }
+
+    if (pipelines) {
       // 파이프라인을 프로필 형식으로 변환
       profiles.value = pipelines.map((p: any) => {
         // SQL 스텝에서 SQL 추출
@@ -1401,10 +1314,7 @@ const refreshProfiles = async () => {
       })
     } else {
       // Fallback: 기존 프로필 API
-      response = await fetch('/api/gateway/agent-scheduler/profiles')
-      if (response.ok) {
-        profiles.value = await response.json()
-      }
+      profiles.value = await agentSchedulerApi.listProfiles()
     }
   } catch (error) {
     console.error('프로필 조회 오류:', error)
@@ -1419,14 +1329,13 @@ const deleteProfile = async (id: string, event: Event) => {
   if (!confirm('이 에이전트를 삭제하시겠습니까?')) return
   
   try {
-    // 먼저 파이프라인 삭제 시도
-    let response = await fetch(`/api/gateway/agent-scheduler/pipelines/${id}`, { method: 'DELETE' })
-    
-    if (!response.ok) {
-      // Fallback: 프로필 삭제
-      await fetch(`/api/gateway/agent-scheduler/profiles/${id}`, { method: 'DELETE' })
+    // 먼저 파이프라인 삭제 시도, 실패 시 프로필 삭제 폴백
+    try {
+      await agentSchedulerApi.deletePipeline(id)
+    } catch {
+      await agentSchedulerApi.deleteProfile(id)
     }
-    
+
     await refreshProfiles()
     if (selectedProfile.value?.id === id) {
       selectedProfile.value = null
@@ -1442,14 +1351,13 @@ const deleteProfile = async (id: string, event: Event) => {
 const toggleProfile = async (profile: AgentProfile, event: Event) => {
   event.stopPropagation()
   try {
-    // 먼저 파이프라인 토글 시도
-    let response = await fetch(`/api/gateway/agent-scheduler/pipelines/${profile.id}/toggle`, { method: 'POST' })
-    
-    if (!response.ok) {
-      // Fallback: 프로필 토글
-      await fetch(`/api/gateway/agent-scheduler/profiles/${profile.id}/toggle`, { method: 'POST' })
+    // 먼저 파이프라인 토글 시도, 실패 시 프로필 토글 폴백
+    try {
+      await agentSchedulerApi.togglePipeline(profile.id)
+    } catch {
+      await agentSchedulerApi.toggleProfile(profile.id)
     }
-    
+
     await refreshProfiles()
   } catch (error) {
     profile.is_active = !profile.is_active

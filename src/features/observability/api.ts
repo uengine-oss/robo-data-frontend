@@ -412,6 +412,11 @@ export const eventApi = {
       throw new Error(`HTTP ${response.status}`)
     }
     return response.json()
+  },
+
+  /** 알람 SSE 스트림 — /text2sql/events/stream/alarms ('connected'/'alarm'/'heartbeat' 이벤트) */
+  createAlarmStream(): EventSource {
+    return new EventSource(`${TEXT2SQL_BASE_URL}/events/stream/alarms`)
   }
 }
 
