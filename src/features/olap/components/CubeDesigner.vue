@@ -6,7 +6,7 @@
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useOlapStore } from '@/stores/olap'
 import { useSessionStore } from '@/stores/session'
-import * as olapApi from '@/services/olap-api'
+import * as olapApi from '@/features/olap/olap-api'
 import mermaid from 'mermaid'
 
 const store = useOlapStore()

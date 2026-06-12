@@ -5,7 +5,7 @@
  */
 import { computed, ref } from 'vue'
 import { IconX } from '@/shared/icons'
-import * as olapApi from '@/services/olap-api'
+import * as olapApi from '@/features/olap/olap-api'
 
 // 타입 정의
 interface LineageNode {

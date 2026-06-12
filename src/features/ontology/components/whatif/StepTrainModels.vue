@@ -5,7 +5,7 @@
  * - 기존 모델이 있으면 교체/추가 선택 다이얼로그
  */
 import { computed, ref, onMounted } from 'vue'
-import { whatifDomainApi, type ModelSpec, type TrainModelsResponse, type RegisteredModel } from '@/services/whatif-domain-api'
+import { whatifDomainApi, type ModelSpec, type TrainModelsResponse, type RegisteredModel } from '@/features/ontology/whatif-domain-api'
 
 const props = defineProps<{
   schemaId: string

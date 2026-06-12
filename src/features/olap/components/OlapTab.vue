@@ -5,7 +5,7 @@
  */
 import { ref, onMounted } from 'vue'
 import { useOlapStore } from '@/stores/olap'
-import * as olapApi from '@/services/olap-api'
+import * as olapApi from '@/features/olap/olap-api'
 import CubeDesigner from './CubeDesigner.vue'
 import PivotAnalysis from './PivotAnalysis.vue'
 

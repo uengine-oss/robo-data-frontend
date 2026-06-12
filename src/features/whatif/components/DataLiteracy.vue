@@ -540,7 +540,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import { whatifApi, type LiteracyExplanation } from '@/services/whatif-api'
+import { whatifApi, type LiteracyExplanation } from '@/features/whatif/whatif-api'
 import Chart from 'chart.js/auto'
 import cytoscape from 'cytoscape'
 

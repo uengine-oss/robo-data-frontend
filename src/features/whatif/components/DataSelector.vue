@@ -110,7 +110,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import type { DataDiscoveryResult } from '@/services/whatif-api'
+import type { DataDiscoveryResult } from '@/features/whatif/whatif-api'
 
 const props = defineProps<{
   discoveryResult: DataDiscoveryResult | null

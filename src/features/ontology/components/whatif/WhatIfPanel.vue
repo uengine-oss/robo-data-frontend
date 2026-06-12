@@ -11,7 +11,7 @@ import StepTrainModels from './StepTrainModels.vue'
 import StepValidation from './StepValidation.vue'
 import StepSimulation from './StepSimulation.vue'
 import StepModelManager from './StepModelManager.vue'
-import { whatifDomainApi, type EdgeCandidate, type ModelSpec, type TrainModelsResponse, type ValidateResponse } from '@/services/whatif-domain-api'
+import { whatifDomainApi, type EdgeCandidate, type ModelSpec, type TrainModelsResponse, type ValidateResponse } from '@/features/ontology/whatif-domain-api'
 
 const props = defineProps<{
   schemaId: string

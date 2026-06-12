@@ -422,7 +422,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, computed } from 'vue'
 import { Chart, registerables } from 'chart.js'
-import type { ValidationResult, ComparisonResult } from '@/services/whatif-api'
+import type { ValidationResult, ComparisonResult } from '@/features/whatif/whatif-api'
 
 // Chart.js 등록
 Chart.register(...registerables)

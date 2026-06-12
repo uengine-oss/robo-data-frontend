@@ -4,7 +4,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import * as olapApi from '@/services/olap-api'
+import * as olapApi from '@/features/olap/olap-api'
 
 interface PivotField {
   dimension: string

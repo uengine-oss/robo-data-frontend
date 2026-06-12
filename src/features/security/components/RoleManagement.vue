@@ -5,8 +5,8 @@
  */
 import { ref, onMounted } from 'vue'
 import { IconPlus, IconEdit, IconTrash, IconCheck, IconX, IconRefresh } from '@/shared/icons'
-import { getRoles, createRole, deleteRole as apiDeleteRole, getPermissions } from '@/services/security-api'
-import type { Role, Permission } from '@/services/security-api'
+import { getRoles, createRole, deleteRole as apiDeleteRole, getPermissions } from '@/features/security/security-api'
+import type { Role, Permission } from '@/features/security/security-api'
 
 const roles = ref<Role[]>([])
 const allPermissions = ref<Permission[]>([])

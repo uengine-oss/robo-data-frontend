@@ -4,7 +4,7 @@
  * Step 1: 상관/인과 관계 자동 발견 + 상관 매트릭스 히트맵
  */
 import { ref, computed } from 'vue'
-import { whatifDomainApi, type EdgeCandidate, type CorrelationMatrixResponse, type ExcludedInfo } from '@/services/whatif-domain-api'
+import { whatifDomainApi, type EdgeCandidate, type CorrelationMatrixResponse, type ExcludedInfo } from '@/features/ontology/whatif-domain-api'
 
 const props = defineProps<{
   schemaId: string

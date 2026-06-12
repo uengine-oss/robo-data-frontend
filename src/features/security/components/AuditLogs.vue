@@ -5,8 +5,8 @@
  */
 import { ref, onMounted, computed } from 'vue'
 import { IconSearch, IconRefresh, IconEye, IconX } from '@/shared/icons'
-import { getAuditLogs } from '@/services/security-api'
-import type { AuditLog } from '@/services/security-api'
+import { getAuditLogs } from '@/features/security/security-api'
+import type { AuditLog } from '@/features/security/security-api'
 
 const logs = ref<AuditLog[]>([])
 const loading = ref(true)

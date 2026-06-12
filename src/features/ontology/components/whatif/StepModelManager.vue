@@ -4,7 +4,7 @@
  * 모델 관리 — 등록된 모델 목록, 상세 보기, 삭제
  */
 import { ref, onMounted } from 'vue'
-import { whatifDomainApi, type RegisteredModel } from '@/services/whatif-domain-api'
+import { whatifDomainApi, type RegisteredModel } from '@/features/ontology/whatif-domain-api'
 
 const props = defineProps<{
   schemaId: string

@@ -4,7 +4,7 @@
  * Step 2: 제안된 모델 DAG 시각화
  */
 import { ref, computed } from 'vue'
-import { whatifDomainApi, type EdgeCandidate, type ModelSpec } from '@/services/whatif-domain-api'
+import { whatifDomainApi, type EdgeCandidate, type ModelSpec } from '@/features/ontology/whatif-domain-api'
 
 const props = defineProps<{
   schemaId: string

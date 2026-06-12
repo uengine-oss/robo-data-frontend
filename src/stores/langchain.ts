@@ -3,7 +3,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { streamLangChain, type LangChainStreamEvent, type LangChainStep } from '@/services/langchain-api'
+import { streamLangChain, type LangChainStreamEvent, type LangChainStep } from '@/features/langchain/langchain-api'
 
 export type LangChainStatus = 'idle' | 'running' | 'completed' | 'error'
 export type LangChainPhase = 'idle' | 'thinking' | 'reasoning' | 'acting' | 'observing'

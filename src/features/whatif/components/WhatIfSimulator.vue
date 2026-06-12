@@ -224,7 +224,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, watch } from 'vue'
-import { whatifApi, type DataDiscoveryResult, type CausalDiscoveryResult, type ValidationResult, type ComparisonResult, type LiteracyExplanation, type AgentAnalysisResult } from '@/services/whatif-api'
+import { whatifApi, type DataDiscoveryResult, type CausalDiscoveryResult, type ValidationResult, type ComparisonResult, type LiteracyExplanation, type AgentAnalysisResult } from '@/features/whatif/whatif-api'
 import ScenarioInput from './ScenarioInput.vue'
 import DataSelector from './DataSelector.vue'
 import CausalDiscovery from './CausalDiscovery.vue'

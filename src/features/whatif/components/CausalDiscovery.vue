@@ -339,8 +339,8 @@
 import { ref, watch, onMounted, nextTick } from 'vue'
 import cytoscape from 'cytoscape'
 import edgehandles from 'cytoscape-edgehandles'
-import type { CausalDiscoveryResult } from '@/services/whatif-api'
-import { whatifApi } from '@/services/whatif-api'
+import type { CausalDiscoveryResult } from '@/features/whatif/whatif-api'
+import { whatifApi } from '@/features/whatif/whatif-api'
 
 // Edgehandles 확장 등록
 cytoscape.use(edgehandles)

@@ -5,8 +5,8 @@
  */
 import { ref, onMounted, computed } from 'vue'
 import { IconPlus, IconEdit, IconTrash, IconSearch, IconCheck, IconX, IconRefresh } from '@/shared/icons'
-import { getUsers, createUser, updateUser, deleteUser as apiDeleteUser, getRoles } from '@/services/security-api'
-import type { User, Role } from '@/services/security-api'
+import { getUsers, createUser, updateUser, deleteUser as apiDeleteUser, getRoles } from '@/features/security/security-api'
+import type { User, Role } from '@/features/security/security-api'
 
 const users = ref<User[]>([])
 const roles = ref<Role[]>([])

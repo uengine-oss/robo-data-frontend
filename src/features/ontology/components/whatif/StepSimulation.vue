@@ -16,7 +16,7 @@ import {
   type SnapshotResponse,
   type SimulateResponse,
   type SimulationTrace,
-} from '@/services/whatif-domain-api'
+} from '@/features/ontology/whatif-domain-api'
 
 const props = defineProps<{
   schemaId: string

@@ -4,7 +4,7 @@
  * Step 4: 모델 검증 — 백테스팅 메트릭, 민감도 분석
  */
 import { ref } from 'vue'
-import { whatifDomainApi, type ValidateResponse } from '@/services/whatif-domain-api'
+import { whatifDomainApi, type ValidateResponse } from '@/features/ontology/whatif-domain-api'
 
 const props = defineProps<{
   schemaId: string
