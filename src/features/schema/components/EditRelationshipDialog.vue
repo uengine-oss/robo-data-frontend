@@ -6,6 +6,7 @@
  * - 관계 편집 (mode='edit'): 관계 이름 변경, matchStrategy, cardinality 설정 변경, 관계 삭제
  */
 import { logger } from '@/shared/utils/logger'
+import { objectExplorerApi, relationshipApi } from '@/features/object-explorer/api'
 import { ref, computed, onMounted, watch } from 'vue'
 import { Teleport } from 'vue'
 import { IconX, IconCheck, IconLink, IconTrash, IconAlertTriangle } from '@/shared/icons'
@@ -70,11 +71,8 @@ const cardinalityOptions = [
 async function loadObjectTypes() {
   isLoadingTypes.value = true
   try {
-    const response = await fetch('/api/gateway/ontology/object-types')
-    if (response.ok) {
-      const data = await response.json()
-      objectTypes.value = data.objectTypes || []
-    }
+    const data = await objectExplorerApi.getObjectTypes()
+    objectTypes.value = data.objectTypes || []
   } catch (err) {
     logger.error('ObjectType 목록 로드 실패:', err)
   } finally {
@@ -87,17 +85,14 @@ async function loadSourceColumns() {
   if (!props.sourceType) return
   
   try {
-    const response = await fetch(`/api/gateway/ontology/object-types/${encodeURIComponent(props.sourceType)}`)
-    if (response.ok) {
-      const data = await response.json()
-      sourceColumns.value = (data.columns || []).map((c: any) => c.name)
-      
-      // 전달받은 sourceColumn이 있으면 선택
-      if (props.sourceColumn && sourceColumns.value.includes(props.sourceColumn)) {
-        selectedSourceColumn.value = props.sourceColumn
-      } else if (sourceColumns.value.length > 0) {
-        selectedSourceColumn.value = sourceColumns.value[0]
-      }
+    const data = await objectExplorerApi.getObjectType(props.sourceType)
+    sourceColumns.value = (data.columns || []).map((c: any) => c.name)
+
+    // 전달받은 sourceColumn이 있으면 선택
+    if (props.sourceColumn && sourceColumns.value.includes(props.sourceColumn)) {
+      selectedSourceColumn.value = props.sourceColumn
+    } else if (sourceColumns.value.length > 0) {
+      selectedSourceColumn.value = sourceColumns.value[0]
     }
   } catch (err) {
     logger.error('소스 컬럼 로드 실패:', err)
@@ -113,17 +108,14 @@ async function loadTargetColumns() {
   
   isLoadingColumns.value = true
   try {
-    const response = await fetch(`/api/gateway/ontology/object-types/${encodeURIComponent(selectedTargetType.value)}`)
-    if (response.ok) {
-      const data = await response.json()
-      targetColumns.value = (data.columns || []).map((c: any) => c.name)
-      
-      // 전달받은 targetColumn이 있으면 선택
-      if (props.targetColumn && targetColumns.value.includes(props.targetColumn)) {
-        selectedTargetColumn.value = props.targetColumn
-      } else if (targetColumns.value.length > 0 && !selectedTargetColumn.value) {
-        selectedTargetColumn.value = targetColumns.value[0]
-      }
+    const data = await objectExplorerApi.getObjectType(selectedTargetType.value)
+    targetColumns.value = (data.columns || []).map((c: any) => c.name)
+
+    // 전달받은 targetColumn이 있으면 선택
+    if (props.targetColumn && targetColumns.value.includes(props.targetColumn)) {
+      selectedTargetColumn.value = props.targetColumn
+    } else if (targetColumns.value.length > 0 && !selectedTargetColumn.value) {
+      selectedTargetColumn.value = targetColumns.value[0]
     }
   } catch (err) {
     logger.error('타겟 컬럼 로드 실패:', err)
@@ -141,27 +133,21 @@ async function loadRelationship() {
   error.value = null
   
   try {
-    const params = new URLSearchParams({
+    const data = await relationshipApi.get({
       sourceType: props.sourceType,
       targetType: props.targetType,
       sourceColumn: props.sourceColumn || '',
       targetColumn: props.targetColumn
     })
-    
-    const response = await fetch(`/api/gateway/ontology/relationships?${params}`)
-    
-    if (response.ok) {
-      const data = await response.json()
+
+    if (data) {
       relationshipName.value = data.name || `${props.sourceType}.${props.sourceColumn} → ${props.targetType}.${props.targetColumn}`
       selectedMatchStrategy.value = data.matchStrategy || 'EXACT_MATCH'
       selectedCardinality.value = data.cardinality || 'ONE_TO_MANY'
       description.value = data.description || ''
-    } else if (response.status === 404) {
-      // 관계가 없으면 기본값 사용
-      relationshipName.value = `${props.sourceType}.${props.sourceColumn} → ${props.targetType}.${props.targetColumn}`
     } else {
-      const errData = await response.json()
-      throw new Error(errData.detail || '관계 정보를 불러올 수 없습니다.')
+      // 관계가 없으면(404) 기본값 사용
+      relationshipName.value = `${props.sourceType}.${props.sourceColumn} → ${props.targetType}.${props.targetColumn}`
     }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '관계 정보를 불러올 수 없습니다.'
@@ -181,28 +167,17 @@ async function createRelationship() {
   error.value = null
   
   try {
-    const response = await fetch('/api/gateway/ontology/relationships', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sourceType: props.sourceType,
-        targetType: selectedTargetType.value,
-        sourceColumn: selectedSourceColumn.value,
-        targetColumn: selectedTargetColumn.value,
-        matchStrategy: selectedMatchStrategy.value,
-        cardinality: selectedCardinality.value,
-        name: relationshipName.value || undefined,
-        description: description.value || undefined
-      })
+    const result = await relationshipApi.create({
+      sourceType: props.sourceType,
+      targetType: selectedTargetType.value,
+      sourceColumn: selectedSourceColumn.value,
+      targetColumn: selectedTargetColumn.value,
+      matchStrategy: selectedMatchStrategy.value,
+      cardinality: selectedCardinality.value,
+      name: relationshipName.value || undefined,
+      description: description.value || undefined
     })
-    
-    if (response.ok) {
-      const result = await response.json()
-      emit('created', result.relationship)
-    } else {
-      const errData = await response.json()
-      throw new Error(errData.detail || '관계 생성에 실패했습니다.')
-    }
+    emit('created', result.relationship)
   } catch (err) {
     error.value = err instanceof Error ? err.message : '관계 생성에 실패했습니다.'
   } finally {
@@ -218,30 +193,21 @@ async function saveRelationship() {
   error.value = null
   
   try {
-    const params = new URLSearchParams({
-      sourceType: props.sourceType,
-      targetType: props.targetType,
-      sourceColumn: props.sourceColumn || '',
-      targetColumn: props.targetColumn
-    })
-    
-    const response = await fetch(`/api/gateway/ontology/relationships?${params}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    await relationshipApi.update(
+      {
+        sourceType: props.sourceType,
+        targetType: props.targetType,
+        sourceColumn: props.sourceColumn || '',
+        targetColumn: props.targetColumn
+      },
+      {
         name: relationshipName.value || undefined,
         matchStrategy: selectedMatchStrategy.value,
         cardinality: selectedCardinality.value,
         description: description.value || undefined
-      })
-    })
-    
-    if (response.ok) {
-      emit('updated')
-    } else {
-      const errData = await response.json()
-      throw new Error(errData.detail || '관계 저장에 실패했습니다.')
-    }
+      }
+    )
+    emit('updated')
   } catch (err) {
     error.value = err instanceof Error ? err.message : '관계 저장에 실패했습니다.'
   } finally {
@@ -262,23 +228,13 @@ async function deleteRelationship() {
   error.value = null
   
   try {
-    const params = new URLSearchParams({
+    await relationshipApi.remove({
       sourceType: props.sourceType,
       targetType: props.targetType,
       sourceColumn: props.sourceColumn || '',
       targetColumn: props.targetColumn
     })
-    
-    const response = await fetch(`/api/gateway/ontology/relationships?${params}`, {
-      method: 'DELETE'
-    })
-    
-    if (response.ok) {
-      emit('deleted')
-    } else {
-      const errData = await response.json()
-      throw new Error(errData.detail || '관계 삭제에 실패했습니다.')
-    }
+    emit('deleted')
   } catch (err) {
     error.value = err instanceof Error ? err.message : '관계 삭제에 실패했습니다.'
   } finally {

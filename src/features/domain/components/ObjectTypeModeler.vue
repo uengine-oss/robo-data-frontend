@@ -16,6 +16,8 @@ import { EditRelationshipDialog } from '@/features/schema'
 import ObjectTypeEditDialog from './ObjectTypeEditDialog.vue'
 import BehaviorDialog from './BehaviorDialog.vue'
 import BehaviorExecuteDialog from './BehaviorExecuteDialog.vue'
+import { objectExplorerApi } from '@/features/object-explorer/api'
+import { behaviorApi } from '@/features/domain/api'
 
 // 스토어 사용
 const canvasStore = useSchemaCanvasStore()
@@ -213,31 +215,12 @@ async function executeBehavior(objectTypeName: string, behaviorName: string, ins
   behaviorExecutionResult.value = null
   
   try {
-    const response = await fetch(
-      `/api/gateway/ontology/object-types/${encodeURIComponent(objectTypeName)}/behaviors/${encodeURIComponent(behaviorName)}/execute`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          objectTypeName,
-          behaviorName,
-          instanceData
-        })
-      }
-    )
-    
-    if (response.ok) {
-      const result = await response.json()
-      behaviorExecutionResult.value = result
-      console.log('[ObjectTypeModeler] Behavior 실행 결과:', result)
-    } else {
-      const errData = await response.json()
-      console.error('[ObjectTypeModeler] Behavior 실행 실패:', errData)
-      behaviorExecutionResult.value = { success: false, error: errData.detail }
-    }
+    const result = await behaviorApi.execute(objectTypeName, behaviorName, { objectTypeName, behaviorName, instanceData })
+    behaviorExecutionResult.value = result
+    console.log('[ObjectTypeModeler] Behavior 실행 결과:', result)
   } catch (err) {
     console.error('[ObjectTypeModeler] Behavior 실행 오류:', err)
-    behaviorExecutionResult.value = { success: false, error: String(err) }
+    behaviorExecutionResult.value = { success: false, error: err instanceof Error ? err.message : String(err) }
   } finally {
     isExecutingBehavior.value = false
   }
@@ -248,15 +231,9 @@ async function loadObjectTypes() {
   isLoading.value = true
   try {
     console.log('[ObjectTypeModeler] ObjectTypes 로드 시작...')
-    const response = await fetch('/api/gateway/ontology/object-types')
-    
-    if (response.ok) {
-      const data = await response.json()
-      objectTypes.value = data.objectTypes || []
-      console.log('[ObjectTypeModeler] 로드된 ObjectTypes:', objectTypes.value.length, '개')
-    } else {
-      console.error('[ObjectTypeModeler] API 응답 실패:', response.status)
-    }
+    const data = await objectExplorerApi.getObjectTypes()
+    objectTypes.value = data.objectTypes || []
+    console.log('[ObjectTypeModeler] 로드된 ObjectTypes:', objectTypes.value.length, '개')
   } catch (err) {
     console.error('[ObjectTypeModeler] ObjectType 로드 실패:', err)
   } finally {
@@ -395,21 +372,9 @@ async function confirmDelete() {
   deleteError.value = null
   
   try {
-    const response = await fetch(`/api/gateway/ontology/object-types/${encodeURIComponent(deleteTarget.value.name)}`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        confirmName: deleteConfirmName.value
-      })
-    })
-    
-    if (response.ok) {
-      closeDeleteDialog()
-      loadObjectTypes()
-    } else {
-      const errData = await response.json()
-      deleteError.value = errData.detail || '삭제에 실패했습니다.'
-    }
+    await objectExplorerApi.deleteObjectType(deleteTarget.value.name, deleteConfirmName.value)
+    closeDeleteDialog()
+    loadObjectTypes()
   } catch (err) {
     deleteError.value = err instanceof Error ? err.message : '삭제에 실패했습니다.'
   } finally {
@@ -522,23 +487,11 @@ async function confirmRename() {
   renameError.value = null
   
   try {
-    const response = await fetch(`/api/gateway/ontology/object-types/${encodeURIComponent(renameTarget.value.name)}/rename`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        newName: newName
-      })
-    })
-    
-    if (response.ok) {
-      closeRenameDialog()
-      loadObjectTypes()
-      // 캔버스도 새로고침
-      canvasStore.loadAllTables()
-    } else {
-      const errData = await response.json()
-      renameError.value = errData.detail || '이름 변경에 실패했습니다.'
-    }
+    await objectExplorerApi.renameObjectType(renameTarget.value.name, newName)
+    closeRenameDialog()
+    loadObjectTypes()
+    // 캔버스도 새로고침
+    canvasStore.loadAllTables()
   } catch (err) {
     renameError.value = err instanceof Error ? err.message : '이름 변경에 실패했습니다.'
   } finally {

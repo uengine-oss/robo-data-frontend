@@ -165,13 +165,11 @@ import { IconPlay } from '@/shared/icons'
 import ResultTable from './ResultTable.vue'
 import type { ReactExecutionResult } from '@/shared/types'
 import { useDatasourcesStore } from '@/features/datasources/datasources'
+import { text2sqlApi } from '@/features/text2sql/api'
 
 defineEmits<{
   (e: 'change-mode', mode: 'react' | 'langchain' | 'direct'): void
 }>()
-
-const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? '/api/gateway'
-const API_BASE = import.meta.env.VITE_TEXT2SQL_API_URL || `${API_GATEWAY_URL}/text2sql`
 
 // State
 const sqlText = ref('')
@@ -285,27 +283,6 @@ async function executeSql() {
     if (!selectedDs?.name) {
       throw new Error('데이터소스를 선택해주세요')
     }
-    const response = await fetch(`${API_BASE}/direct-sql/stream`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sql: sqlText.value,
-        datasource: selectedDs.name,
-        max_sql_seconds: 60,
-        format_with_ai: formatWithAi.value
-      })
-    })
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
-    
-    const reader = response.body?.getReader()
-    if (!reader) throw new Error('스트림을 읽을 수 없습니다')
-    
-    const decoder = new TextDecoder()
-    let buffer = ''
-
     const handleEvent = (event: any) => {
       switch (event.event) {
         case 'validating':
@@ -370,32 +347,16 @@ async function executeSql() {
       }
     }
 
-    const parseAndHandleLine = (rawLine: string) => {
-      const line = rawLine.trim()
-      if (!line) return
-      const jsonLine = line.startsWith('data:') ? line.slice(5).trimStart() : line
-      if (!jsonLine) return
-      try {
-        handleEvent(JSON.parse(jsonLine))
-      } catch (e) {
-        // 불완전한 JSON 라인은 다음 청크에서 이어서 처리
-      }
-    }
+    await text2sqlApi.directSqlStream(
+      {
+        sql: sqlText.value,
+        datasource: selectedDs.name,
+        max_sql_seconds: 60,
+        format_with_ai: formatWithAi.value
+      },
+      handleEvent
+    )
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-      for (const line of lines) parseAndHandleLine(line)
-    }
-
-    // decoder 내부 잔여 버퍼 및 마지막 미처리 라인 반영
-    buffer += decoder.decode()
-    if (buffer.trim()) parseAndHandleLine(buffer)
-    
   } catch (e) {
     error.value = e instanceof Error ? e.message : '알 수 없는 오류'
     isStreamingSummary.value = false

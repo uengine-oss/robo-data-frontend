@@ -1,5 +1,5 @@
-/** domain api — Agents.md 에디터·노드 비주얼이펙트·에이전트 스케줄러·ProcessGPT. 공유 http 코어 사용. */
-import { ONTOLOGY_BASE_URL, API_GATEWAY_URL } from '@/shared/services/http'
+/** domain api — Agents.md 에디터·노드 비주얼이펙트·에이전트 스케줄러·ProcessGPT·Behavior. 공유 http 코어 사용. */
+import { ONTOLOGY_BASE_URL, API_GATEWAY_URL, postJson, handleHttpError } from '@/shared/services/http'
 
 // ============================================================================
 // Agents.md Editor API (Node-type Agent CRUD + Context)
@@ -312,5 +312,62 @@ export const processGptApi = {
     }
     // Fallback: parse from ReAct agent response
     return []
+  }
+}
+
+// ============================================================================
+// Object-Type Behavior API — /ontology/object-types/{name}/behaviors/*
+// ============================================================================
+
+export const behaviorApi = {
+  /**
+   * Behavior 실행. body 는 호출처별 페이로드를 그대로 전달한다
+   * (백엔드 계약 보존 — instanceData / instance_data 등 키 차이는 호출처가 책임).
+   */
+  async execute(objectTypeName: string, behaviorName: string, body: unknown): Promise<any> {
+    return postJson(
+      `${ONTOLOGY_BASE_URL}/object-types/${encodeURIComponent(objectTypeName)}/behaviors/${encodeURIComponent(behaviorName)}/execute`,
+      body,
+      {}
+    )
+  },
+
+  /** Behavior 생성 */
+  async create(objectTypeName: string, behavior: unknown): Promise<any> {
+    return postJson(`${ONTOLOGY_BASE_URL}/object-types/${encodeURIComponent(objectTypeName)}/behaviors`, behavior, {})
+  },
+
+  /** Behavior 수정 */
+  async update(objectTypeName: string, behaviorName: string, behavior: unknown): Promise<any> {
+    const response = await fetch(`${ONTOLOGY_BASE_URL}/object-types/${encodeURIComponent(objectTypeName)}/behaviors/${encodeURIComponent(behaviorName)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(behavior)
+    })
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    return response.json().catch(() => ({}))
+  },
+
+  /** Behavior 삭제 */
+  async remove(objectTypeName: string, behaviorName: string): Promise<void> {
+    const response = await fetch(`${ONTOLOGY_BASE_URL}/object-types/${encodeURIComponent(objectTypeName)}/behaviors/${encodeURIComponent(behaviorName)}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' }
+    })
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+  },
+
+  /** Behavior 용 코드 생성 (LLM) — /ontology/generate-code */
+  async generateCode(prompt: string, language: string = 'python'): Promise<{ code?: string; result?: string } & Record<string, any>> {
+    return postJson(`${ONTOLOGY_BASE_URL}/generate-code`, { prompt, language }, {})
+  },
+
+  /** Behavior 실행 결과를 테이블로 저장 — /ontology/save-result-to-table */
+  async saveResultToTable(body: unknown): Promise<{ rows_inserted?: number } & Record<string, any>> {
+    return postJson(`${ONTOLOGY_BASE_URL}/save-result-to-table`, body, {})
   }
 }

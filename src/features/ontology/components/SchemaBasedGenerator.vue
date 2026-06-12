@@ -120,6 +120,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useOntologyStore } from '@/features/ontology/ontology'
+import { text2sqlApi } from '@/features/text2sql/api'
+import { objectExplorerApi } from '@/features/object-explorer/api'
 
 const emit = defineEmits(['generated', 'cancel'])
 const store = useOntologyStore()
@@ -151,17 +153,14 @@ onMounted(async () => {
 async function loadDatasources() {
   loadingDatasources.value = true
   try {
-    const response = await fetch('/api/gateway/text2sql/meta/datasources')
-    if (response.ok) {
-      const data = await response.json()
-      // API가 문자열 배열을 반환하므로 객체 배열로 변환
-      if (Array.isArray(data)) {
-        datasources.value = data.map((ds: string | { name: string }) => 
-          typeof ds === 'string' ? { name: ds, type: 'Database' } : ds
-        )
-      } else {
-        datasources.value = data
-      }
+    const data = await text2sqlApi.getDatasources()
+    // API가 문자열 배열을 반환하므로 객체 배열로 변환
+    if (Array.isArray(data)) {
+      datasources.value = data.map((ds: string | { name: string }) =>
+        typeof ds === 'string' ? { name: ds, type: 'Database' } : ds
+      )
+    } else {
+      datasources.value = data
     }
   } catch (err) {
     console.error('데이터 소스 로드 실패:', err)
@@ -179,17 +178,14 @@ watch(selectedDatasource, async (ds) => {
   
   loadingSchemas.value = true
   try {
-    const response = await fetch(`/api/gateway/text2sql/meta/datasources/${encodeURIComponent(ds)}/schemas`)
-    if (response.ok) {
-      const data = await response.json()
-      // API가 문자열 배열을 반환하므로 객체 배열로 변환
-      if (Array.isArray(data)) {
-        schemas.value = data.map((s: string | { name: string }) => 
-          typeof s === 'string' ? { name: s } : s
-        )
-      } else {
-        schemas.value = data
-      }
+    const data = await text2sqlApi.getDatasourceSchemas(ds)
+    // API가 문자열 배열을 반환하므로 객체 배열로 변환
+    if (Array.isArray(data)) {
+      schemas.value = data.map((s: string | { name: string }) =>
+        typeof s === 'string' ? { name: s } : s
+      )
+    } else {
+      schemas.value = data
     }
   } catch (err) {
     console.error('스키마 로드 실패:', err)
@@ -224,14 +220,8 @@ async function generateOntology() {
       domainContext: domainContext.value || undefined
     }
     
-    const response = await fetch('/api/gateway/ontology/generate-from-schema', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
-    })
-    
-    const data = await response.json()
-    
+    const data = await objectExplorerApi.generateFromSchema(requestBody)
+
     if (!data.success) {
       throw new Error(data.error || '온톨로지 생성에 실패했습니다')
     }

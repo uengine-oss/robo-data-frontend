@@ -517,6 +517,8 @@ import type { ReactExecutionResult } from '@/shared/types'
 import { buildSqlLineDiff, type PreviousSqlLine, type SqlDiffLine } from '@/shared/utils/sqlLineDiff'
 import { getText2SqlStageLabelKo } from '@/shared/utils/text2sqlProgress'
 import { text2sqlApi } from '@/features/text2sql/api'
+import { ontologyApi } from '@/features/ontology/api'
+import { objectExplorerApi } from '@/features/object-explorer/api'
 import {
   IconPlay, IconUpload, IconSettings, IconChevronDown, IconCopy
 } from '@/shared/icons'
@@ -764,11 +766,8 @@ async function openOntologyInstanceModal(msg: ChatMessage) {
 
   // 스키마 목록 로드
   try {
-    const response = await fetch('/api/gateway/ontology/schemas')
-    if (response.ok) {
-      const data = await response.json()
-      ontologySchemas.value = data.schemas || []
-    }
+    const data = await ontologyApi.listSchemas()
+    ontologySchemas.value = data.schemas || []
   } catch (err) {
     console.error('스키마 목록 로드 실패:', err)
   }
@@ -790,11 +789,8 @@ watch(selectedSchemaId, async (schemaId) => {
   }
 
   try {
-    const response = await fetch(`/api/gateway/ontology/schemas/${schemaId}`)
-    if (response.ok) {
-      const schema = await response.json()
-      availableNodeTypes.value = schema.nodes || []
-    }
+    const schema = await ontologyApi.getSchemaById(schemaId)
+    availableNodeTypes.value = schema?.nodes || []
   } catch (err) {
     console.error('스키마 상세 로드 실패:', err)
     availableNodeTypes.value = []
@@ -818,52 +814,37 @@ async function createOntologyInstances() {
     // 1. Materialized View 생성 (선택된 경우)
     let viewFullName = null
     if (createMaterializedView.value && mvViewName.value) {
-      const mvResponse = await fetch('/api/gateway/text2sql/direct-sql/materialized-view', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      try {
+        const mvData = await text2sqlApi.createMaterializedView({
           datasource: selectedDs.name,
           view_name: mvViewName.value,
-          sql_query: ontologyModalData.value.sql,
+          source_sql: ontologyModalData.value.sql,
           schema_name: 'public',
           description: `온톨로지 인스턴스 동기화: ${selectedNodeType.value}`,
           refresh_on_create: true
         })
-      })
-
-      if (mvResponse.ok) {
-        const mvData = await mvResponse.json()
         viewFullName = mvData.full_name
         console.log('Materialized View 생성됨:', viewFullName)
+      } catch (mvErr) {
+        console.warn('Materialized View 생성 실패 (무시):', mvErr)
       }
     }
 
     // 2. Neo4j에 온톨로지 인스턴스 생성
-    const instanceResponse = await fetch('/api/gateway/ontology/instances/bulk-create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        schema_id: selectedSchemaId.value,
-        node_type: selectedNodeType.value,
-        sql_query: ontologyModalData.value.sql,
-        id_column: selectedIdColumn.value,
-        name_column: selectedNameColumn.value || selectedIdColumn.value,
-        materialized_view: viewFullName,
-        source_question: ontologyModalData.value.question
-      })
+    const result = await objectExplorerApi.bulkCreateInstances({
+      schema_id: selectedSchemaId.value,
+      node_type: selectedNodeType.value,
+      sql_query: ontologyModalData.value.sql,
+      id_column: selectedIdColumn.value,
+      name_column: selectedNameColumn.value || selectedIdColumn.value,
+      materialized_view: viewFullName,
+      source_question: ontologyModalData.value.question
     })
-
-    if (instanceResponse.ok) {
-      const result = await instanceResponse.json()
-      alert(`${result.created_count || 0}개의 인스턴스가 생성되었습니다.`)
-      showOntologyModal.value = false
-    } else {
-      const errData = await instanceResponse.json()
-      alert(`인스턴스 생성 실패: ${errData.detail || '알 수 없는 오류'}`)
-    }
+    alert(`${result.created_count || 0}개의 인스턴스가 생성되었습니다.`)
+    showOntologyModal.value = false
   } catch (err) {
     console.error('온톨로지 인스턴스 생성 실패:', err)
-    alert('인스턴스 생성 중 오류가 발생했습니다.')
+    alert(`인스턴스 생성 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`)
   } finally {
     isCreatingInstances.value = false
   }

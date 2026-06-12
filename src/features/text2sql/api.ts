@@ -1,6 +1,6 @@
 /** text2sql api — 자연어 질의(ReAct)·메타·직접SQL·머티리얼라이즈드뷰. 공유 http 코어 사용. */
 import type { ReactRequest, ReactStreamEvent, Text2SqlTableInfo, Text2SqlColumnInfo } from '@/shared/types'
-import { TEXT2SQL_BASE_URL, ROBO_BASE_URL, postJson, type Headers } from '@/shared/services/http'
+import { TEXT2SQL_BASE_URL, ROBO_BASE_URL, postJson, handleHttpError, type Headers } from '@/shared/services/http'
 
 // ============================================================================
 // Text2SQL API (ReAct)
@@ -252,6 +252,45 @@ export const text2sqlApi = {
   },
 
   /**
+   * LLM 텍스트 생성 (OpenAI 호환) — /text2sql/generate
+   */
+  async generate(
+    messages: Array<{ role: string; content: string }>,
+    temperature: number = 0.3
+  ): Promise<{ content?: string; result?: string; response?: string } & Record<string, any>> {
+    return postJson(`${TEXT2SQL_BASE_URL}/generate`, { messages, temperature }, {})
+  },
+
+  /**
+   * 자연어 질의 → 결과 (단발) — /text2sql/ask
+   */
+  async ask(question: string, datasource: string, limit: number = 1000): Promise<Record<string, any>> {
+    return postJson(`${TEXT2SQL_BASE_URL}/ask`, { question, datasource, limit }, {})
+  },
+
+  /**
+   * 데이터소스 목록 — /text2sql/meta/datasources
+   */
+  async getDatasources(): Promise<any> {
+    const response = await fetch(`${TEXT2SQL_BASE_URL}/meta/datasources`)
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    return response.json()
+  },
+
+  /**
+   * 데이터소스의 스키마 목록 — /text2sql/meta/datasources/{ds}/schemas
+   */
+  async getDatasourceSchemas(datasource: string): Promise<any> {
+    const response = await fetch(`${TEXT2SQL_BASE_URL}/meta/datasources/${encodeURIComponent(datasource)}/schemas`)
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    return response.json()
+  },
+
+  /**
    * 헬스체크
    */
   async healthCheck(): Promise<unknown> {
@@ -260,6 +299,62 @@ export const text2sqlApi = {
       throw new Error(`HTTP ${response.status}`)
     }
     return response.json()
+  },
+
+  /**
+   * Direct SQL 실행 (NDJSON 스트림) — 검증·자동교정·실행·AI포맷 등 이벤트를 onEvent 로 전달.
+   * 라인은 `data:` 접두가 붙을 수 있다. 소비처는 event.event(또는 event.type) 로 분기한다.
+   * (DirectSqlInput·Text2SqlTab·CreateObjectTypeDialog·BehaviorExecuteDialog 공용)
+   */
+  async directSqlStream(
+    request: { sql: string; datasource: string; max_sql_seconds?: number; format_with_ai?: boolean },
+    onEvent: (event: any) => void,
+    headers: Headers = {}
+  ): Promise<void> {
+    if (!request.datasource) {
+      throw new Error('datasource is required')
+    }
+    const response = await fetch(`${TEXT2SQL_BASE_URL}/direct-sql/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(request)
+    })
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('스트림을 읽을 수 없습니다')
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+    const parseAndHandleLine = (rawLine: string) => {
+      const line = rawLine.trim()
+      if (!line) return
+      const jsonLine = line.startsWith('data:') ? line.slice(5).trimStart() : line
+      if (!jsonLine) return
+      let parsed: any
+      try {
+        parsed = JSON.parse(jsonLine)
+      } catch {
+        return // 불완전한 JSON 라인만 무시 (다음 청크에서 이어 처리)
+      }
+      onEvent(parsed) // onEvent 내부 예외(에러 이벤트 throw 등)는 호출자로 전파
+    }
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) parseAndHandleLine(line)
+      }
+      buffer += decoder.decode()
+      if (buffer.trim()) parseAndHandleLine(buffer)
+    } finally {
+      reader.releaseLock()
+    }
   },
 
   // ========================================================================

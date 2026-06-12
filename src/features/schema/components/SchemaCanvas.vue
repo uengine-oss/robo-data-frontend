@@ -12,6 +12,7 @@ import TextViewer from '@/shared/components/TextViewer.vue'
 import CardinalityModal, { type ConnectionInfo, type Cardinality, type MatchStrategy } from './CardinalityModal.vue'
 import EditRelationshipDialog from './EditRelationshipDialog.vue'
 import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
+import { behaviorApi } from '@/features/domain/api'
 import type { Text2SqlTableInfo } from '@/shared/types'
 import { IconTable, IconSearch, IconRefresh, IconTrash, IconZoomIn, IconZoomOut, IconMaximize, IconLink, IconFolder, IconChevronRight, IconDatabase } from '@/shared/icons'
 
@@ -176,31 +177,7 @@ async function executeBehaviorForRow(rowIdx: number) {
   behaviorResultError.value = null
   
   try {
-    const url = `/api/gateway/ontology/object-types/${encodeURIComponent(behavior.objectTypeName)}/behaviors/${encodeURIComponent(behavior.name)}/execute`
-    
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ instanceData: instanceData })
-    })
-    
-    if (!response.ok) {
-      const errData = await response.json()
-      // detail이 배열인 경우 (Pydantic validation error) 처리
-      let errorMsg = 'Behavior 실행 실패'
-      if (errData.detail) {
-        if (Array.isArray(errData.detail)) {
-          errorMsg = errData.detail.map((e: any) => e.msg || JSON.stringify(e)).join(', ')
-        } else if (typeof errData.detail === 'string') {
-          errorMsg = errData.detail
-        } else {
-          errorMsg = JSON.stringify(errData.detail)
-        }
-      }
-      throw new Error(errorMsg)
-    }
-    
-    const result = await response.json()
+    const result = await behaviorApi.execute(behavior.objectTypeName, behavior.name, { instanceData })
     behaviorResultData.value = result
     showBehaviorResultPopup.value = true
     

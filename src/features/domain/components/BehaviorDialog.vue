@@ -7,6 +7,8 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { Teleport } from 'vue'
 import { IconX, IconCheck, IconPlay } from '@/shared/icons'
 import DmnEditor from './DmnEditor.vue'
+import { behaviorApi } from '@/features/domain/api'
+import { text2sqlApi } from '@/features/text2sql/api'
 
 interface BehaviorConfig {
   endpoint?: string
@@ -179,42 +181,18 @@ ${description.value}
 Python 코드만 출력하세요 (마크다운 코드블록 없이):
 `
 
-    const response = await fetch('/api/gateway/ontology/generate-code', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt,
-        language: 'python'
-      })
-    })
-    
-    if (!response.ok) {
-      // 직접 OpenAI 호출 시도
-      const openaiResponse = await fetch('/api/gateway/text2sql/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.3
-        })
-      })
-      
-      if (!openaiResponse.ok) {
-        throw new Error('코드 생성 API 호출 실패')
-      }
-      
-      const data = await openaiResponse.json()
-      let code = data.content || data.result || data.response || ''
-      
-      // 마크다운 코드블록 제거
-      code = code.replace(/^```python\n?/i, '').replace(/\n?```$/i, '').trim()
-      pythonCode.value = code
-    } else {
-      const data = await response.json()
-      let code = data.code || data.result || ''
-      code = code.replace(/^```python\n?/i, '').replace(/\n?```$/i, '').trim()
-      pythonCode.value = code
+    let code = ''
+    try {
+      const data = await behaviorApi.generateCode(prompt, 'python')
+      code = data.code || data.result || ''
+    } catch {
+      // 직접 OpenAI 호출 시도 (폴백)
+      const data = await text2sqlApi.generate([{ role: 'user', content: prompt }], 0.3)
+      code = data.content || data.result || data.response || ''
     }
+    // 마크다운 코드블록 제거
+    code = code.replace(/^```python\n?/i, '').replace(/\n?```$/i, '').trim()
+    pythonCode.value = code
     
     // Python 타입으로 전환
     behaviorType.value = 'python'
@@ -285,23 +263,12 @@ async function saveBehavior() {
   error.value = null
   
   try {
-    const url = props.mode === 'edit'
-      ? `/api/gateway/ontology/object-types/${encodeURIComponent(props.objectTypeName)}/behaviors/${encodeURIComponent(props.behavior?.name || '')}`
-      : `/api/gateway/ontology/object-types/${encodeURIComponent(props.objectTypeName)}/behaviors`
-    
-    const method = props.mode === 'edit' ? 'PATCH' : 'POST'
-    
-    const response = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(behavior)
-    })
-    
-    if (!response.ok) {
-      const errData = await response.json()
-      throw new Error(errData.detail || 'Behavior 저장 실패')
+    if (props.mode === 'edit') {
+      await behaviorApi.update(props.objectTypeName, props.behavior?.name || '', behavior)
+    } else {
+      await behaviorApi.create(props.objectTypeName, behavior)
     }
-    
+
     emit('saved', behavior)
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Behavior 저장 실패'
@@ -318,18 +285,7 @@ async function deleteBehavior() {
   error.value = null
   
   try {
-    const url = `/api/gateway/ontology/object-types/${encodeURIComponent(props.objectTypeName)}/behaviors/${encodeURIComponent(props.behavior.name)}`
-    
-    const response = await fetch(url, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' }
-    })
-    
-    if (!response.ok) {
-      const errData = await response.json()
-      throw new Error(errData.detail || 'Behavior 삭제 실패')
-    }
-    
+    await behaviorApi.remove(props.objectTypeName, props.behavior.name)
     emit('deleted', props.behavior.name)
     showDeleteConfirm.value = false
   } catch (err) {

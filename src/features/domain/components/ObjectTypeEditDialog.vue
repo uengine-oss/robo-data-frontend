@@ -8,6 +8,7 @@
 import { ref, computed, watch } from 'vue'
 import { IconX, IconEdit, IconCheck, IconBarChart } from '@/shared/icons'
 import ChartConfigTab from './ChartConfigTab.vue'
+import { objectExplorerApi } from '@/features/object-explorer/api'
 
 export interface ChartConfig {
   chartType: 'bar' | 'line' | 'pie' | 'map' | 'none'
@@ -76,18 +77,8 @@ async function handleRename() {
   renameError.value = null
   
   try {
-    const response = await fetch(`/api/gateway/ontology/object-types/${encodeURIComponent(props.objectType.name)}/rename`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ newName: newName.value.replace(/\s+/g, '_') })
-    })
-    
-    if (response.ok) {
-      emit('saved', { ...props.objectType, name: newName.value })
-    } else {
-      const errData = await response.json()
-      renameError.value = errData.detail || '이름 변경에 실패했습니다.'
-    }
+    await objectExplorerApi.renameObjectType(props.objectType.name, newName.value.replace(/\s+/g, '_'))
+    emit('saved', { ...props.objectType, name: newName.value })
   } catch (err) {
     renameError.value = err instanceof Error ? err.message : '이름 변경에 실패했습니다.'
   } finally {
@@ -101,23 +92,13 @@ async function handleSaveChartConfig(config: ChartConfig) {
   chartSaveMessage.value = null
   
   try {
-    const response = await fetch(`/api/gateway/ontology/object-types/${encodeURIComponent(props.objectType.name)}/chart-config`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chartConfig: config })
-    })
-    
-    if (response.ok) {
-      chartConfig.value = config
-      chartSaveMessage.value = '차트 설정이 저장되었습니다.'
-      setTimeout(() => {
-        chartSaveMessage.value = null
-      }, 3000)
-      emit('saved', { ...props.objectType, chartConfig: config })
-    } else {
-      const errData = await response.json()
-      chartSaveMessage.value = errData.detail || '저장에 실패했습니다.'
-    }
+    await objectExplorerApi.updateChartConfig(props.objectType.name, config)
+    chartConfig.value = config
+    chartSaveMessage.value = '차트 설정이 저장되었습니다.'
+    setTimeout(() => {
+      chartSaveMessage.value = null
+    }, 3000)
+    emit('saved', { ...props.objectType, chartConfig: config })
   } catch (err) {
     chartSaveMessage.value = err instanceof Error ? err.message : '저장에 실패했습니다.'
   } finally {

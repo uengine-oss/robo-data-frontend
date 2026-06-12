@@ -93,9 +93,11 @@ function parseErrorMessage(errorText: string, status: number): string {
   try {
     const errorJson = JSON.parse(errorText)
     if (errorJson.detail) {
-      return errorJson.error_type
-        ? `[${errorJson.error_type}] ${errorJson.detail}`
-        : errorJson.detail
+      // FastAPI detail 은 문자열 또는 Pydantic 검증오류 배열([{msg,...}]) — 사람이 읽게 평탄화
+      const detail = Array.isArray(errorJson.detail)
+        ? errorJson.detail.map((e: any) => e?.msg || (typeof e === 'string' ? e : JSON.stringify(e))).join(', ')
+        : (typeof errorJson.detail === 'string' ? errorJson.detail : JSON.stringify(errorJson.detail))
+      return errorJson.error_type ? `[${errorJson.error_type}] ${detail}` : detail
     }
     if (errorJson.message) {
       return errorJson.message

@@ -8,8 +8,7 @@
  * even while editing.
  */
 import { ref, computed, watch, nextTick } from 'vue'
-import { agentsMdApi, processGptApi } from '@/features/domain/api'
-import { objectExplorerApi } from '@/features/object-explorer/api'
+import { agentsMdApi, processGptApi, behaviorApi } from '@/features/domain/api'
 import type { AgentContextResponse, ProcessGPTProcess } from '@/features/domain/api'
 
 interface BehaviorModel {
@@ -143,50 +142,40 @@ async function addProcessMethod() {
 
   try {
     // Save as a Behavior node via ontology API
-    const apiUrl = (import.meta.env.VITE_API_GATEWAY_URL ?? '/api/gateway') + '/ontology'
-    const response = await fetch(`${apiUrl}/object-types/${encodeURIComponent(props.nodeTypeName)}/behaviors`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: behaviorName,
-        description: `ProcessGPT: ${proc.name}${processTriggerCondition.value ? ' — 조건: ' + processTriggerCondition.value : ''}`,
-        behaviorType: 'processGPT',
-        config: {
-          processId: proc.id,
-          processName: proc.name,
-          triggerCondition: processTriggerCondition.value,
-        },
-        inputFields: [],
-        outputField: '',
-      })
-    })
-
-    if (response.ok) {
-      // Add to local list
-      processGptMethods.value.push({
-        name: `process.${behaviorName}`,
+    await behaviorApi.create(props.nodeTypeName, {
+      name: behaviorName,
+      description: `ProcessGPT: ${proc.name}${processTriggerCondition.value ? ' — 조건: ' + processTriggerCondition.value : ''}`,
+      behaviorType: 'processGPT',
+      config: {
         processId: proc.id,
         processName: proc.name,
-        description: proc.description || '',
-      })
+        triggerCondition: processTriggerCondition.value,
+      },
+      inputFields: [],
+      outputField: '',
+    })
 
-      // Insert reference into editor
-      const mention = `@method:process.${behaviorName}`
-      if (processTriggerCondition.value) {
-        const insertText = `- ${processTriggerCondition.value} → ${mention} 호출`
-        content.value += `\n${insertText}`
-      }
+    // Add to local list
+    processGptMethods.value.push({
+      name: `process.${behaviorName}`,
+      processId: proc.id,
+      processName: proc.name,
+      description: proc.description || '',
+    })
 
-      showProcessSelector.value = false
-      successMsg.value = `${proc.name} 프로세스가 메서드로 추가되었습니다`
-      setTimeout(() => successMsg.value = '', 3000)
-
-      // Refresh context
-      await loadContext()
-    } else {
-      const errData = await response.json().catch(() => ({}))
-      error.value = errData.detail || '프로세스 메서드 추가 실패'
+    // Insert reference into editor
+    const mention = `@method:process.${behaviorName}`
+    if (processTriggerCondition.value) {
+      const insertText = `- ${processTriggerCondition.value} → ${mention} 호출`
+      content.value += `\n${insertText}`
     }
+
+    showProcessSelector.value = false
+    successMsg.value = `${proc.name} 프로세스가 메서드로 추가되었습니다`
+    setTimeout(() => successMsg.value = '', 3000)
+
+    // Refresh context
+    await loadContext()
   } catch (e: any) {
     error.value = e.message || '프로세스 메서드 추가 실패'
   } finally {

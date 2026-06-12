@@ -99,26 +99,16 @@ const processWithAI = async (userMessage: string) => {
   assistantMessage.isStreaming = true
   
   try {
-    const response = await fetch('/api/gateway/text2sql/events/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: userMessage,
-        history: messages.value.slice(0, -1).map(m => ({
-          role: m.role,
-          content: m.content
-        })),
-        current_config: currentEventConfig.value,
-        step: configStep.value
-      })
+    const data = await eventApi.chat({
+      message: userMessage,
+      history: messages.value.slice(0, -1).map(m => ({
+        role: m.role,
+        content: m.content
+      })),
+      current_config: currentEventConfig.value,
+      step: configStep.value
     })
 
-    if (!response.ok) {
-      throw new Error('API 오류')
-    }
-
-    const data = await response.json()
-    
     // 응답 업데이트
     assistantMessage.content = data.response
     assistantMessage.isStreaming = false

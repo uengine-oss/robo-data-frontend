@@ -13,8 +13,9 @@ import { Teleport } from 'vue'
 import { Text2SqlTab } from '@/features/text2sql'
 import { useReactStore } from '@/features/text2sql/text2sql'
 import { useDatasourcesStore } from '@/features/datasources/datasources'
+import { text2sqlApi } from '@/features/text2sql/api'
 import { IconX, IconCheck, IconDatabase, IconLink, IconPlus, IconTrash } from '@/shared/icons'
-import { objectExplorerApi } from '@/features/object-explorer/api'
+import { objectExplorerApi, relationshipApi } from '@/features/object-explorer/api'
 
 // 데이터 소스 타입
 type DataSourceType = 'natural-language' | 'direct-sql' | 'manual-input'
@@ -252,37 +253,11 @@ async function executeSql() {
     if (!datasourceName) {
       throw new Error('데이터소스를 선택하거나 SQL에 datasource를 명시해주세요')
     }
-    const response = await fetch('/api/gateway/text2sql/direct-sql/stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sql: directSqlInput.value,
-        datasource: datasourceName
-      })
-    })
-    
-    if (!response.ok) {
-      let errorMsg = 'SQL 실행 실패'
-      try {
-        const errData = await response.json()
-        errorMsg = errData.detail || errorMsg
-      } catch {
-        errorMsg = await response.text() || errorMsg
-      }
-      throw new Error(errorMsg)
-    }
-    
-    // 스트리밍 응답 처리
-    const text = await response.text()
-    const lines = text.trim().split('\n')
-    
     let columns: string[] = []
     let rows: any[][] = []
-    
-    for (const line of lines) {
-      if (!line.trim()) continue
-      try {
-        const chunk = JSON.parse(line)
+    await text2sqlApi.directSqlStream(
+      { sql: directSqlInput.value, datasource: datasourceName },
+      (chunk: any) => {
         if (chunk.event === 'result') {
           columns = chunk.columns || []
           rows = chunk.rows || []
@@ -299,12 +274,9 @@ async function executeSql() {
           columns = chunk.columns
           rows = chunk.rows || []
         }
-      } catch (parseErr) {
-        // JSON 파싱 실패한 줄은 무시
-        console.warn('JSON 파싱 실패:', line)
       }
-    }
-    
+    )
+
     sqlResultColumns.value = columns
     sqlResultRows.value = rows
     
@@ -515,34 +487,19 @@ async function createObjectType() {
     }
     
     // 1. ObjectType을 Neo4j에 저장
-    const response = await fetch('/api/gateway/ontology/object-types', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
-    })
-    
-    if (!response.ok) {
-      const errData = await response.json()
-      throw new Error(errData.detail || 'ObjectType 생성 실패')
-    }
-    
-    const result = await response.json()
-    
+    const result = await objectExplorerApi.createObjectType(requestBody)
+
     // 2. 관계 생성 (선택된 ObjectType들과 연결)
     for (const relConfig of relationConfigs.value) {
       if (relConfig.sourceColumn && relConfig.targetColumn) {
         try {
-          await fetch('/api/gateway/ontology/relationships', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              sourceType: relConfig.targetType,  // 부모 ObjectType
-              targetType: objectTypeName.value,   // 새로 생성된 ObjectType
-              sourceColumn: relConfig.targetColumn,
-              targetColumn: relConfig.sourceColumn,
-              matchStrategy: relConfig.matchStrategy,
-              cardinality: relConfig.cardinality === 'MANY_TO_ONE' ? 'ONE_TO_MANY' : relConfig.cardinality
-            })
+          await relationshipApi.create({
+            sourceType: relConfig.targetType,  // 부모 ObjectType
+            targetType: objectTypeName.value,   // 새로 생성된 ObjectType
+            sourceColumn: relConfig.targetColumn,
+            targetColumn: relConfig.sourceColumn,
+            matchStrategy: relConfig.matchStrategy,
+            cardinality: relConfig.cardinality === 'MANY_TO_ONE' ? 'ONE_TO_MANY' : relConfig.cardinality
           })
         } catch (relErr) {
           console.error('관계 생성 실패:', relErr)
@@ -575,32 +532,22 @@ async function generateNamesFromQuestion(question: string, sql: string) {
   try {
     console.log('[CreateObjectTypeDialog] LLM 이름 생성 시작:', question)
     
-    const response = await fetch('/api/gateway/ontology/generate-object-type-name', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        question: question,
-        sql: sql,
-        columns: sqlResultColumns.value
-      })
+    const result = await objectExplorerApi.generateObjectTypeName({
+      question: question,
+      sql: sql,
+      columns: sqlResultColumns.value
     })
-    
-    if (response.ok) {
-      const result = await response.json()
-      console.log('[CreateObjectTypeDialog] LLM 이름 생성 결과:', result)
-      
-      if (result.korean_name) {
-        suggestedKoreanName.value = result.korean_name
-        objectTypeName.value = result.korean_name
-      }
-      if (result.english_name) {
-        suggestedEnglishName.value = result.english_name
-      }
-      if (result.description) {
-        objectTypeDescription.value = result.description
-      }
-    } else {
-      console.warn('[CreateObjectTypeDialog] LLM 이름 생성 실패:', await response.text())
+    console.log('[CreateObjectTypeDialog] LLM 이름 생성 결과:', result)
+
+    if (result.korean_name) {
+      suggestedKoreanName.value = result.korean_name
+      objectTypeName.value = result.korean_name
+    }
+    if (result.english_name) {
+      suggestedEnglishName.value = result.english_name
+    }
+    if (result.description) {
+      objectTypeDescription.value = result.description
     }
   } catch (err) {
     console.error('[CreateObjectTypeDialog] LLM 이름 생성 오류:', err)

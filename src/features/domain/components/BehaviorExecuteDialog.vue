@@ -2,6 +2,8 @@
 import { ref, watch, computed } from 'vue'
 import { IconX, IconDatabase } from '@/shared/icons'
 import { useDatasourcesStore } from '@/features/datasources/datasources'
+import { behaviorApi } from '@/features/domain/api'
+import { text2sqlApi } from '@/features/text2sql/api'
 
 interface Behavior {
   name: string
@@ -58,47 +60,27 @@ async function loadInstances() {
       throw new Error('데이터소스를 선택해주세요')
     }
     // SQL 실행하여 인스턴스 조회
-    const response = await fetch('/api/gateway/text2sql/direct-sql/stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sql: props.query, datasource: selectedDs.name })
-    })
-    
-    if (!response.ok) {
-      throw new Error('인스턴스 조회 실패')
-    }
-    
-    // 스트리밍 응답 처리
-    const text = await response.text()
-    const lines = text.split('\n').filter(line => line.trim())
-    
-    for (const line of lines) {
-      try {
-        const chunk = JSON.parse(line)
+    await text2sqlApi.directSqlStream(
+      { sql: props.query, datasource: selectedDs.name },
+      (chunk: any) => {
         if (chunk.event === 'result') {
           columns.value = chunk.columns || []
           instances.value = chunk.rows || []
         } else if (chunk.event === 'error') {
           throw new Error(chunk.message || 'SQL 실행 오류')
         } else if (chunk.type === 'columns' && chunk.columns) {
-          // legacy best-effort
           columns.value = chunk.columns
         } else if (chunk.type === 'row' && chunk.row) {
           instances.value.push(chunk.row)
         } else if (chunk.type === 'error') {
           throw new Error(chunk.message || 'SQL 실행 오류')
+        } else if (chunk.columns) {
+          // 일반 JSON(비스트리밍) 응답 보존
+          columns.value = chunk.columns
+          if (chunk.rows) instances.value = chunk.rows
         }
-      } catch (parseErr) {
-        // JSON이 아닌 라인은 무시
       }
-    }
-    
-    // 스트리밍이 아닌 경우 (일반 JSON 응답)
-    if (instances.value.length === 0 && columns.value.length === 0) {
-      const data = JSON.parse(text)
-      if (data.columns) columns.value = data.columns
-      if (data.rows) instances.value = data.rows
-    }
+    )
     
   } catch (err) {
     error.value = err instanceof Error ? err.message : '인스턴스 로드 실패'
@@ -121,22 +103,11 @@ async function executeBehavior() {
   error.value = null
   
   try {
-    const url = `/api/gateway/ontology/object-types/${encodeURIComponent(props.objectTypeName)}/behaviors/${encodeURIComponent(props.behavior.name)}/execute`
-    
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        instance_data: selectedInstance.value
-      })
-    })
-    
-    if (!response.ok) {
-      const errData = await response.json()
-      throw new Error(errData.detail || 'Behavior 실행 실패')
-    }
-    
-    executionResult.value = await response.json()
+    executionResult.value = await behaviorApi.execute(
+      props.objectTypeName,
+      props.behavior.name,
+      { instance_data: selectedInstance.value }
+    )
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Behavior 실행 실패'
   } finally {
@@ -162,22 +133,11 @@ async function saveResultToTable() {
     }
     
     // 테이블 생성 및 데이터 삽입 API 호출
-    const response = await fetch('/api/gateway/ontology/save-result-to-table', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        schema_name: saveSchemaName.value,
-        table_name: saveTableName.value,
-        data: resultData
-      })
+    const result = await behaviorApi.saveResultToTable({
+      schema_name: saveSchemaName.value,
+      table_name: saveTableName.value,
+      data: resultData
     })
-    
-    if (!response.ok) {
-      const errData = await response.json()
-      throw new Error(errData.detail || '테이블 저장 실패')
-    }
-    
-    const result = await response.json()
     alert(`테이블 "${saveSchemaName.value}"."${saveTableName.value}"에 ${result.rows_inserted || resultData.length}개 행이 저장되었습니다.`)
     showSaveOptions.value = false
     

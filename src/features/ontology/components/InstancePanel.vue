@@ -11,6 +11,8 @@ import type { OntologyNode } from '@/shared/types'
 import { storeToRefs } from 'pinia'
 import { IconX, IconRefresh, IconDatabase, IconSearch, IconCheck } from '@/shared/icons'
 import { ontologyApi } from '@/features/ontology/api'
+import { text2sqlApi } from '@/features/text2sql/api'
+import { objectExplorerApi } from '@/features/object-explorer/api'
 import { Text2SqlTab } from '@/features/text2sql'
 import { useReactStore } from '@/features/text2sql/text2sql'
 import { useDatasourcesStore } from '@/features/datasources/datasources'
@@ -168,22 +170,18 @@ async function createInstances() {
     // 1. Materialized View 생성 (선택된 경우)
     let viewFullName = null
     if (createMaterializedView.value && mvViewName.value) {
-      const mvResponse = await fetch('/api/gateway/text2sql/direct-sql/materialized-view', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      try {
+        const mvData = await text2sqlApi.createMaterializedView({
           datasource: selectedDs.name,
           view_name: mvViewName.value,
-          sql_query: reactStore.finalSql,
+          source_sql: reactStore.finalSql,
           schema_name: 'public',
           description: `${props.node.name} 인스턴스 동기화`,
           refresh_on_create: true
         })
-      })
-      
-      if (mvResponse.ok) {
-        const mvData = await mvResponse.json()
         viewFullName = mvData.full_name
+      } catch (mvErr) {
+        console.warn('Materialized View 생성 실패 (무시):', mvErr)
       }
     }
     
@@ -193,47 +191,36 @@ async function createInstances() {
       throw new Error('스키마 ID가 없습니다')
     }
     
-    const response = await fetch('/api/gateway/ontology/instances/bulk-create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        schema_id: schemaId,
-        node_type: props.node.name,
-        sql_query: reactStore.finalSql,  // SQL만 전달, 백엔드에서 실행
-        id_column: selectedIdColumn.value,
-        name_column: selectedNameColumn.value || selectedIdColumn.value,
-        materialized_view: viewFullName,
-        source_question: reactStore.currentQuestion
-      })
+    const result = await objectExplorerApi.bulkCreateInstances({
+      schema_id: schemaId,
+      node_type: props.node.name,
+      sql_query: reactStore.finalSql,  // SQL만 전달, 백엔드에서 실행
+      id_column: selectedIdColumn.value,
+      name_column: selectedNameColumn.value || selectedIdColumn.value,
+      materialized_view: viewFullName,
+      source_question: reactStore.currentQuestion
     })
-    
-    if (response.ok) {
-      const result = await response.json()
-      const count = result.created_count || 0
-      createSuccess.value = `${count}개의 ${props.node.name} 인스턴스가 생성되었습니다!`
-      
-      // 스토어의 노드 인스턴스 개수 업데이트
-      store.updateNodeInstanceCountByName(props.node.name, count)
-      
-      // 캔버스에 인스턴스 노드 추가
-      if (reactStore.executionResult?.rows) {
-        const instances = reactStore.executionResult.rows.map(row => ({
-          id: String(row[selectedIdColumn.value] || ''),
-          name: String(row[selectedNameColumn.value || selectedIdColumn.value] || '')
-        })).filter(i => i.id)
-        store.addCanvasInstances(props.node.name, instances)
-      }
-      
-      // 성공 후 모달 닫기
-      setTimeout(() => {
-        showInstanceExplorerModal.value = false
-        showInstanceConfig.value = false
-        emit('instances-updated', { nodeId: props.node.id, count })
-      }, 1500)
-    } else {
-      const errData = await response.json()
-      throw new Error(errData.detail || '인스턴스 생성 실패')
+    const count = result.created_count || 0
+    createSuccess.value = `${count}개의 ${props.node.name} 인스턴스가 생성되었습니다!`
+
+    // 스토어의 노드 인스턴스 개수 업데이트
+    store.updateNodeInstanceCountByName(props.node.name, count)
+
+    // 캔버스에 인스턴스 노드 추가
+    if (reactStore.executionResult?.rows) {
+      const instances = reactStore.executionResult.rows.map(row => ({
+        id: String(row[selectedIdColumn.value] || ''),
+        name: String(row[selectedNameColumn.value || selectedIdColumn.value] || '')
+      })).filter(i => i.id)
+      store.addCanvasInstances(props.node.name, instances)
     }
+
+    // 성공 후 모달 닫기
+    setTimeout(() => {
+      showInstanceExplorerModal.value = false
+      showInstanceConfig.value = false
+      emit('instances-updated', { nodeId: props.node.id, count })
+    }, 1500)
     
   } catch (err) {
     createError.value = err instanceof Error ? err.message : '인스턴스 생성 실패'
