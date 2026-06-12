@@ -7,7 +7,7 @@
  * - 일반 텍스트: 그대로 표시
  */
 import { computed } from 'vue'
-import { parseResultContent, tokenizeSql, parseToolInput, type ParsedContent } from '@/utils/resultFormatter'
+import { parseResultContent, tokenizeSql, parseToolInput, type ParsedContent } from '@/shared/utils/resultFormatter'
 
 const props = defineProps<{
   content: string

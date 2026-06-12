@@ -5,9 +5,9 @@
  */
 
 import { computed, ref } from 'vue'
-import type { GraphNode } from '@/types'
+import type { GraphNode } from '@/shared/types'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
-import { getRelationshipGroups } from '@/utils/nodeRelationships'
+import { getRelationshipGroups } from '@/shared/utils/nodeRelationships'
 import NodeDetailBase from './NodeDetailBase.vue'
 
 interface Props { node: GraphNode }

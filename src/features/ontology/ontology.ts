@@ -15,7 +15,7 @@ import type {
   GenerateSchemaRequest,
   GenerateSchemaResponse,
   ApplyFeedbackRequest
-} from '@/types'
+} from '@/shared/types'
 
 // ============================================================================
 // 위저드 상태

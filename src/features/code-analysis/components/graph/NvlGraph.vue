@@ -9,7 +9,7 @@
  * props 변경 시 즉시 diff 하여 NVL에 반영한다.
  */
 
-import { logger } from '@/utils/logger'
+import { logger } from '@/shared/utils/logger'
 import { ref, computed, onMounted, onUnmounted, watch, shallowRef, nextTick } from 'vue'
 import { NVL } from '@neo4j-nvl/base'
 import {
@@ -18,9 +18,9 @@ import {
   PanInteraction,
   ZoomInteraction
 } from '@neo4j-nvl/interaction-handlers'
-import type { GraphData, GraphNode, GraphLink, NvlNode, NvlRelationship } from '@/types'
+import type { GraphData, GraphNode, GraphLink, NvlNode, NvlRelationship } from '@/shared/types'
 import type { PartialNode, PartialRelationship } from '@neo4j-nvl/base'
-import { getNodeColor, getRelationshipColor, getRelationshipWidth, getNodeSize } from '@/config/graphStyles'
+import { getNodeColor, getRelationshipColor, getRelationshipWidth, getNodeSize } from '@/shared/config/graphStyles'
 import { useNavigatorStore } from '@/shared/stores/navigator'
 import { storeToRefs } from 'pinia'
 

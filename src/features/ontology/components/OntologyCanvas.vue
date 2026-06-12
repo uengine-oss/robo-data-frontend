@@ -8,7 +8,7 @@ import { VueFlow, type Node, type Edge, type VueFlowStore } from '@vue-flow/core
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
-import type { OntologySchema, OntologyNode } from '@/types'
+import type { OntologySchema, OntologyNode } from '@/shared/types'
 import { useOntologyStore } from '@/features/ontology/ontology'
 import { storeToRefs } from 'pinia'
 

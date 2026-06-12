@@ -16,8 +16,8 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { logger } from '@/utils/logger'
-import { STORAGE_KEYS } from '@/config/storageKeys'
+import { logger } from '@/shared/utils/logger'
+import { STORAGE_KEYS } from '@/shared/config/storageKeys'
 import type {
   ProjectMetadata,
   BackendRequestMetadata,
@@ -31,7 +31,7 @@ import type {
   StreamMessage,
   NameCaseOption,
   AnalyzeEvent,
-} from '@/types'
+} from '@/shared/types'
 import { useSessionStore } from '@/shared/stores/session'
 import { antlrApi, roboApi } from '@/features/code-analysis/api'
 

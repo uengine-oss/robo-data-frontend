@@ -12,7 +12,7 @@ import {
   estimateProgressPercent,
   formatCountsSummaryKo,
   getText2SqlStageLabelKo
-} from '@/utils/text2sqlProgress'
+} from '@/shared/utils/text2sqlProgress'
 import type {
   ReactStatus,
   ReactPhase,
@@ -23,7 +23,7 @@ import type {
   ReactPhaseData,
   Text2SqlTableInfo,
   Text2SqlColumnInfo
-} from '@/types'
+} from '@/shared/types'
 
 // ============================================================================
 // 헬퍼 함수

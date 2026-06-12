@@ -2,7 +2,7 @@
  * 그래프 노드/관계 패널 표시용 — 기술명(함수명·테이블명 등) 우선, 논리명은 괄호 병기.
  */
 
-import type { GraphLink, GraphNode } from '@/types'
+import type { GraphLink, GraphNode } from '@/shared/types'
 
 /** C 계열 소스에서 블록/행 주석을 제거해 디테일 패널에 표시 (문자열 리터럴 내부는 미세 조정 안 함). */
 export function stripCStyleComments(source: string): string {

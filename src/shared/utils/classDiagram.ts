@@ -6,7 +6,7 @@
  * 깊이 기반 필터링, 노이즈 제거 등을 수행합니다.
  */
 
-import type { GraphNode, GraphLink } from '@/types'
+import type { GraphNode, GraphLink } from '@/shared/types'
 
 // ============================================================================
 // 상수 정의

@@ -513,9 +513,9 @@ import { useDatasourcesStore } from '@/features/datasources/datasources'
 import ResultTable from './ResultTable.vue'
 import HistoryPanel from './HistoryPanel.vue'
 import DirectSqlInput from './DirectSqlInput.vue'
-import type { ReactExecutionResult } from '@/types'
-import { buildSqlLineDiff, type PreviousSqlLine, type SqlDiffLine } from '@/utils/sqlLineDiff'
-import { getText2SqlStageLabelKo } from '@/utils/text2sqlProgress'
+import type { ReactExecutionResult } from '@/shared/types'
+import { buildSqlLineDiff, type PreviousSqlLine, type SqlDiffLine } from '@/shared/utils/sqlLineDiff'
+import { getText2SqlStageLabelKo } from '@/shared/utils/text2sqlProgress'
 import { text2sqlApi } from '@/features/text2sql/api'
 import {
   IconPlay, IconUpload, IconSettings, IconChevronDown, IconCopy

@@ -95,11 +95,11 @@
 </template>
 
 <script setup lang="ts">
-import { logger } from '@/utils/logger'
+import { logger } from '@/shared/utils/logger'
 import mermaid from 'mermaid'
 import { ref, onMounted, watch, nextTick } from 'vue'
 import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
-import type { Text2SqlColumnInfo } from '@/types'
+import type { Text2SqlColumnInfo } from '@/shared/types'
 
 const props = defineProps<{
   isActive?: boolean

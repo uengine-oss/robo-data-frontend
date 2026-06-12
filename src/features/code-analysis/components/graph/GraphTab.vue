@@ -5,7 +5,7 @@
  */
 
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { logger } from '@/utils/logger'
+import { logger } from '@/shared/utils/logger'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { useSessionStore } from '@/shared/stores/session'
 import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
@@ -17,12 +17,12 @@ import NodeDetailPanel from './NodeDetailPanel.vue'
 import GraphStylePanel from './GraphStylePanel.vue'
 import VueFlowClassDiagram from './VueFlowClassDiagram.vue'
 import { SchemaView } from '@/features/schema'
-import { getClassName, getDirectory, CLASS_LABELS } from '@/utils/classDiagram'
-import type { GraphNode, GraphLink } from '@/types'
-import { useResize } from '@/composables/useResize'
-import { useDrag } from '@/composables/useDrag'
-import { getNodeColor, getRelationshipColor } from '@/config/graphStyles'
-import { storageVersion } from '@/utils/graphStyleStorage'
+import { getClassName, getDirectory, CLASS_LABELS } from '@/shared/utils/classDiagram'
+import type { GraphNode, GraphLink } from '@/shared/types'
+import { useResize } from '@/shared/composables/useResize'
+import { useDrag } from '@/shared/composables/useDrag'
+import { getNodeColor, getRelationshipColor } from '@/shared/config/graphStyles'
+import { storageVersion } from '@/shared/utils/graphStyleStorage'
 
 const projectStore = useAnalyzerStore()
 const sessionStore = useSessionStore()

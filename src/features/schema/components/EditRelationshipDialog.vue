@@ -5,7 +5,7 @@
  * - 관계 생성 (mode='create')
  * - 관계 편집 (mode='edit'): 관계 이름 변경, matchStrategy, cardinality 설정 변경, 관계 삭제
  */
-import { logger } from '@/utils/logger'
+import { logger } from '@/shared/utils/logger'
 import { ref, computed, onMounted, watch } from 'vue'
 import { Teleport } from 'vue'
 import { IconX, IconCheck, IconLink, IconTrash, IconAlertTriangle } from '@/shared/icons'

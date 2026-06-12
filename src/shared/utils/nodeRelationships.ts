@@ -19,7 +19,7 @@
  *   - DB 링크                    : LINKS_TO / DB_LINK
  */
 
-import type { GraphLink } from '@/types'
+import type { GraphLink } from '@/shared/types'
 
 // ─────────────────────────────────────────────────────────────────────────
 // 의미 그룹 정의 — 백엔드 `report.py` 의 ENTITY_*_REL_TYPES 와 일치

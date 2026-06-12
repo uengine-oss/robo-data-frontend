@@ -39,7 +39,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import type { ReactExecutionResult } from '@/types'
+import type { ReactExecutionResult } from '@/shared/types'
 import { IconTable, IconPlay } from '@/shared/icons'
 
 const props = withDefaults(defineProps<{

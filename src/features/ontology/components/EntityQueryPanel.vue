@@ -4,7 +4,7 @@
  * 온톨로지 노드에 대한 자연어 검색 및 인스턴스 생성
  */
 import { ref, computed, watch } from 'vue'
-import type { OntologyNode, ReactExecutionResult } from '@/types'
+import type { OntologyNode, ReactExecutionResult } from '@/shared/types'
 import { useSessionStore } from '@/shared/stores/session'
 import { useOntologyStore } from '@/features/ontology/ontology'
 import { useDatasourcesStore } from '@/features/datasources/datasources'

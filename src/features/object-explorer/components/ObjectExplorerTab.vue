@@ -18,7 +18,7 @@ import ObjectSearchPanel from './ObjectSearchPanel.vue'
 import ObjectDetailPanel from './ObjectDetailPanel.vue'
 import ChildSelectDialog from './ChildSelectDialog.vue'
 import ObjectChartPanel from './ObjectChartPanel.vue'
-import { useResize } from '@/composables/useResize'
+import { useResize } from '@/shared/composables/useResize'
 import { objectExplorerApi } from '@/features/object-explorer/api'
 
 // ============================================================================

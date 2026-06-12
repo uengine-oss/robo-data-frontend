@@ -9,8 +9,8 @@
  */
 
 import { computed, ref } from 'vue'
-import type { GraphNode, GraphLink } from '@/types'
-import { getNodeColor } from '@/config/graphStyles'  // 통계용 — sortedNodeStats/Rel 색
+import type { GraphNode, GraphLink } from '@/shared/types'
+import { getNodeColor } from '@/shared/config/graphStyles'  // 통계용 — sortedNodeStats/Rel 색
 import NodeDetailContent from './node-detail/NodeDetailContent.vue'
 
 // 검색 결과 최대 개수

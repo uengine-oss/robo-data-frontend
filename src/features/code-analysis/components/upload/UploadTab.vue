@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { logger } from '@/utils/logger'
+import { logger } from '@/shared/utils/logger'
 import { ref, computed, nextTick, watch } from 'vue'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { useSessionStore } from '@/shared/stores/session'
@@ -10,7 +10,7 @@ import UploadTree from './UploadTree.vue'
 import JsonViewer from './JsonViewer.vue'
 import DataConfirmModal from '@/shared/components/DataConfirmModal.vue'
 import type { DataAction } from '@/shared/components/DataConfirmModal.vue'
-import { buildUploadTreeFromUploadedFiles, uniqueFilesByRelPath } from '@/utils/upload'
+import { buildUploadTreeFromUploadedFiles, uniqueFilesByRelPath } from '@/shared/utils/upload'
 import { IconFolder, IconDatabase, IconFile, IconFolderOpen, IconLightbulb, IconSettings, IconX, IconPlay, IconTrash } from '@/shared/icons'
 
 const projectStore = useAnalyzerStore()

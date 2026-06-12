@@ -1,5 +1,5 @@
 /** text2sql api — 자연어 질의(ReAct)·메타·직접SQL·머티리얼라이즈드뷰. 공유 http 코어 사용. */
-import type { ReactRequest, ReactStreamEvent, Text2SqlTableInfo, Text2SqlColumnInfo } from '@/types'
+import type { ReactRequest, ReactStreamEvent, Text2SqlTableInfo, Text2SqlColumnInfo } from '@/shared/types'
 import { TEXT2SQL_BASE_URL, ROBO_BASE_URL, postJson, type Headers } from '@/shared/services/http'
 
 // ============================================================================

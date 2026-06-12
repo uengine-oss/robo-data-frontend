@@ -6,10 +6,10 @@
  */
 
 import { computed } from 'vue'
-import type { GraphNode } from '@/types'
+import type { GraphNode } from '@/shared/types'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
-import { getRelationshipGroups, getAttachedByType } from '@/utils/nodeRelationships'
-import { technicalNodeName, logicalNodeName } from '@/utils/graphDisplay'
+import { getRelationshipGroups, getAttachedByType } from '@/shared/utils/nodeRelationships'
+import { technicalNodeName, logicalNodeName } from '@/shared/utils/graphDisplay'
 import NodeDetailBase from './NodeDetailBase.vue'
 
 interface Props { node: GraphNode }

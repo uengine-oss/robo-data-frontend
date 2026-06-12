@@ -5,12 +5,12 @@
  */
 
 import { computed } from 'vue'
-import type { GraphNode } from '@/types'
+import type { GraphNode } from '@/shared/types'
 import {
   technicalNodeName,
   logicalNodeName,
   stripCStyleComments,
-} from '@/utils/graphDisplay'
+} from '@/shared/utils/graphDisplay'
 import NodeDetailBase from './NodeDetailBase.vue'
 import TextViewer from '@/shared/components/TextViewer.vue'
 

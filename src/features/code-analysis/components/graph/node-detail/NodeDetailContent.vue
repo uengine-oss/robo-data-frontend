@@ -5,7 +5,7 @@
  */
 
 import { computed } from 'vue'
-import type { GraphNode } from '@/types'
+import type { GraphNode } from '@/shared/types'
 import { pickTemplate } from './templateRouter'
 
 import ModuleCard from './ModuleCard.vue'

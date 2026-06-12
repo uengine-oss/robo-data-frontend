@@ -7,7 +7,7 @@
 import { ref, watch, computed, onMounted } from 'vue'
 import { useOntologyStore } from '@/features/ontology/ontology'
 import { useSessionStore } from '@/shared/stores/session'
-import type { OntologyNode } from '@/types'
+import type { OntologyNode } from '@/shared/types'
 import { storeToRefs } from 'pinia'
 import { IconX, IconRefresh, IconDatabase, IconSearch, IconCheck } from '@/shared/icons'
 import { ontologyApi } from '@/features/ontology/api'

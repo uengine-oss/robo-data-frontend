@@ -161,7 +161,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, markRaw, type Component } from 'vue'
-import type { Text2SqlColumnInfo } from '@/types'
+import type { Text2SqlColumnInfo } from '@/shared/types'
 import IconSearch from '@/shared/icons/IconSearch.vue'
 import IconTable from '@/shared/icons/IconTable.vue'
 import IconLayers from '@/shared/icons/IconLayers.vue'

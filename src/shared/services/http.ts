@@ -5,7 +5,7 @@
  * NDJSON·SSE 스트림 처리, 서비스별 친절 에러 메시지.
  * 도메인별 api 는 이 코어를 import 해 엔드포인트만 정의한다.
  */
-import type { StreamEvent } from '@/types'
+import type { StreamEvent } from '@/shared/types'
 
 // ============================================================================
 // Base URL — API Gateway(/api/gateway/*) 단일 진입점. Vite 프록시 → Spring Gateway(9000).

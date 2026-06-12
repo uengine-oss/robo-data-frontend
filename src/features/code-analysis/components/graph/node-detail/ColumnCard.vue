@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { GraphNode } from '@/types'
+import type { GraphNode } from '@/shared/types'
 import NodeDetailBase from './NodeDetailBase.vue'
 import TextViewer from '@/shared/components/TextViewer.vue'
 

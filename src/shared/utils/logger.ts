@@ -7,7 +7,7 @@
  * - group/groupEnd: DEV 에서만 그룹화.
  *
  * 사용:
- *   import { logger } from '@/utils/logger'
+ *   import { logger } from '@/shared/utils/logger'
  *   logger.debug('foo', value)
  *   logger.warn('something off', err)
  */

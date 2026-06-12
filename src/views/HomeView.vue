@@ -6,7 +6,7 @@
 import { computed, inject } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSessionStore } from '@/shared/stores/session'
-import { FEATURES } from '@/config/features'
+import { FEATURES } from '@/shared/config/features'
 import AlarmToast from '@/shared/components/AlarmToast.vue'
 
 const sessionStore = useSessionStore()

@@ -13,7 +13,7 @@ import {
   type NavigatorSection,
   type NavigatorTreeItem,
 } from '@/shared/stores/navigator'
-import { useResize } from '@/composables/useResize'
+import { useResize } from '@/shared/composables/useResize'
 import NavigatorTreeNode from './NavigatorTreeNode.vue'
 
 const projectStore = useAnalyzerStore()

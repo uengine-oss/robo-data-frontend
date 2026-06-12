@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { logger } from '@/utils/logger'
+import { logger } from '@/shared/utils/logger'
 import { ref } from 'vue'
 import { IconUpload } from '@/shared/icons'
 

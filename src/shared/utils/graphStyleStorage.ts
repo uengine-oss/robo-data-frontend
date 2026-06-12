@@ -8,8 +8,8 @@
  */
 
 import { ref } from 'vue'
-import { logger } from '@/utils/logger'
-import { STORAGE_KEYS } from '@/config/storageKeys'
+import { logger } from '@/shared/utils/logger'
+import { STORAGE_KEYS } from '@/shared/config/storageKeys'
 
 // ============================================================================
 // 타입

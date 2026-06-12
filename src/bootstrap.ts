@@ -12,7 +12,7 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
 import './styles/main.scss'
-import { initializeAppSettings } from './config/appSettings'
+import { initializeAppSettings } from '@/shared/config/appSettings'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 
 let app: VueApp | null = null

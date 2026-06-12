@@ -24,7 +24,7 @@ import {
   IconEdit,
   IconKey
 } from '@/shared/icons'
-import { getAppTitle, setAppTitle, DEFAULT_APP_TITLE } from '@/config/appSettings'
+import { getAppTitle, setAppTitle, DEFAULT_APP_TITLE } from '@/shared/config/appSettings'
 
 // ============================================================================
 // Props & Emits

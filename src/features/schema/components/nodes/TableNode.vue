@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { logger } from '@/utils/logger'
+import { logger } from '@/shared/utils/logger'
 import { Handle, Position } from '@vue-flow/core'
 import { computed, inject, ref, watch } from 'vue'
-import type { Text2SqlColumnInfo } from '@/types'
+import type { Text2SqlColumnInfo } from '@/shared/types'
 import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { roboSchemaApi } from '@/features/schema/api'
-import { getDescriptionColor, getDescriptionSourceLabel } from '@/utils/descriptionColor'
+import { getDescriptionColor, getDescriptionSourceLabel } from '@/shared/utils/descriptionColor'
 
 interface Behavior {
   name: string
@@ -134,7 +134,7 @@ function truncateDescription(desc: string, maxLen = 20): string {
 function isCodeSource(source?: string): boolean {
   return source === 'procedure' || source === 'code'
 }
-// 설명 출처별 색/라벨은 @/utils/descriptionColor 에서 import
+// 설명 출처별 색/라벨은 @/shared/utils/descriptionColor 에서 import
 
 // 호버 시 출처 칩 표시 상태
 const isDescriptionHovered = ref(false)

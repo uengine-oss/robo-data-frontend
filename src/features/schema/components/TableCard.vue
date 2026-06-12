@@ -57,7 +57,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { Text2SqlTableInfo } from '@/types'
+import type { Text2SqlTableInfo } from '@/shared/types'
 
 const props = defineProps<{
   table: Text2SqlTableInfo

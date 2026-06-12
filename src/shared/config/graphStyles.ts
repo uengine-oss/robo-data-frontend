@@ -253,7 +253,7 @@ export const NODE_SIZES: Record<string, number> = {
 // 유틸리티 함수
 // ============================================================================
 
-import { getNodeStyle, getRelationshipStyle } from '@/utils/graphStyleStorage'
+import { getNodeStyle, getRelationshipStyle } from '@/shared/utils/graphStyleStorage'
 
 /**
  * 노드 라벨에 따른 색상 반환

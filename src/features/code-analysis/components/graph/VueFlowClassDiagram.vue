@@ -10,14 +10,14 @@
  * - 드래그/줌 인터랙션
  */
 
-import { logger } from '@/utils/logger'
+import { logger } from '@/shared/utils/logger'
 import { ref, computed, watch, nextTick } from 'vue'
 import { VueFlow, useVueFlow, Handle, Position } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import type { Node, Edge, NodeMouseEvent } from '@vue-flow/core'
-import type { GraphNode, GraphLink } from '@/types'
+import type { GraphNode, GraphLink } from '@/shared/types'
 import {
   buildClassDiagramData,
   findNodeIdsByClassNames,
@@ -25,7 +25,7 @@ import {
   VISIBILITY_MAP,
   type UmlClass,
   type ClassDiagramData
-} from '@/utils/classDiagram'
+} from '@/shared/utils/classDiagram'
 import ELK from 'elkjs'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'

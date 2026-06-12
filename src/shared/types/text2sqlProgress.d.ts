@@ -1,4 +1,4 @@
-declare module '@/utils/text2sqlProgress' {
+declare module '@/shared/utils/text2sqlProgress' {
   export function getText2SqlStageLabelKo(stage: string): string
   export function formatCountsSummaryKo(counts?: Record<string, number>): string[]
   export function buildProgressHeadlineKo(args: {

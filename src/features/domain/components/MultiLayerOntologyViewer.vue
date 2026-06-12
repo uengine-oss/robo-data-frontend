@@ -2025,7 +2025,7 @@ import SchemaBasedGenerator from '@/features/ontology/components/SchemaBasedGene
 import { glossaryApi, type Glossary } from '@/features/glossary/api'
 import { text2sqlApi } from '@/features/text2sql/api'
 import { useSessionStore } from '@/shared/stores/session'
-import type { ReactRequest, ReactStreamEvent } from '@/types'
+import type { ReactRequest, ReactStreamEvent } from '@/shared/types'
 
 // Register edgehandles extension
 cytoscape.use(edgehandles)

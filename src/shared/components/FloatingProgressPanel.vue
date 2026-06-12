@@ -7,7 +7,7 @@
 import { ref, computed, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
-import { useDrag } from '@/composables/useDrag'
+import { useDrag } from '@/shared/composables/useDrag'
 import { IconX, IconChevronDown } from '@/shared/icons'
 
 const projectStore = useAnalyzerStore()

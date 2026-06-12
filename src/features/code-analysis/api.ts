@@ -1,8 +1,8 @@
 /**
  * code-analysis api — antlr 파싱 + robo 분석. 공유 http 코어(shared/services/http) 사용.
  */
-import type { BackendRequestMetadata, FileUploadResponse, ParseResponse, AnalyzeEvent } from '@/types'
-import { getNormalizedUploadPath } from '@/utils/upload'
+import type { BackendRequestMetadata, FileUploadResponse, ParseResponse, AnalyzeEvent } from '@/shared/types'
+import { getNormalizedUploadPath } from '@/shared/utils/upload'
 import {
   ANTLR_BASE_URL, ROBO_BASE_URL,
   postJson, postFormData, streamFetch, handleHttpError,

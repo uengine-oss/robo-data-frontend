@@ -16,7 +16,7 @@ import {
   EMBEDDED_FEATURES,
   type FeatureDef,
   type FeatureGroupId,
-} from '@/config/features'
+} from '@/shared/config/features'
 
 const sessionStore = useSessionStore()
 const navigatorStore = useNavigatorStore()

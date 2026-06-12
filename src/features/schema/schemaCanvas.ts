@@ -7,17 +7,17 @@
  * - 'text2sql': neo4j-text2sql (PostgreSQL 인제스천)
  */
 
-import { logger } from '@/utils/logger'
+import { logger } from '@/shared/utils/logger'
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { MarkerType } from '@vue-flow/core'
 import type { Edge, Node } from '@vue-flow/core'
 import { roboSchemaApi } from '@/features/schema/api'
 import { text2sqlApi } from '@/features/text2sql/api'
-import type { Text2SqlTableInfo, Text2SqlColumnInfo } from '@/types'
+import type { Text2SqlTableInfo, Text2SqlColumnInfo } from '@/shared/types'
 import { useSessionStore } from '@/shared/stores/session'
 import { useDatasourcesStore } from '@/features/datasources/datasources'
-import { applyElkLayout } from '@/utils/elkLayout'
+import { applyElkLayout } from '@/shared/utils/elkLayout'
 
 export type SchemaDataSource = 'robo' | 'text2sql'
 
@@ -2085,7 +2085,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     await loadRelatedTablesFromNeo4j(tableName)
   }
   
-  /** 자동 레이아웃 — ELK layered 알고리즘 (구현은 @/utils/elkLayout) */
+  /** 자동 레이아웃 — ELK layered 알고리즘 (구현은 @/shared/utils/elkLayout) */
   async function applyAutoLayout() {
     await applyElkLayout(nodes.value, edges.value)
   }

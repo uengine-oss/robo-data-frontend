@@ -89,7 +89,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import ResultTable from './ResultTable.vue'
-import type { ReactExecutionResult, ReactStepModel } from '@/types'
+import type { ReactExecutionResult, ReactStepModel } from '@/shared/types'
 import { IconCopy, IconAlertTriangle } from '@/shared/icons'
 
 const props = defineProps<{

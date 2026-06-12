@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { UploadTreeNode } from '@/utils/upload'
+import type { UploadTreeNode } from '@/shared/utils/upload'
 import UploadTreeNodeItem from './UploadTreeNode.vue'
 
 interface Props {

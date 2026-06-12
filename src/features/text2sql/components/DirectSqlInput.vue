@@ -163,7 +163,7 @@
 import { ref, computed } from 'vue'
 import { IconPlay } from '@/shared/icons'
 import ResultTable from './ResultTable.vue'
-import type { ReactExecutionResult } from '@/types'
+import type { ReactExecutionResult } from '@/shared/types'
 import { useDatasourcesStore } from '@/features/datasources/datasources'
 
 defineEmits<{

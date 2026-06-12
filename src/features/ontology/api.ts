@@ -1,5 +1,5 @@
 /** ontology api — 도메인 온톨로지 스키마 CRUD·생성·피드백. 공유 http 코어 사용. */
-import type { OntologySchema, GenerateSchemaRequest, GenerateSchemaResponse, ApplyFeedbackRequest, ApplyFeedbackResponse, NodeInstanceData } from '@/types'
+import type { OntologySchema, GenerateSchemaRequest, GenerateSchemaResponse, ApplyFeedbackRequest, ApplyFeedbackResponse, NodeInstanceData } from '@/shared/types'
 import { ONTOLOGY_BASE_URL } from '@/shared/services/http'
 
 export interface SchemaListItem {

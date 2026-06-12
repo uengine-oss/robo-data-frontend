@@ -17,7 +17,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
-import type { GraphData, GraphLink, GraphNode } from '@/types'
+import type { GraphData, GraphLink, GraphNode } from '@/shared/types'
 
 /**
  * 캔버스 프리셋 — 일반 그래프와 다른 표시 규칙을 적용하는 모드.

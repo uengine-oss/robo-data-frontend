@@ -10,7 +10,7 @@ import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { storeToRefs } from 'pinia'
 import SettingsModal from './SettingsModal.vue'
 import { IconSearch, IconBell, IconSettings } from '@/shared/icons'
-import { getAppTitle } from '@/config/appSettings'
+import { getAppTitle } from '@/shared/config/appSettings'
 
 const sessionStore = useSessionStore()
 const projectStore = useAnalyzerStore()

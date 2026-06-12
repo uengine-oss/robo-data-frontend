@@ -93,7 +93,7 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive, watch } from 'vue'
-import type { Text2SqlTableInfo } from '@/types'
+import type { Text2SqlTableInfo } from '@/shared/types'
 import IconChevronRight from '@/shared/icons/IconChevronRight.vue'
 import IconDatabase from '@/shared/icons/IconDatabase.vue'
 import IconFolder from '@/shared/icons/IconFolder.vue'

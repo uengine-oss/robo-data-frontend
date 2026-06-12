@@ -13,7 +13,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
-import type { GraphLink, GraphNode } from '@/types'
+import type { GraphLink, GraphNode } from '@/shared/types'
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 타입 정의

@@ -17,7 +17,7 @@
  *   - MODULE.FILE / MODULE.DEFINE → 파일 카드 (모듈 아닌 물리 파일)
  */
 
-import type { GraphNode } from '@/types'
+import type { GraphNode } from '@/shared/types'
 
 export type TemplateType =
   | 'module'

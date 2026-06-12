@@ -6,7 +6,7 @@
  */
 
 import { computed } from 'vue'
-import type { GraphNode } from '@/types'
+import type { GraphNode } from '@/shared/types'
 import NodeDetailBase from './NodeDetailBase.vue'
 
 interface Props {

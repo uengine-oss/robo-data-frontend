@@ -13,14 +13,14 @@ import {
   RELATIONSHIP_WIDTHS,
   getNodeColor,
   getRelationshipColor,
-} from '@/config/graphStyles'
+} from '@/shared/config/graphStyles'
 import {
   getStyle,
   setColor,
   setSize,
   type StyleCategory,
   type StyleConfig
-} from '@/utils/graphStyleStorage'
+} from '@/shared/utils/graphStyleStorage'
 
 // ============================================================================
 // Props & Emits

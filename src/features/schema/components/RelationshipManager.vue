@@ -102,11 +102,11 @@
 </template>
 
 <script setup lang="ts">
-import { logger } from '@/utils/logger'
+import { logger } from '@/shared/utils/logger'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { text2sqlApi } from '@/features/text2sql/api'
 import { useText2SqlSchemaStore } from '@/features/text2sql/text2sql'
-import type { Text2SqlTableInfo } from '@/types'
+import type { Text2SqlTableInfo } from '@/shared/types'
 import { IconLayers, IconRefresh, IconChevronRight, IconTrash, IconPlus } from '@/shared/icons'
 
 const schemaStore = useText2SqlSchemaStore()

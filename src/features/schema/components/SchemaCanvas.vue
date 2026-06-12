@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { copyToClipboard } from '@/utils/clipboard'
-import { logger } from '@/utils/logger'
+import { copyToClipboard } from '@/shared/utils/clipboard'
+import { logger } from '@/shared/utils/logger'
 import { ref, onMounted, provide, computed, markRaw, watch, nextTick } from 'vue'
 import { VueFlow, useVueFlow, type Connection, type NodeChange } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
@@ -12,7 +12,7 @@ import TextViewer from '@/shared/components/TextViewer.vue'
 import CardinalityModal, { type ConnectionInfo, type Cardinality, type MatchStrategy } from './CardinalityModal.vue'
 import EditRelationshipDialog from './EditRelationshipDialog.vue'
 import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
-import type { Text2SqlTableInfo } from '@/types'
+import type { Text2SqlTableInfo } from '@/shared/types'
 import { IconTable, IconSearch, IconRefresh, IconTrash, IconZoomIn, IconZoomOut, IconMaximize, IconLink, IconFolder, IconChevronRight, IconDatabase } from '@/shared/icons'
 
 // Props
@@ -120,7 +120,7 @@ function formatCell(value: unknown): string {
   return str.length > 100 ? str.substring(0, 100) + '...' : str
 }
 
-// 클립보드 복사는 @/utils/clipboard 의 copyToClipboard 사용
+// 클립보드 복사는 @/shared/utils/clipboard 의 copyToClipboard 사용
 
 // ========== Behavior 실행 모드 관련 ==========
 

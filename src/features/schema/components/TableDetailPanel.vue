@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
-import type { Text2SqlColumnInfo } from '@/types'
+import type { Text2SqlColumnInfo } from '@/shared/types'
 import { IconX, IconEdit, IconTrash, IconPlus } from '@/shared/icons'
-import { getDescriptionColor, getDescriptionSourceLabel } from '@/utils/descriptionColor'
+import { getDescriptionColor, getDescriptionSourceLabel } from '@/shared/utils/descriptionColor'
 import TextViewer from '@/shared/components/TextViewer.vue'
 
 const store = useSchemaCanvasStore()
