@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { IconX, IconDatabase } from '@/shared/icons'
-import { useDatasourcesStore } from '@/stores/datasources'
+import { useDatasourcesStore } from '@/features/datasources/datasources'
 
 interface Behavior {
   name: string

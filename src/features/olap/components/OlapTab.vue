@@ -4,7 +4,7 @@
  * OLAP 분석 메인 탭 - 큐브 설계 및 피벗 분석
  */
 import { ref, onMounted } from 'vue'
-import { useOlapStore } from '@/stores/olap'
+import { useOlapStore } from '@/features/olap/olap'
 import * as olapApi from '@/features/olap/olap-api'
 import CubeDesigner from './CubeDesigner.vue'
 import PivotAnalysis from './PivotAnalysis.vue'

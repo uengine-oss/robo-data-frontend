@@ -4,7 +4,7 @@
  * 비즈니스 용어집 관리 탭
  */
 import { ref, computed, onMounted, watch } from 'vue'
-import { useSessionStore } from '@/stores/session'
+import { useSessionStore } from '@/shared/stores/session'
 import { glossaryApi, type Glossary, type Term } from '@/features/glossary/api'
 import { IconPlus, IconSearch, IconEdit, IconTrash, IconCheck, IconChevronDown, IconBook } from '@/shared/icons'
 import TermModal from './TermModal.vue'

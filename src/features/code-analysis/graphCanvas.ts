@@ -16,7 +16,7 @@
 
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { useAnalyzerStore } from '@/stores/analyzer'
+import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import type { GraphData, GraphLink, GraphNode } from '@/types'
 
 /**

@@ -4,7 +4,7 @@
  * LangChain ReAct 기반 Text2SQL 인터페이스
  */
 import { ref, computed, watch, nextTick } from 'vue'
-import { useLangChainStore } from '@/stores/langchain'
+import { useLangChainStore } from '@/features/langchain/langchain'
 import FormattedResult from './FormattedResult.vue'
 
 const langchainStore = useLangChainStore()

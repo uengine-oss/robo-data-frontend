@@ -11,8 +11,8 @@
  */
 
 import { ref, computed, watch } from 'vue'
-import { useSessionStore, type ApiProvider } from '@/stores/session'
-import { useAnalyzerStore } from '@/stores/analyzer'
+import { useSessionStore, type ApiProvider } from '@/shared/stores/session'
+import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { storeToRefs } from 'pinia'
 import {
   IconSettings,

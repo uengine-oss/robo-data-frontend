@@ -3,7 +3,7 @@
  * FieldList.vue
  * 피벗 분석을 위한 차원 및 측정값 필드 목록 (HTML5 Drag & Drop)
  */
-import { useOlapStore } from '@/stores/olap'
+import { useOlapStore } from '@/features/olap/olap'
 
 const store = useOlapStore()
 

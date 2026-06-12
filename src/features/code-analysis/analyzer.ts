@@ -32,7 +32,7 @@ import type {
   NameCaseOption,
   AnalyzeEvent,
 } from '@/types'
-import { useSessionStore } from './session'
+import { useSessionStore } from '@/shared/stores/session'
 import { antlrApi, roboApi } from '@/features/code-analysis/api'
 
 // ============================================================================

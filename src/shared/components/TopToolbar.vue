@@ -5,8 +5,8 @@
  */
 
 import { ref, onMounted, onUnmounted } from 'vue'
-import { useSessionStore } from '@/stores/session'
-import { useAnalyzerStore } from '@/stores/analyzer'
+import { useSessionStore } from '@/shared/stores/session'
+import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { storeToRefs } from 'pinia'
 import SettingsModal from './SettingsModal.vue'
 import { IconSearch, IconBell, IconSettings } from '@/shared/icons'

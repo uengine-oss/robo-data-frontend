@@ -7,7 +7,7 @@ import type { SourceType } from '@/types'
 import type { DetectTypesResponse } from '@/features/code-analysis/api'
 import { buildUploadTree, collectAllFolderPaths, forceWebkitRelativePath, getNormalizedUploadPath, getParentFolderRelPath, mapPickedFilesToTarget, moveRelPathToFolder, normalizeSlashes, resolveSelectedTargetFolder, splitPath, type UploadTreeNode, uniqueFilesByRelPath } from '@/utils/upload'
 import { IconFolder, IconX, IconCheck, IconAlertTriangle, IconLoader } from '@/shared/icons'
-import { useDatasourcesStore, type DataSource } from '@/stores/datasources'
+import { useDatasourcesStore, type DataSource } from '@/features/datasources/datasources'
 
 interface Props {
   initialFiles?: File[]

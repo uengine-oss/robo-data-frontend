@@ -5,7 +5,7 @@
  * 타임시리즈 데이터에서 비영업일을 필터아웃하기 위한 영업일 설정
  */
 import { ref, computed, onMounted, watch } from 'vue'
-import { useSessionStore } from '@/stores/session'
+import { useSessionStore } from '@/shared/stores/session'
 import { businessCalendarApi, type BusinessDay } from '@/features/glossary/api'
 import { IconPlus, IconTrash, IconChevronLeft, IconChevronRight, IconCheck, IconCalendar } from '@/shared/icons'
 

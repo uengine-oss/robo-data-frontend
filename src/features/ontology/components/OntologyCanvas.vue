@@ -9,7 +9,7 @@ import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import type { OntologySchema, OntologyNode } from '@/types'
-import { useOntologyStore } from '@/stores/ontology'
+import { useOntologyStore } from '@/features/ontology/ontology'
 import { storeToRefs } from 'pinia'
 
 // 커스텀 노드 컴포넌트

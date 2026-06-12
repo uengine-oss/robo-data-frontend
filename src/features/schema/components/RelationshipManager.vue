@@ -105,7 +105,7 @@
 import { logger } from '@/utils/logger'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { text2sqlApi } from '@/features/text2sql/api'
-import { useText2SqlSchemaStore } from '@/stores/text2sql'
+import { useText2SqlSchemaStore } from '@/features/text2sql/text2sql'
 import type { Text2SqlTableInfo } from '@/types'
 import { IconLayers, IconRefresh, IconChevronRight, IconTrash, IconPlus } from '@/shared/icons'
 

@@ -157,8 +157,8 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, watch } from 'vue'
-import { useHistoryStore, type QueryHistoryItem } from '@/stores/text2sql'
-import { useSessionStore } from '@/stores/session'
+import { useHistoryStore, type QueryHistoryItem } from '@/features/text2sql/text2sql'
+import { useSessionStore } from '@/shared/stores/session'
 import { IconHistory, IconTrash, IconRefresh, IconX, IconBarChart, IconWatchAgent, IconChevronDown as IconChevron } from '@/shared/icons'
 
 // Props

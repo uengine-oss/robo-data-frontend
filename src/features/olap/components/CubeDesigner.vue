@@ -4,8 +4,8 @@
  * OLAP 큐브 설계 - AI 기반 스타 스키마 생성 및 ETL 전략
  */
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
-import { useOlapStore } from '@/stores/olap'
-import { useSessionStore } from '@/stores/session'
+import { useOlapStore } from '@/features/olap/olap'
+import { useSessionStore } from '@/shared/stores/session'
 import * as olapApi from '@/features/olap/olap-api'
 import mermaid from 'mermaid'
 

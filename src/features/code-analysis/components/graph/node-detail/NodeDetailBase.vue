@@ -8,7 +8,7 @@
 import { computed, nextTick, ref, useSlots, watch } from 'vue'
 import type { GraphNode } from '@/types'
 import { getRelationshipGroups } from '@/utils/nodeRelationships'
-import { useAnalyzerStore } from '@/stores/analyzer'
+import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import TextViewer from '@/shared/components/TextViewer.vue'
 import { relationshipRowParts } from '@/utils/graphDisplay'
 

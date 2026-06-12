@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { logger } from '@/utils/logger'
 import { ref, computed, nextTick, watch } from 'vue'
-import { useAnalyzerStore } from '@/stores/analyzer'
-import { useSessionStore } from '@/stores/session'
+import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
+import { useSessionStore } from '@/shared/stores/session'
 import { storeToRefs } from 'pinia'
 import DropZone from './DropZone.vue'
 import UploadModal from './UploadModal.vue'

@@ -2024,7 +2024,7 @@ import SynonymSuggestionModal from '@/features/domain/components/SynonymSuggesti
 import SchemaBasedGenerator from '@/features/ontology/components/SchemaBasedGenerator.vue'
 import { glossaryApi, type Glossary } from '@/features/glossary/api'
 import { text2sqlApi } from '@/features/text2sql/api'
-import { useSessionStore } from '@/stores/session'
+import { useSessionStore } from '@/shared/stores/session'
 import type { ReactRequest, ReactStreamEvent } from '@/types'
 
 // Register edgehandles extension

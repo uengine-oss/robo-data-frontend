@@ -98,7 +98,7 @@
 import { logger } from '@/utils/logger'
 import mermaid from 'mermaid'
 import { ref, onMounted, watch, nextTick } from 'vue'
-import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
+import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
 import type { Text2SqlColumnInfo } from '@/types'
 
 const props = defineProps<{

@@ -4,7 +4,7 @@
  * 용어집 생성/수정 모달
  */
 import { ref, computed, onMounted, watch } from 'vue'
-import { useSessionStore } from '@/stores/session'
+import { useSessionStore } from '@/shared/stores/session'
 import { glossaryApi, type Glossary } from '@/features/glossary/api'
 import { IconX } from '@/shared/icons'
 

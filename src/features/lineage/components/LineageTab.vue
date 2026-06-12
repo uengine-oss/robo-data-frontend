@@ -8,7 +8,7 @@
  * 2. data-platform-olap의 ETL 설정 데이터
  */
 import { ref, computed, onMounted, watch } from 'vue'
-import { useSessionStore } from '@/stores/session'
+import { useSessionStore } from '@/shared/stores/session'
 import LineageGraph from './LineageGraph.vue'
 import LineageDetailPanel from './LineageDetailPanel.vue'
 import { IconRefresh, IconUpload, IconSearch } from '@/shared/icons'

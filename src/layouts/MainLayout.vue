@@ -6,9 +6,9 @@ import SideNav from '@/shared/components/SideNav.vue'
 import { NavigatorPanel } from '@/features/code-analysis'
 import FloatingProgressPanel from '@/shared/components/FloatingProgressPanel.vue'
 import { RouterView } from 'vue-router'
-import { useAnalyzerStore } from '@/stores/analyzer'
-import { useSessionStore } from '@/stores/session'
-import { useNavigatorStore } from '@/stores/navigator'
+import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
+import { useSessionStore } from '@/shared/stores/session'
+import { useNavigatorStore } from '@/shared/stores/navigator'
 
 // host(robo-architect)에 임베드되면 architect 상단바를 쓰므로 analyzer 자체 TopToolbar 는 숨긴다.
 const isEmbedded = inject<boolean>('isEmbedded', false)

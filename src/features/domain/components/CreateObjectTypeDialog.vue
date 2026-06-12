@@ -11,8 +11,8 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { Teleport } from 'vue'
 import { Text2SqlTab } from '@/features/text2sql'
-import { useReactStore } from '@/stores/text2sql'
-import { useDatasourcesStore } from '@/stores/datasources'
+import { useReactStore } from '@/features/text2sql/text2sql'
+import { useDatasourcesStore } from '@/features/datasources/datasources'
 import { IconX, IconCheck, IconDatabase, IconLink, IconPlus, IconTrash } from '@/shared/icons'
 import { objectExplorerApi } from '@/features/object-explorer/api'
 

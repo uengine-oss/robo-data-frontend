@@ -7,12 +7,12 @@
  */
 import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useAnalyzerStore } from '@/stores/analyzer'
+import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import {
   useNavigatorStore,
   type NavigatorSection,
   type NavigatorTreeItem,
-} from '@/stores/navigator'
+} from '@/shared/stores/navigator'
 import { useResize } from '@/composables/useResize'
 import NavigatorTreeNode from './NavigatorTreeNode.vue'
 

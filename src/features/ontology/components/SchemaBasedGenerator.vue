@@ -119,7 +119,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { useOntologyStore } from '@/stores/ontology'
+import { useOntologyStore } from '@/features/ontology/ontology'
 
 const emit = defineEmits(['generated', 'cancel'])
 const store = useOntologyStore()

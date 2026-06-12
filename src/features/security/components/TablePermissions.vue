@@ -7,7 +7,7 @@
  * - 하위 레벨 설정이 상위를 오버라이드
  */
 import { ref, reactive, computed, onMounted } from 'vue'
-import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
+import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
 import { storeToRefs } from 'pinia'
 import { 
   IconChevronRight, 

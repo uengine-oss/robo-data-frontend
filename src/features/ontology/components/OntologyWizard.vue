@@ -7,7 +7,7 @@
  * Step 3: 데이터 소스 바인딩 및 모니터링 시작
  */
 import { ref, computed, onMounted } from 'vue'
-import { useOntologyStore } from '@/stores/ontology'
+import { useOntologyStore } from '@/features/ontology/ontology'
 import { storeToRefs } from 'pinia'
 import OntologyCanvas from './OntologyCanvas.vue'
 import { IconUpload, IconRefresh, IconPlay, IconCheck } from '@/shared/icons'

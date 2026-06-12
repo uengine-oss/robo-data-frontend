@@ -5,9 +5,9 @@
  */
 import { ref, computed, watch } from 'vue'
 import type { OntologyNode, ReactExecutionResult } from '@/types'
-import { useSessionStore } from '@/stores/session'
-import { useOntologyStore } from '@/stores/ontology'
-import { useDatasourcesStore } from '@/stores/datasources'
+import { useSessionStore } from '@/shared/stores/session'
+import { useOntologyStore } from '@/features/ontology/ontology'
+import { useDatasourcesStore } from '@/features/datasources/datasources'
 import { IconPlay, IconRefresh, IconDatabase, IconSearch, IconLink, IconCheck } from '@/shared/icons'
 import { ResultTable } from '@/features/text2sql'
 

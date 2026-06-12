@@ -6,8 +6,8 @@
  *   - 단독 실행            → 그룹 메뉴(확장 가능) + 분석/도구(bottom) 플랫
  */
 import { ref, computed, inject } from 'vue'
-import { useSessionStore } from '@/stores/session'
-import { useNavigatorStore } from '@/stores/navigator'
+import { useSessionStore } from '@/shared/stores/session'
+import { useNavigatorStore } from '@/shared/stores/navigator'
 import { storeToRefs } from 'pinia'
 import { IconChevronDown, IconFolder } from '@/shared/icons'
 import {

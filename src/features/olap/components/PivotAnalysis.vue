@@ -4,7 +4,7 @@
  * 피벗 테이블 분석 - 드래그앤드롭으로 차원/측정값 구성 및 쿼리 실행
  */
 import { ref, watch, nextTick } from 'vue'
-import { useOlapStore } from '@/stores/olap'
+import { useOlapStore } from '@/features/olap/olap'
 import * as olapApi from '@/features/olap/olap-api'
 import FieldList from './FieldList.vue'
 

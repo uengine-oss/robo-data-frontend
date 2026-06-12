@@ -507,9 +507,9 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { useReactStore, useHistoryStore, type QueryHistoryItem } from '@/stores/text2sql'
-import { useSessionStore } from '@/stores/session'
-import { useDatasourcesStore } from '@/stores/datasources'
+import { useReactStore, useHistoryStore, type QueryHistoryItem } from '@/features/text2sql/text2sql'
+import { useSessionStore } from '@/shared/stores/session'
+import { useDatasourcesStore } from '@/features/datasources/datasources'
 import ResultTable from './ResultTable.vue'
 import HistoryPanel from './HistoryPanel.vue'
 import DirectSqlInput from './DirectSqlInput.vue'

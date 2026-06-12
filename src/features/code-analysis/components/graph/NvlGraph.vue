@@ -21,7 +21,7 @@ import {
 import type { GraphData, GraphNode, GraphLink, NvlNode, NvlRelationship } from '@/types'
 import type { PartialNode, PartialRelationship } from '@neo4j-nvl/base'
 import { getNodeColor, getRelationshipColor, getRelationshipWidth, getNodeSize } from '@/config/graphStyles'
-import { useNavigatorStore } from '@/stores/navigator'
+import { useNavigatorStore } from '@/shared/stores/navigator'
 import { storeToRefs } from 'pinia'
 
 // ============================================================================

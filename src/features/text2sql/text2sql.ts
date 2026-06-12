@@ -6,7 +6,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { text2sqlApi } from '@/features/text2sql/api'
-import { useDatasourcesStore } from '@/stores/datasources'
+import { useDatasourcesStore } from '@/features/datasources/datasources'
 import {
   buildProgressHeadlineKo,
   estimateProgressPercent,

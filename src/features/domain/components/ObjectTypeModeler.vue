@@ -8,8 +8,8 @@
  */
 import { ref, computed, onMounted, provide, Teleport } from 'vue'
 import { SchemaCanvas } from '@/features/schema'
-import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
-import { useSessionStore } from '@/stores/session'
+import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
+import { useSessionStore } from '@/shared/stores/session'
 import { IconPlus, IconSearch, IconRefresh, IconDatabase, IconTrash, IconAlertTriangle, IconEdit } from '@/shared/icons'
 import CreateObjectTypeDialog from './CreateObjectTypeDialog.vue'
 import { EditRelationshipDialog } from '@/features/schema'

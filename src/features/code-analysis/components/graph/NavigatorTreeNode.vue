@@ -5,8 +5,8 @@
  * 드래그 데이터: application/json { nodeId, nodeType, labels }
  */
 import { computed } from 'vue'
-import { useCanvasStore } from '@/stores/graphCanvas'
-import { useNavigatorStore, type NavigatorTreeItem } from '@/stores/navigator'
+import { useCanvasStore } from '@/features/code-analysis/graphCanvas'
+import { useNavigatorStore, type NavigatorTreeItem } from '@/shared/stores/navigator'
 
 interface Props {
   node: NavigatorTreeItem

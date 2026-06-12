@@ -6,7 +6,7 @@
  */
 import { ref, computed, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useAnalyzerStore } from '@/stores/analyzer'
+import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { useDrag } from '@/composables/useDrag'
 import { IconX, IconChevronDown } from '@/shared/icons'
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
+import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
 import type { Text2SqlColumnInfo } from '@/types'
 import { IconX, IconEdit, IconTrash, IconPlus } from '@/shared/icons'
 import { getDescriptionColor, getDescriptionSourceLabel } from '@/utils/descriptionColor'

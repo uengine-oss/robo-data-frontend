@@ -5,15 +5,15 @@
  * 데이터 소스 바인딩 및 Text2SQL 에이전트를 통한 인스턴스 조회
  */
 import { ref, watch, computed, onMounted } from 'vue'
-import { useOntologyStore } from '@/stores/ontology'
-import { useSessionStore } from '@/stores/session'
+import { useOntologyStore } from '@/features/ontology/ontology'
+import { useSessionStore } from '@/shared/stores/session'
 import type { OntologyNode } from '@/types'
 import { storeToRefs } from 'pinia'
 import { IconX, IconRefresh, IconDatabase, IconSearch, IconCheck } from '@/shared/icons'
 import { ontologyApi } from '@/features/ontology/api'
 import { Text2SqlTab } from '@/features/text2sql'
-import { useReactStore } from '@/stores/text2sql'
-import { useDatasourcesStore } from '@/stores/datasources'
+import { useReactStore } from '@/features/text2sql/text2sql'
+import { useDatasourcesStore } from '@/features/datasources/datasources'
 
 const sessionStore = useSessionStore()
 const datasourcesStore = useDatasourcesStore()

@@ -11,7 +11,7 @@ import InstancePanel from './InstancePanel.vue'
 import FeedbackModal from './FeedbackModal.vue'
 import SchemaSelector from './SchemaSelector.vue'
 import WhatIfPanel from './whatif/WhatIfPanel.vue'
-import { useOntologyStore } from '@/stores/ontology'
+import { useOntologyStore } from '@/features/ontology/ontology'
 import { storeToRefs } from 'pinia'
 import type { OntologySchema } from '@/types'
 

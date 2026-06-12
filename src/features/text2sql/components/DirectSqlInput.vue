@@ -164,7 +164,7 @@ import { ref, computed } from 'vue'
 import { IconPlay } from '@/shared/icons'
 import ResultTable from './ResultTable.vue'
 import type { ReactExecutionResult } from '@/types'
-import { useDatasourcesStore } from '@/stores/datasources'
+import { useDatasourcesStore } from '@/features/datasources/datasources'
 
 defineEmits<{
   (e: 'change-mode', mode: 'react' | 'langchain' | 'direct'): void

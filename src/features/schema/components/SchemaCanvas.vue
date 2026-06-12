@@ -11,7 +11,7 @@ import TableDetailPanel from './TableDetailPanel.vue'
 import TextViewer from '@/shared/components/TextViewer.vue'
 import CardinalityModal, { type ConnectionInfo, type Cardinality, type MatchStrategy } from './CardinalityModal.vue'
 import EditRelationshipDialog from './EditRelationshipDialog.vue'
-import { useSchemaCanvasStore } from '@/stores/schemaCanvas'
+import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
 import type { Text2SqlTableInfo } from '@/types'
 import { IconTable, IconSearch, IconRefresh, IconTrash, IconZoomIn, IconZoomOut, IconMaximize, IconLink, IconFolder, IconChevronRight, IconDatabase } from '@/shared/icons'
 

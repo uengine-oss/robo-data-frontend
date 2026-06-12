@@ -13,7 +13,7 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { VueFlow, useVueFlow, Position, MarkerType } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
-import { useSessionStore } from '@/stores/session'
+import { useSessionStore } from '@/shared/stores/session'
 import { 
   IconPlay, 
   IconRefresh,
