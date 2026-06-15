@@ -98,6 +98,34 @@ function convertNeo4jRelationship(rel: Neo4jRelationship): GraphLink {
   }
 }
 
+/**
+ * analyzer step 함수명 → 진행 표시용 한글 라벨. 표시 전용(백엔드 순서는 모름).
+ * 미등록 step 은 generic 변환(_step 제거·언더스코어→공백)으로 폴백 → 백엔드가 step 추가해도 안 깨짐.
+ */
+const STEP_LABELS: Record<string, string> = {
+  parse_ddl_step: 'DDL 파싱',
+  load_ast_step: 'AST 적재',
+  scan_codebase_step: '코드베이스 스캔',
+  link_deterministic_step: '결정론 연결',
+  link_calls_by_name_step: '호출 이름 분류',
+  link_residual_patterns_step: '잔여 패턴 연결',
+  link_dbms_tables_step: 'DBMS 테이블 연결',
+  link_calls_by_ast_step: 'AST 호출 분류',
+  build_context_step: '분석 컨텍스트 구성',
+  fetch_table_samples_step: '테이블 샘플 조회',
+  analyze_function_step: '함수 분석',
+  summarize_module_step: '모듈 요약',
+  enrich_table_description_step: '테이블 설명 강화',
+  enrich_lineage_from_catalog_step: '리니지 보강',
+  build_components_step: '컴포넌트 군집화',
+  health_metrics_step: '건강 지표',
+  embed_step: '임베딩',
+}
+
+function stepLabel(node: string): string {
+  return STEP_LABELS[node] || node.replace(/_step$/, '').replace(/_/g, ' ') || '단계'
+}
+
 /** 노드 properties + labels 에서 사람이 읽기 쉬운 이름 추출 */
 function resolveNodeName(
   properties: Record<string, unknown>,
@@ -433,46 +461,43 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     if (event.content) addMessage(event.type === 'error' ? 'error' : 'message', event.content)
   }
 
-  /** phase_event(analyzer 진행) → 진행 상태 refs 갱신. */
+  /**
+   * phase_event(analyzer 진행) → 진행 상태 refs 갱신.
+   * 백엔드 wire 는 `event`(start/node_done/stopped/complete/paused/resumed) + 완료 step `node` 다.
+   * node_done 한 건 = step 하나 완료 → 타임라인(dynamicSteps)에 정확히 누적하고,
+   * % 는 strategy 별 예상 단계수(totalPhases) 대비 추정치(완료 전까지 99% 상한)로 표시한다.
+   */
   function applyPhaseEvent(event: AnalyzeEvent): void {
-    const phaseNum = event.phase ?? 0
-    const phaseName = event.name || ''
-    const phaseProgress = event.progress ?? 0
-    const details = event.details || {}
-    const prefix = `[${phaseNum + 1}/${totalPhases.value}] ${phaseName}`
-
-    if (event.status === 'started') {
-      if (typeof details.totalPhases === 'number') totalPhases.value = details.totalPhases
-      currentPhase.value = phaseNum
-      currentPhaseName.value = phaseName
-      currentPhaseProgress.value = 0
-      currentStep.value = `${prefix} 시작...`
-      if (!dynamicSteps.value.some(s => s.num === phaseNum)) {
-        dynamicSteps.value = [...dynamicSteps.value, { num: phaseNum, name: phaseName }]
+    switch (event.event) {
+      case 'start':
+        dynamicSteps.value = []
+        currentPhase.value = 0
+        currentPhaseProgress.value = 0
+        currentStep.value = '분석 시작...'
+        break
+      case 'node_done': {
+        const label = stepLabel(event.node ?? '')
+        const num = dynamicSteps.value.length
+        dynamicSteps.value = [...dynamicSteps.value, { num, name: label }]
+        currentPhase.value = num
+        currentPhaseName.value = label
+        currentStep.value = `${label} 완료`
+        currentPhaseProgress.value = Math.min(99, Math.round((num + 1) / totalPhases.value * 100))
+        break
       }
-    } else if (event.status === 'in_progress') {
-      if (phaseNum === currentPhase.value) {
-        currentPhaseProgress.value = Math.max(currentPhaseProgress.value, phaseProgress)
-      } else {
-        currentPhase.value = phaseNum
-        currentPhaseName.value = phaseName
-        currentPhaseProgress.value = phaseProgress
-      }
-      if (details.step) {
-        const stepDetail = details.done && details.total
-          ? `${details.step} (${details.done}/${details.total})`
-          : details.step
-        currentStep.value = `${prefix} - ${stepDetail} (${phaseProgress}%)`
-      } else if (details.completed && details.total) {
-        currentStep.value = `${prefix} (${details.completed}/${details.total}) ${phaseProgress}%`
-      } else {
-        currentStep.value = `${prefix} 진행 중... (${phaseProgress}%)`
-      }
-    } else if (event.status === 'completed') {
-      currentPhaseProgress.value = 100
-      currentStep.value = `${prefix} 완료 ✓`
-    } else if (event.status === 'skipped') {
-      currentStep.value = `${prefix} 건너뜀`
+      case 'complete':
+        currentPhaseProgress.value = 100
+        currentStep.value = '분석 완료 ✓'
+        break
+      case 'stopped':
+        currentStep.value = '중단됨'
+        break
+      case 'paused':
+        isPipelinePaused.value = true
+        break
+      case 'resumed':
+        isPipelinePaused.value = false
+        break
     }
   }
 
@@ -491,9 +516,11 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   }
 
   async function doAnalyze(): Promise<void> {
-    currentStep.value = '[3단계] 🧠 AI 분석 진행 중...'
+    currentStep.value = '🧠 AI 분석 진행 중...'
     clearGraphEvents()
     dynamicSteps.value = []
+    // % 추정용 예상 단계수(node_done 개수). 타임라인은 정확, 바는 추정(완료 시 100% 보정).
+    totalPhases.value = analyzeMeta.value.strategy === 'dbms' ? 13 : 14
     addMessage('message', '🔍 분석 시작...')
 
     await roboApi.analyze(

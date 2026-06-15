@@ -4,7 +4,7 @@
  * 인제스천 진행 상태를 플로팅 팝업으로 표시
  * 메타데이터 관련 탭 전체에서 보임
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { useDrag } from '@/shared/composables/useDrag'
@@ -62,6 +62,29 @@ const progress = computed(() => currentPhaseProgress.value)
 const isCompleted = computed(() =>
   currentPhase.value >= totalPhases.value - 1 && currentPhaseProgress.value >= 100
 )
+
+// 경과 시간 — 분석 중 1초마다 갱신. 패널은 분석 동안 마운트 유지되므로 컴포넌트 로컬로 충분.
+const startMs = ref<number | null>(null)
+const nowMs = ref(0)
+let elapsedTimer: ReturnType<typeof setInterval> | undefined
+watch(isProcessing, (proc) => {
+  if (proc) {
+    startMs.value = Date.now()
+    nowMs.value = Date.now()
+    elapsedTimer = setInterval(() => { nowMs.value = Date.now() }, 1000)
+  } else if (elapsedTimer) {
+    clearInterval(elapsedTimer)
+    elapsedTimer = undefined
+  }
+})
+const elapsedText = computed(() => {
+  if (startMs.value === null) return ''
+  const total = Math.max(0, Math.floor((nowMs.value - startMs.value) / 1000))
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return m > 0 ? `${m}분 ${s}초` : `${s}초`
+})
+onUnmounted(() => { if (elapsedTimer) clearInterval(elapsedTimer) })
 
 // 최근 오류 메시지 확인 (오류가 있으면 패널 유지)
 const hasRecentError = computed(() => {
@@ -200,7 +223,10 @@ watch(hasRecentError, (hasError) => {
             <span class="step-label">
               {{ isPipelinePaused ? '⏸ 일시정지됨' : currentStep || '대기 중' }}
             </span>
-            <span class="progress-percent">{{ progress }}%</span>
+            <span class="progress-right">
+              <span v-if="elapsedText" class="elapsed-time">⏱ {{ elapsedText }}</span>
+              <span class="progress-percent">{{ progress }}%</span>
+            </span>
           </div>
           <div class="progress-track">
             <div 
@@ -465,6 +491,8 @@ watch(hasRecentError, (hasError) => {
 .progress-info {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  gap: 8px;
   margin-bottom: 8px;
 }
 
@@ -474,7 +502,21 @@ watch(hasRecentError, (hasError) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 250px;
+  flex: 1;
+  min-width: 0;
+}
+
+.progress-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.elapsed-time {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .progress-percent {

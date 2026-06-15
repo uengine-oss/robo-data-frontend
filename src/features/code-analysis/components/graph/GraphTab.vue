@@ -52,6 +52,27 @@ const showConsole = ref(false)
 const showSearch = ref(false)
 const progressPanelCollapsed = ref(false) // 진행 패널 축소 상태
 const labelFilters = ref<string[]>([]) // 레전드 필터 (노드 라벨)
+/** 그룹 영역(바운디드 컨텍스트) 오버레이 기준 — null=끔, 'component_id'=켬. */
+const groupHullBy = ref<string | null>(null)
+function toggleGroupHull(): void {
+  groupHullBy.value = groupHullBy.value ? null : 'component_id'
+}
+
+/** 노드 색 기준 — 'label'=라벨별, 'health'=건강지표(risk)별 강조. */
+const colorMode = ref<'label' | 'health'>('label')
+function toggleHealthView(): void {
+  colorMode.value = colorMode.value === 'health' ? 'label' : 'health'
+}
+
+/** 스키마 하위 뷰(캔버스/Mermaid) — 전환 버튼을 공통 툴바로 끌어올려 SchemaView 가 제어받게 함. */
+const schemaMode = ref<'canvas' | 'mermaid'>('canvas')
+
+/** 테이블 전체 보기 — 모든 TABLE 노드와 그 관계(FK 등)를 캔버스에 로드. */
+function showAllTables(): void {
+  labelFilters.value = []
+  canvasStore.setPreset(null)
+  canvasStore.loadNodesByLabels(['Table'])
+}
 
 // 분석 패널 모드: 'docked' (왼쪽 고정), 'floating' (플로팅), 'hidden' (완전 숨김)
 // 기본값은 hidden - 인제스천 시작 시에만 자동으로 표시됨
@@ -612,6 +633,8 @@ watch(hasGraph, (has, prev) => {
           :selectedNodeId="selectedNode?.id"
           :selectedRelationshipId="selectedRelationship?.id"
           :labelFilters="labelFilters"
+          :groupHullBy="groupHullBy"
+          :colorMode="colorMode"
           @node-select="handleNodeSelect"
           @relationship-select="handleRelationshipSelect"
           @node-delete="handleNodeRemoveFromCanvas"
@@ -650,7 +673,7 @@ watch(hasGraph, (has, prev) => {
       </div>
       
       <div class="view-container" v-show="activeView === 'schema'">
-        <SchemaView />
+        <SchemaView :mode="schemaMode" />
       </div>
       
       <!-- 플로팅: 우측 패널 토글 (그래프 뷰에서만) -->
@@ -679,11 +702,27 @@ watch(hasGraph, (has, prev) => {
         >
           UML
         </button>
-        <button 
+        <button
           :class="{ active: activeView === 'graph' }"
           @click="activeView = 'graph'"
         >
           Graph
+        </button>
+      </div>
+
+      <!-- 스키마 하위 전환(캔버스/Mermaid) — 메인 뷰 스위처와 같은 자리·스타일로 일관 -->
+      <div class="view-switcher" v-if="activeView === 'schema'">
+        <button
+          :class="{ active: schemaMode === 'canvas' }"
+          @click="schemaMode = 'canvas'"
+        >
+          📐 캔버스
+        </button>
+        <button
+          :class="{ active: schemaMode === 'mermaid' }"
+          @click="schemaMode = 'mermaid'"
+        >
+          📊 Mermaid ER
         </button>
       </div>
 
@@ -709,6 +748,38 @@ watch(hasGraph, (has, prev) => {
         @click="toggleInteractionPreset"
       >
         🔗 모듈간 상호작용
+      </button>
+
+      <!-- 영역 보기: 같은 컴포넌트(바운디드 컨텍스트) 노드를 색 영역으로 묶어 표시 -->
+      <button
+        v-if="activeView === 'graph'"
+        class="interaction-preset-btn"
+        :class="{ active: groupHullBy !== null }"
+        title="영역 보기 — 같은 컴포넌트끼리 색 영역으로 묶기 (다시 누르면 해제)"
+        @click="toggleGroupHull"
+      >
+        🗺️ 영역 보기
+      </button>
+
+      <!-- 건강 보기: 함수 노드를 건강지표(risk)별 색으로 — 위험(빨강)/주의(주황)/양호(초록) -->
+      <button
+        v-if="activeView === 'graph'"
+        class="interaction-preset-btn"
+        :class="{ active: colorMode === 'health' }"
+        title="건강 보기 — 위험한 함수를 색으로 강조 (빨강=위험/주황=주의/초록=양호, 다시 누르면 해제)"
+        @click="toggleHealthView"
+      >
+        🩺 건강 보기
+      </button>
+
+      <!-- 테이블 전체: 모든 테이블 + 그 관계(FK 등)를 캔버스에 -->
+      <button
+        v-if="activeView === 'graph'"
+        class="interaction-preset-btn"
+        title="모든 테이블과 그 관계(FK 등) 표시"
+        @click="showAllTables"
+      >
+        🗄️ 테이블 전체
       </button>
 
       <template v-if="activeView === 'uml'">

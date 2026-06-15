@@ -23,6 +23,7 @@ import type { PartialNode, PartialRelationship } from '@neo4j-nvl/base'
 import { getNodeColor, getRelationshipColor, getRelationshipWidth, getNodeSize } from '@/shared/config/graphStyles'
 import { useNavigatorStore } from '@/shared/stores/navigator'
 import { storeToRefs } from 'pinia'
+import { useGroupHulls } from './useGroupHulls'
 
 // ============================================================================
 // 타입 정의
@@ -34,6 +35,19 @@ interface Props {
   selectedRelationshipId?: string
   /** 노드 라벨 필터 (비어있으면 전체 표시) */
   labelFilters?: string[]
+  /**
+   * 같은 그룹 노드끼리 감싸는 영역(바운디드 컨텍스트) 표시 기준.
+   *  - 'component_id' (또는 다른 속성 키) → properties[key] 로 묶음
+   *  - 'label'                          → 노드 대표 라벨로 묶음
+   *  - null/미지정                       → 표시 안 함
+   */
+  groupHullBy?: string | null
+  /**
+   * 노드 색 기준.
+   *  - 'label'(기본) → 라벨별 색(getNodeColor)
+   *  - 'health'      → 건강지표(risk)별 색 — 나쁜 함수 강조. 지표 없는 노드는 회색.
+   */
+  colorMode?: 'label' | 'health'
 }
 
 interface NodeStat {
@@ -78,8 +92,27 @@ const NVL_OPTIONS = {
 // ============================================================================
 
 const props = withDefaults(defineProps<Props>(), {
-  labelFilters: () => []
+  labelFilters: () => [],
+  groupHullBy: null,
+  colorMode: 'label'
 })
+
+// 건강지표(risk)별 노드 색 — getNodeColor(공유 유틸)는 건드리지 않고 여기서만 override.
+const HEALTH_COLORS: Record<string, string> = {
+  high: '#fa5252',   // 위험 — 빨강
+  medium: '#ffa94d', // 주의 — 주황
+  low: '#51cf66',    // 양호 — 초록
+}
+const HEALTH_NEUTRAL = '#868e96' // 건강지표 없는 노드(테이블·모듈 등)
+
+/** colorMode 에 따른 노드 색 — 'health' 면 risk 기반, 아니면 라벨 기반. */
+function resolveNodeColor(labels: string[], properties?: Record<string, unknown>): string {
+  if (props.colorMode === 'health') {
+    const risk = String(properties?.risk ?? '')
+    return HEALTH_COLORS[risk] ?? HEALTH_NEUTRAL
+  }
+  return getNodeColor(labels)
+}
 
 const emit = defineEmits<{
   'node-select': [node: GraphNode | null]
@@ -107,6 +140,15 @@ const { showLogicalNames } = storeToRefs(navigatorStore)
 const containerRef = ref<HTMLElement>()
 const nvlInstance = shallowRef<NVL | null>(null)
 const isInitializing = ref(false)
+
+// 그룹 영역(바운디드 컨텍스트) 오버레이. 변환·hull·동기화는 useGroupHulls 가 캡슐화하고,
+// 여기서는 라이프사이클 배선만 한다(단일 책임 분리).
+const groupHulls = useGroupHulls(
+  containerRef,
+  nvlInstance,
+  () => props.graphData.nodes,
+  () => ({ groupBy: props.groupHullBy ?? null })
+)
 
 const nodeStats = ref<Map<string, NodeStat>>(new Map())
 const relationshipStats = ref<Map<string, NodeStat>>(new Map())
@@ -153,7 +195,7 @@ function toNvlNode(node: GraphNode, isSelected = false): NvlNode {
   return {
     id: node.id,
     caption: resolveCaption(node),
-    color: getNodeColor(node.labels),
+    color: resolveNodeColor(node.labels, node.properties),
     size: getNodeSize(node.labels),
     selected: isSelected,
     properties: {
@@ -252,19 +294,24 @@ async function initNvl(): Promise<void> {
     rels,
     NVL_OPTIONS,
     {
+      // 레이아웃이 움직이는 매 프레임/완료 시 영역 오버레이도 같이 갱신
+      onLayoutStep: () => groupHulls.redraw(),
       onLayoutDone: () => {
         isInitializing.value = false
+        groupHulls.redraw()
       }
     }
   )
 
   setupInteractions()
+  groupHulls.attach()
   updateStats()
   visibleNodeCount.value = nodeMap.size
 }
 
 function destroyNvl(): void {
   closeContextMenu()
+  groupHulls.detach()
   if (nvlInstance.value) {
     nvlInstance.value.destroy()
     nvlInstance.value = null
@@ -334,6 +381,7 @@ function syncGraph(): void {
 
   updateStats()
   visibleNodeCount.value = nodeMap.size
+  groupHulls.redraw()
 }
 
 // ============================================================================
@@ -405,8 +453,14 @@ function setupInteractions(): void {
   document.addEventListener('click', documentClickHandler as EventListener)
 
   new DragNodeInteraction(nvl)
-  new PanInteraction(nvl)
-  new ZoomInteraction(nvl)
+
+  // 캔버스 줌/이동 시 영역 오버레이를 같은 변환으로 다시 그림 (NVL 과 desync 방지).
+  // NVL 은 setPan/setZoom 을 콜백 호출 전에 실행하고 콜백 반환값은 무시하므로
+  // (interaction-handlers base.js) 기본 동작에 영향 없다.
+  const panInteraction = new PanInteraction(nvl)
+  panInteraction.updateCallback('onPan', () => groupHulls.redraw())
+  const zoomInteraction = new ZoomInteraction(nvl)
+  zoomInteraction.updateCallback('onZoom', () => groupHulls.redraw())
 }
 
 function closeContextMenu(): void {
@@ -489,7 +543,7 @@ function updateNodeStyles(): void {
   const updates: PartialNode[] = []
   for (const [id, n] of nodeMap.entries()) {
     const labels = (n.properties?.labels as string[]) || ['Unknown']
-    const color = getNodeColor(labels)
+    const color = resolveNodeColor(labels, n.properties)
     const size = getNodeSize(labels)
     if (n.color !== color || n.size !== size) {
       updates.push({ id, color, size })
@@ -569,6 +623,15 @@ watch([() => props.selectedNodeId, () => props.selectedRelationshipId], ([newNod
   if (nodesToUpdate.length > 0 || relsToUpdate.length > 0) {
     nvlInstance.value.updateElementsInGraph(nodesToUpdate, relsToUpdate)
   }
+})
+
+watch(() => props.groupHullBy, () => {
+  groupHulls.redraw()
+})
+
+// 색 기준(라벨↔건강) 전환 시 이미 그려진 노드 색을 즉시 갱신
+watch(() => props.colorMode, () => {
+  updateNodeStyles()
 })
 
 watch(showLogicalNames, () => {

@@ -5,6 +5,7 @@ import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { useSessionStore } from '@/shared/stores/session'
 import { storeToRefs } from 'pinia'
 import DropZone from './DropZone.vue'
+import ScopeBrowser from './ScopeBrowser.vue'
 import UploadModal from './UploadModal.vue'
 import UploadTree from './UploadTree.vue'
 import JsonViewer from './JsonViewer.vue'
@@ -34,7 +35,7 @@ const handleRestartPipeline = async () => {
   }
 }
 
-// 경로 모드(Electron): host가 준 로컬 폴더를 바로 분석
+// 경로 모드(Electron): 로컬 폴더를 브라우저로 탐색·미리보기 후 폴더 전체 분석.
 const handleAnalyzePath = async () => {
   try {
     await projectStore.analyzeProjectPath()
@@ -413,10 +414,10 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
 
 <template>
   <div class="upload-tab">
-    <div class="upload-main">
+    <div class="upload-main" :class="{ 'is-path-mode': isPathMode }">
       <!-- 좌측: (경로 모드) 폴더 분석 / (업로드 모드) 드롭존 또는 파일·DDL 목록 -->
       <div class="upload-left">
-        <!-- 경로 모드(Electron): host가 준 로컬 폴더를 업로드 없이 바로 분석 -->
+        <!-- 경로 모드(Electron): 로컬 폴더를 트리로 탐색 + 미리보기 + 포함/제외 후 분석 -->
         <template v-if="isPathMode">
           <div class="path-mode-panel">
             <div class="path-mode-header">
@@ -424,15 +425,12 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
               <span>로컬 폴더 분석</span>
             </div>
             <div class="path-mode-path" :title="projectRoot || ''">{{ projectRoot }}</div>
-            <button
-              class="btn btn--primary path-mode-btn"
-              @click="handleAnalyzePath"
-              :disabled="isProcessing"
-            >
-              <IconPlay :size="16" />
-              <span>{{ isProcessing ? '분석 중...' : '분석 시작' }}</span>
-            </button>
-            <p class="path-mode-hint">이 폴더를 직접 분석합니다 (업로드 없음 · 언어 자동 감지).</p>
+            <ScopeBrowser
+              v-if="projectRoot"
+              :root="projectRoot"
+              :isProcessing="isProcessing"
+              @analyze="handleAnalyzePath"
+            />
           </div>
         </template>
 
@@ -637,15 +635,23 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
   position: relative;
 }
 
+// 경로 모드: grid(300px 1fr) 해제 → 범위 브라우저가 전체폭을 쓰게 한다.
+.upload-main.is-path-mode {
+  display: block;
+}
+
 .path-mode-panel {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
+  gap: 12px;
   height: 100%;
-  padding: 40px;
-  text-align: center;
+  padding: 16px;
+
+  // 헤더·경로 아래 남은 공간을 범위 브라우저가 채운다.
+  :deep(.scope-browser) {
+    flex: 1;
+    min-height: 0;
+  }
 }
 
 .path-mode-header {
@@ -667,12 +673,6 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
   font-size: 13px;
   color: var(--color-text-light);
   word-break: break-all;
-}
-
-.path-mode-hint {
-  font-size: 12px;
-  color: var(--color-text-light);
-  margin: 0;
 }
 
 .upload-main {

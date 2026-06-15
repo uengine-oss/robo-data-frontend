@@ -227,12 +227,10 @@ export interface AnalyzeGraphRef {
 export interface AnalyzeEvent {
   type: AnalyzeEventType
   content?: string                              // message·error·detected(JSON 문자열)
-  // phase_event
-  phase?: number
-  name?: string
-  status?: 'started' | 'in_progress' | 'completed' | 'skipped' | 'error'
-  progress?: number
-  details?: Record<string, unknown>
+  // phase_event — 백엔드 실제 wire(executor.py·pause_controller.py): event + node(완료 step) + run_id.
+  event?: 'start' | 'node_done' | 'stopped' | 'complete' | 'paused' | 'resumed'
+  node?: string                                 // node_done 시 방금 완료된 step 함수명
+  run_id?: string
   // node_event
   op?: 'merge'
   label?: string
