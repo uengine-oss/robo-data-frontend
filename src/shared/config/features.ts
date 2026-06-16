@@ -32,6 +32,7 @@ import {
   IconCalendar,
   IconSettings,
   IconEye,
+  IconTable,
 } from '@/shared/icons'
 
 /** 메뉴 그룹 식별자. 'bottom' 은 그룹 헤더 없이 플랫 렌더(분석/도구). */
@@ -72,7 +73,7 @@ export const FEATURES: FeatureDef[] = [
     component: lazy(() => import('@/features/code-analysis').then((m: any) => m.UploadTab)) },
   { id: 'datasources', label: '데이터 소스', icon: IconDatabase, group: 'physical', embeddable: true,
     component: lazy(() => import('@/features/datasources').then((m: any) => m.DataSourcesTab)) },
-  { id: 'graph', label: '스키마 관리', icon: IconDatabase, group: 'physical', embeddable: true,
+  { id: 'graph', label: '스키마 관리', icon: IconTable, group: 'physical', embeddable: true,
     component: lazy(() => import('@/features/code-analysis').then((m: any) => m.GraphTab)) },
   { id: 'text2sql', label: '자연어 질의', icon: IconMessageSquare, group: 'physical',
     component: lazy(() => import('@/features/text2sql').then((m: any) => m.Text2SqlTab)) },

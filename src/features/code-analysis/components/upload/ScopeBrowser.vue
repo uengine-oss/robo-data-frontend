@@ -1,14 +1,19 @@
 <script setup lang="ts">
 /**
- * ScopeBrowser.vue — 경로 모드 로컬 파일 브라우저.
+ * ScopeBrowser.vue — 경로 모드 로컬 파일 브라우저 (IDE 스타일).
  *
- * 호스트(Electron)의 로컬 폴더를 트리로 보여주고 파일을 미리본다. FS 접근은
- * 데스크톱 IPC(window.desktop.fs) 경유. 분석은 폴더 전체를 대상으로 한다
- * (범위 선택/제외는 제거 — 입구 통일 계약 전까지 실효가 없어 폐기).
+ * 호스트(Electron)의 로컬 폴더를 트리로 보여주고, 파일을 미리보고 편집·저장하며,
+ * 이름변경/복사/삭제(휴지통)/새폴더 같은 파일 작업을 한다. FS 접근은 데스크톱
+ * IPC(window.desktop.fs) 경유. 분석은 폴더 전체를 대상으로 한다.
  *
- * 상태는 이 컴포넌트에 중앙집중하고 트리는 평탄 리스트(visibleRows)로 렌더한다.
+ * 인터랙션은 아키텍트 FileTreePane 모델을 따른다:
+ *   - 이름변경 = 행에서 인라인 입력 (Electron 은 window.prompt 미지원이므로 필수)
+ *   - 새 폴더 = 기본명 생성 후 즉시 인라인 명명 (VS Code 식)
+ *   - 파일 편집 = 미리보기 textarea 직접 편집 + 저장(dirty 시)
+ *
+ * 상태는 이 컴포넌트에 중앙집중, 트리는 평탄 리스트(visibleRows)로 렌더한다.
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { logger } from '@/shared/utils/logger'
 
 interface FsEntry {
@@ -25,21 +30,15 @@ type FsReadResult =
 const props = defineProps<{ root: string; isProcessing?: boolean }>()
 const emit = defineEmits<{ analyze: [] }>()
 
-// ── 상태 ──────────────────────────────────────────────────────────────
-const childrenByPath = ref<Map<string, FsEntry[]>>(new Map())
-const expanded = ref<Set<string>>(new Set())
-const loadingPaths = ref<Set<string>>(new Set())
-const loadError = ref<string>('')
+/** 루트 폴더명(헤더 표시용) — 전체 경로는 tooltip 으로. */
+const rootName = computed(() => props.root.split(/[\\/]/).filter(Boolean).pop() || props.root)
 
-const selectedFile = ref<string | null>(null)
-const preview = ref<{ state: 'loading' | 'text' | 'binary' | 'too-large' | 'error'; content?: string; note?: string }>(
-  { state: 'text', content: '' },
-)
-
+// ── 데스크톱 FS 브리지 ────────────────────────────────────────────────
 type Res<T> = { ok: boolean; data?: T; error?: { message: string } }
 interface FsBridge {
   listDir(i: { root: string; path: string }): Promise<Res<FsEntry[]>>
   readFile(i: { root: string; path: string }): Promise<Res<FsReadResult>>
+  writeFile(i: { root: string; path: string; content: string }): Promise<Res<{ ok: true }>>
   rename(i: { root: string; from: string; to: string }): Promise<Res<{ ok: true }>>
   copy(i: { root: string; from: string; to: string }): Promise<Res<{ ok: true }>>
   trash(i: { root: string; path: string }): Promise<Res<{ ok: true }>>
@@ -53,18 +52,21 @@ function parentOf(p: string): string {
   const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
   return i > 0 ? p.slice(0, i) : props.root
 }
+function basenameOf(p: string): string {
+  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
+  return i >= 0 ? p.slice(i + 1) : p
+}
 function joinPath(dir: string, name: string): string {
   const sep = dir.includes('\\') ? '\\' : '/'
   return dir.endsWith(sep) ? dir + name : dir + sep + name
 }
-async function reloadDir(dir: string): Promise<void> {
-  const next = new Map(childrenByPath.value)
-  next.delete(dir)
-  childrenByPath.value = next
-  await loadDir(dir)
-}
 
-// ── 로딩 ──────────────────────────────────────────────────────────────
+// ── 트리 상태 ─────────────────────────────────────────────────────────
+const childrenByPath = ref<Map<string, FsEntry[]>>(new Map())
+const expanded = ref<Set<string>>(new Set())
+const loadingPaths = ref<Set<string>>(new Set())
+const loadError = ref<string>('')
+
 async function loadDir(dirPath: string): Promise<void> {
   if (childrenByPath.value.has(dirPath) || loadingPaths.value.has(dirPath)) return
   const fs = bridge()
@@ -87,7 +89,13 @@ async function loadDir(dirPath: string): Promise<void> {
   }
 }
 
-// ── 트리 평탄화(보이는 행만) ──────────────────────────────────────────
+async function reloadDir(dir: string): Promise<void> {
+  const next = new Map(childrenByPath.value)
+  next.delete(dir)
+  childrenByPath.value = next
+  await loadDir(dir)
+}
+
 interface Row { entry: FsEntry; depth: number }
 const visibleRows = computed<Row[]>(() => {
   const out: Row[] = []
@@ -111,9 +119,95 @@ function toggleExpand(entry: FsEntry): void {
   expanded.value = next
 }
 
+// ── 트리 선택(커서) — 새 폴더 등 작업의 "기준 폴더"가 된다(VS Code 식) ─────────────
+const selectedEntry = ref<FsEntry | null>(null)
+/** 새 폴더 생성 기준 — 선택이 폴더면 그 폴더, 파일이면 그 부모, 선택 없으면 루트. */
+const targetDir = computed(() =>
+  selectedEntry.value
+    ? (selectedEntry.value.type === 'dir' ? selectedEntry.value.path : parentOf(selectedEntry.value.path))
+    : props.root,
+)
+/** 행 클릭 — 선택(하이라이트) + 폴더면 펼침/접힘, 파일이면 미리보기. */
+function onRowClick(entry: FsEntry): void {
+  selectedEntry.value = entry
+  if (entry.type === 'dir') toggleExpand(entry)
+  else selectFile(entry)
+}
+
+// ── 미리보기 + 편집 ───────────────────────────────────────────────────
+// 활성 파일은 "단순 ref"로 textarea 에 직접 바인딩(검증된 방식). 다른 파일의 미저장 편집은
+// 별도 stash 에 보존 → 전환해도 안 잃는다(멀티버퍼). 활성 편집 경로를 건드리지 않아 안전.
+interface Buf { content: string; original: string; eol: '\n' | '\r\n' }
+const selectedFile = ref<string | null>(null)
+const preview = ref<{ state: 'empty' | 'loading' | 'text' | 'binary' | 'too-large' | 'error'; note?: string }>(
+  { state: 'empty' },
+)
+const editContent = ref('')      // 활성 파일 내용 (LF) — textarea 직접 바인딩
+const originalContent = ref('')  // 활성 파일 저장본 (LF)
+const fileEol = ref<'\n' | '\r\n'>('\n')  // 활성 파일 원래 줄바꿈 — 저장 시 복원
+const saving = ref(false)
+// 비활성(다른) 파일의 미저장 편집 보존 — 전환 직전 stash, 다시 열면 복원.
+const stash = ref<Map<string, Buf>>(new Map())
+
+// 인앱 확인/안내 UI — ★이 Electron 호스트는 네이티브 window.confirm/alert/prompt 가
+// 호출 후 렌더러 키보드 포커스를 깨뜨린다(편집 불가 회귀의 진짜 원인). 절대 쓰지 말 것.
+const confirmBox = ref<{ message: string; resolve: (v: boolean) => void } | null>(null)
+function askConfirm(message: string): Promise<boolean> {
+  return new Promise((resolve) => { confirmBox.value = { message, resolve } })
+}
+function answerConfirm(v: boolean): void {
+  confirmBox.value?.resolve(v)
+  confirmBox.value = null
+}
+const toast = ref('')
+let toastTimer: ReturnType<typeof setTimeout> | undefined
+function showToast(msg: string): void {
+  toast.value = msg
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toast.value = '' }, 4000)
+}
+
+// textarea 는 입력 시 CRLF→LF 로 정규화한다. dirty 비교가 어긋나지 않도록 편집·비교는 LF 로
+// 통일하고(로드 시 정규화), 저장 때 원래 EOL 로 되돌린다(줄바꿈 스타일 보존).
+function toLf(s: string): string { return s.replace(/\r\n?/g, '\n') }
+function fromLf(s: string, eol: '\n' | '\r\n'): string { return eol === '\r\n' ? s.replace(/\n/g, '\r\n') : s }
+
+const isDirty = computed(() => preview.value.state === 'text' && editContent.value !== originalContent.value)
+/** 그 경로가 미저장(dirty)인지 — 활성은 직접 비교, 그 외는 stash 비교(여러 파일 동시 마커). */
+function isDirtyPath(p: string): boolean {
+  if (p === selectedFile.value) return isDirty.value
+  const b = stash.value.get(p)
+  return !!b && b.content !== b.original
+}
+
+/** 전환 직전, 현재 활성 파일의 미저장 상태를 stash 에 보존. */
+function stashActive(): void {
+  const p = selectedFile.value
+  if (!p || preview.value.state !== 'text') return
+  const next = new Map(stash.value)
+  next.set(p, { content: editContent.value, original: originalContent.value, eol: fileEol.value })
+  stash.value = next
+}
+function dropStash(p: string): void {
+  if (!stash.value.has(p)) return
+  const next = new Map(stash.value); next.delete(p); stash.value = next
+}
+
 async function selectFile(entry: FsEntry): Promise<void> {
   if (entry.type !== 'file') return
+  if (entry.path === selectedFile.value) return   // 이미 활성
+  stashActive()                                    // 현재 파일 미저장분 보존
   selectedFile.value = entry.path
+  // stash 에 있으면 디스크 재로드 없이 복원(미저장 편집 보존).
+  const st = stash.value.get(entry.path)
+  if (st) {
+    editContent.value = st.content
+    originalContent.value = st.original
+    fileEol.value = st.eol
+    dropStash(entry.path)                           // 이제 활성 → stash 에서 제거
+    preview.value = { state: 'text' }
+    return
+  }
   const fs = bridge()
   if (!fs) return
   preview.value = { state: 'loading' }
@@ -121,41 +215,112 @@ async function selectFile(entry: FsEntry): Promise<void> {
     const res = await fs.readFile({ root: props.root, path: entry.path })
     if (!res.ok || !res.data) { preview.value = { state: 'error', note: res.error?.message || '읽기 실패' }; return }
     const d = res.data
-    if (d.kind === 'text') preview.value = { state: 'text', content: d.content }
-    else if (d.kind === 'binary') preview.value = { state: 'binary', note: '바이너리 파일 — 미리보기를 표시하지 않습니다.' }
-    else preview.value = { state: 'too-large', note: `파일이 너무 큽니다 (${Math.round(d.size / 1024)} KB) — 미리보기를 표시하지 않습니다.` }
+    if (d.kind === 'text') {
+      fileEol.value = d.content.includes('\r\n') ? '\r\n' : '\n'
+      const lf = toLf(d.content)
+      editContent.value = lf
+      originalContent.value = lf
+      preview.value = { state: 'text' }
+    } else if (d.kind === 'binary') {
+      preview.value = { state: 'binary', note: '바이너리 파일 — 미리보기/편집을 표시하지 않습니다.' }
+    } else {
+      preview.value = { state: 'too-large', note: `파일이 너무 큽니다 (${Math.round(d.size / 1024)} KB) — 미리보기/편집을 표시하지 않습니다.` }
+    }
   } catch (e) {
     preview.value = { state: 'error', note: String(e) }
   }
 }
 
-// ── 파일 작업 (이름변경·삭제·복사·새 폴더) ────────────────────────────
+async function saveFile(): Promise<void> {
+  if (!selectedFile.value || !isDirty.value || saving.value) return
+  const fs = bridge(); if (!fs) return
+  saving.value = true
+  try {
+    const res = await fs.writeFile({ root: props.root, path: selectedFile.value, content: fromLf(editContent.value, fileEol.value) })
+    if (!res.ok) { showToast(res.error?.message || '저장 실패'); return }
+    originalContent.value = editContent.value   // dirty 해제 (둘 다 LF 기준)
+  } finally {
+    saving.value = false
+  }
+}
+
+function clearPreview(): void {
+  selectedFile.value = null
+  preview.value = { state: 'empty' }
+  editContent.value = ''
+  originalContent.value = ''
+}
+
+// ── 우클릭 메뉴 ───────────────────────────────────────────────────────
 const ctx = ref<{ visible: boolean; x: number; y: number; entry: FsEntry | null }>(
   { visible: false, x: 0, y: 0, entry: null },
 )
 function openCtx(e: MouseEvent, entry: FsEntry): void {
   e.preventDefault()
+  e.stopPropagation()
+  selectedEntry.value = entry   // 우클릭한 항목을 선택(=새 폴더 기준이 됨)
   ctx.value = { visible: true, x: e.clientX, y: e.clientY, entry }
+}
+/** 트리 빈 곳 우클릭 → 루트 컨텍스트(entry=null): "새 폴더"만. */
+function openRootCtx(e: MouseEvent): void {
+  e.preventDefault()
+  ctx.value = { visible: true, x: e.clientX, y: e.clientY, entry: null }
 }
 function closeCtx(): void { ctx.value = { ...ctx.value, visible: false, entry: null } }
 
-async function doRename(entry: FsEntry): Promise<void> {
+// ── 인라인 이름변경 ──────────────────────────────────────────────────
+// 인라인 이름변경 — 텍스트는 별도 ref(중첩 .value 바인딩 꼬임 방지).
+const renamingPath = ref<string | null>(null)
+const renameValue = ref('')
+
+function startRename(entry: FsEntry): void {
   closeCtx()
-  const name = window.prompt('새 이름', entry.name)
-  if (!name || name === entry.name) return
-  const fs = bridge(); if (!fs) return
-  const res = await fs.rename({ root: props.root, from: entry.path, to: joinPath(parentOf(entry.path), name) })
-  if (!res.ok) { window.alert(res.error?.message || '이름변경 실패'); return }
-  await reloadDir(parentOf(entry.path))
+  renamingPath.value = entry.path
+  renameValue.value = entry.name
+  // v-for 안 template ref 는 불안정 → 단일 입력을 querySelector 로 포커스(IDE 식 선택).
+  nextTick(() => {
+    const el = document.querySelector<HTMLInputElement>('.scope-browser .rename-input')
+    if (!el) return
+    el.focus()
+    const dot = entry.type === 'file' ? el.value.lastIndexOf('.') : -1
+    el.setSelectionRange(0, dot > 0 ? dot : el.value.length)
+  })
 }
 
+function cancelRename(): void { renamingPath.value = null }
+
+async function commitRename(): Promise<void> {
+  const path = renamingPath.value
+  if (path === null) return
+  renamingPath.value = null                 // 먼저 비워 blur·enter 이중 커밋 방지
+  const newName = renameValue.value.trim()
+  const oldName = basenameOf(path)
+  if (!newName || newName === oldName || newName.includes('/') || newName.includes('\\')) return
+  const fs = bridge(); if (!fs) return
+  const to = joinPath(parentOf(path), newName)
+  const res = await fs.rename({ root: props.root, from: path, to })
+  if (!res.ok) { showToast(res.error?.message || '이름변경 실패'); return }
+  // 미저장 편집도 새 경로로 따라가게: 활성이면 selectedFile만 갱신(편집 ref 유지), stash면 키 이동.
+  const st = stash.value.get(path)
+  if (st) { dropStash(path); const n = new Map(stash.value); n.set(to, st); stash.value = n }
+  if (selectedFile.value === path) selectedFile.value = to
+  if (selectedEntry.value?.path === path) selectedEntry.value = { ...selectedEntry.value, path: to, name: newName }
+  await reloadDir(parentOf(path))
+}
+
+// ── 파일 작업 ─────────────────────────────────────────────────────────
 async function doTrash(entry: FsEntry): Promise<void> {
   closeCtx()
-  if (!window.confirm(`'${entry.name}'을(를) 휴지통으로 보낼까요? (복구 가능)`)) return
+  if (!(await askConfirm(`'${entry.name}'을(를) 휴지통으로 보낼까요? (복구 가능)`))) return
   const fs = bridge(); if (!fs) return
   const res = await fs.trash({ root: props.root, path: entry.path })
-  if (!res.ok) { window.alert(res.error?.message || '삭제 실패'); return }
-  if (selectedFile.value === entry.path) { selectedFile.value = null; preview.value = { state: 'text', content: '' } }
+  if (!res.ok) { showToast(res.error?.message || '삭제 실패'); return }
+  // 삭제된 경로(파일, 또는 폴더면 그 하위)의 미저장 stash 정리.
+  const under = (p: string) => p === entry.path || p.startsWith(entry.path + '/') || p.startsWith(entry.path + '\\')
+  for (const p of [...stash.value.keys()]) { if (under(p)) dropStash(p) }
+  // 활성 파일이 삭제 대상(또는 그 폴더 하위)이면 미리보기 비우기.
+  if (selectedFile.value && under(selectedFile.value)) clearPreview()
+  if (selectedEntry.value?.path === entry.path) selectedEntry.value = null
   await reloadDir(parentOf(entry.path))
 }
 
@@ -168,19 +333,23 @@ async function doCopy(entry: FsEntry): Promise<void> {
     ? `${entry.name.slice(0, dot)}_복사${entry.name.slice(dot)}`
     : `${entry.name}_복사`
   const res = await fs.copy({ root: props.root, from: entry.path, to: joinPath(dir, copyName) })
-  if (!res.ok) { window.alert(res.error?.message || '복사 실패'); return }
+  if (!res.ok) { showToast(res.error?.message || '복사 실패'); return }
   await reloadDir(dir)
 }
 
+/** 새 폴더: 안 겹치는 기본명으로 생성 후 즉시 인라인 명명. */
 async function doMkdir(dir: string): Promise<void> {
   closeCtx()
-  const name = window.prompt('새 폴더 이름')
-  if (!name) return
   const fs = bridge(); if (!fs) return
-  const res = await fs.mkdir({ root: props.root, path: joinPath(dir, name) })
-  if (!res.ok) { window.alert(res.error?.message || '새 폴더 실패'); return }
+  const existing = new Set((childrenByPath.value.get(dir) || []).map(e => e.name))
+  let name = '새 폴더'
+  for (let n = 2; existing.has(name); n++) name = `새 폴더 ${n}`
+  const newPath = joinPath(dir, name)
+  const res = await fs.mkdir({ root: props.root, path: newPath })
+  if (!res.ok) { showToast(res.error?.message || '새 폴더 실패'); return }
   expanded.value = new Set(expanded.value).add(dir)
   await reloadDir(dir)
+  startRename({ name, path: newPath, type: 'dir' })
 }
 
 function refreshAll(): void {
@@ -193,9 +362,11 @@ function refreshAll(): void {
 watch(() => props.root, (root) => {
   childrenByPath.value = new Map()
   expanded.value = new Set()
-  selectedFile.value = null
-  preview.value = { state: 'text', content: '' }
+  renamingPath.value = null
   loadError.value = ''
+  stash.value = new Map()   // 루트가 바뀌면 모든 미저장 편집 폐기
+  selectedEntry.value = null
+  clearPreview()
   if (root) loadDir(root)
 }, { immediate: true })
 </script>
@@ -205,23 +376,22 @@ watch(() => props.root, (root) => {
     <!-- 좌: 트리 -->
     <div class="tree-pane">
       <div class="tree-header">
-        <span class="tree-title">📁 로컬 폴더</span>
+        <span class="tree-title" :title="root">📁 {{ rootName }}</span>
         <span class="tree-actions">
           <button class="tool-btn" title="새로고침" @click="refreshAll">↻</button>
-          <button class="tool-btn" title="새 폴더 (루트)" @click="doMkdir(root)">＋📁</button>
         </span>
       </div>
 
       <div v-if="loadError" class="tree-error">{{ loadError }}</div>
 
-      <div class="tree-body">
+      <div class="tree-body" @contextmenu.self="openRootCtx">
         <div
           v-for="row in visibleRows"
           :key="row.entry.path"
           class="tree-row"
-          :class="{ selected: selectedFile === row.entry.path }"
+          :class="{ selected: selectedEntry?.path === row.entry.path }"
           :style="{ paddingLeft: `${8 + row.depth * 16}px` }"
-          @click="row.entry.type === 'dir' ? toggleExpand(row.entry) : selectFile(row.entry)"
+          @click="onRowClick(row.entry)"
           @contextmenu="openCtx($event, row.entry)"
         >
           <button
@@ -232,7 +402,24 @@ watch(() => props.root, (root) => {
           <span v-else class="twisty-spacer"></span>
 
           <span class="row-icon">{{ row.entry.type === 'dir' ? '📁' : '📄' }}</span>
-          <span class="row-name">{{ row.entry.name }}</span>
+
+          <!-- 인라인 이름변경 -->
+          <input
+            v-if="renamingPath === row.entry.path"
+            class="rename-input"
+            v-model="renameValue"
+            @click.stop
+            @mousedown.stop
+            @keyup.enter="commitRename"
+            @keyup.esc="cancelRename"
+            @blur="commitRename"
+          />
+          <span v-else class="row-name" :class="{ 'is-dirty': isDirtyPath(row.entry.path) }">{{ row.entry.name }}</span>
+          <span
+            v-if="renamingPath !== row.entry.path && isDirtyPath(row.entry.path)"
+            class="dirty-dot"
+            title="저장되지 않은 변경"
+          >●</span>
         </div>
 
         <div v-if="visibleRows.length === 0 && !loadError" class="tree-empty">불러오는 중…</div>
@@ -243,27 +430,61 @@ watch(() => props.root, (root) => {
       </button>
     </div>
 
-    <!-- 우: 미리보기 -->
+    <!-- 우: 미리보기 + 편집 -->
     <div class="preview-pane">
-      <div class="preview-header">{{ selectedFile ? selectedFile.split(/[\\/]/).pop() : '파일 미리보기' }}</div>
+      <div class="preview-header">
+        <span class="preview-name">{{ selectedFile ? basenameOf(selectedFile) : '파일 미리보기' }}</span>
+        <!-- 저장 버튼은 변경(dirty)이 있을 때만 — 되돌려서 원본과 같아지면 사라진다(IDE 식). -->
+        <button
+          v-if="preview.state === 'text' && (isDirty || saving)"
+          class="save-btn"
+          :disabled="saving"
+          @click="saveFile"
+        >{{ saving ? '저장 중…' : '저장' }}</button>
+      </div>
       <div class="preview-body">
-        <div v-if="!selectedFile" class="preview-placeholder">왼쪽 트리에서 파일을 클릭하면 내용이 표시됩니다.</div>
+        <div v-if="preview.state === 'empty'" class="preview-placeholder">왼쪽 트리에서 파일을 클릭하면 내용이 표시됩니다.</div>
         <div v-else-if="preview.state === 'loading'" class="preview-placeholder">불러오는 중…</div>
-        <pre v-else-if="preview.state === 'text'" class="preview-text">{{ preview.content }}</pre>
+        <textarea
+          v-else-if="preview.state === 'text'"
+          v-model="editContent"
+          class="preview-editor"
+          spellcheck="false"
+          @keydown.ctrl.s.prevent="saveFile"
+          @keydown.meta.s.prevent="saveFile"
+        ></textarea>
         <div v-else class="preview-placeholder">{{ preview.note }}</div>
       </div>
     </div>
 
-    <!-- 우클릭 파일 작업 메뉴 -->
-    <template v-if="ctx.visible && ctx.entry">
+    <!-- 우클릭 파일 작업 메뉴 — 항목 위=전체 작업 / 빈 곳(entry=null)=루트에 새 폴더만 -->
+    <template v-if="ctx.visible">
       <div class="ctx-backdrop" @click="closeCtx" @contextmenu.prevent="closeCtx"></div>
       <div class="ctx-menu" :style="{ left: `${ctx.x}px`, top: `${ctx.y}px` }">
-        <button class="ctx-item" @click="doRename(ctx.entry)">이름변경</button>
-        <button class="ctx-item" @click="doCopy(ctx.entry)">복사</button>
-        <button v-if="ctx.entry.type === 'dir'" class="ctx-item" @click="doMkdir(ctx.entry.path)">새 폴더</button>
-        <button class="ctx-item danger" @click="doTrash(ctx.entry)">삭제 (휴지통)</button>
+        <template v-if="ctx.entry">
+          <button class="ctx-item" @click="startRename(ctx.entry)">이름변경</button>
+          <button class="ctx-item" @click="doCopy(ctx.entry)">복사</button>
+          <button v-if="ctx.entry.type === 'dir'" class="ctx-item" @click="doMkdir(targetDir)">여기에 새 폴더</button>
+          <button class="ctx-item danger" @click="doTrash(ctx.entry)">삭제 (휴지통)</button>
+        </template>
+        <button v-else class="ctx-item" @click="doMkdir(targetDir)">새 폴더 ({{ targetDir === root ? '루트' : basenameOf(targetDir) }})</button>
       </div>
     </template>
+
+    <!-- 인앱 확인 모달 (네이티브 confirm 대체 — 포커스 깨짐 방지) -->
+    <template v-if="confirmBox">
+      <div class="modal-backdrop" @click="answerConfirm(false)"></div>
+      <div class="modal-box">
+        <p class="modal-msg">{{ confirmBox.message }}</p>
+        <div class="modal-actions">
+          <button class="modal-btn" @click="answerConfirm(false)">취소</button>
+          <button class="modal-btn danger" @click="answerConfirm(true)">확인</button>
+        </div>
+      </div>
+    </template>
+
+    <!-- 인앱 토스트 (네이티브 alert 대체) -->
+    <div v-if="toast" class="toast" @click="toast = ''">{{ toast }}</div>
   </div>
 </template>
 
@@ -285,29 +506,78 @@ watch(() => props.root, (root) => {
   background: var(--color-bg-secondary);
 }
 
+// IDE 파일트리 헤더 — 아키텍트 FileTreePane 스타일(대문자·muted·elevated)
 .tree-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 8px 6px 12px;
+  padding: 8px 8px 8px 12px;
   border-bottom: 1px solid var(--color-border);
-  font-size: 13px;
+  background: var(--color-bg-tertiary);
+  font-size: 11px;
   font-weight: 600;
-  color: var(--color-text-bright);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
 }
-.tree-actions { display: flex; gap: 4px; }
+.tree-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-actions { display: flex; gap: 2px; flex-shrink: 0; }
 .tool-btn {
   background: transparent;
-  border: 1px solid var(--color-border);
-  border-radius: 5px;
+  border: none;
+  border-radius: 4px;
   color: var(--color-text-light);
-  font-size: 12px;
-  padding: 2px 7px;
+  font-size: 13px;
+  line-height: 1;
+  padding: 3px 6px;
   cursor: pointer;
-  &:hover { background: var(--color-bg-tertiary); color: var(--color-text-bright); }
+  &:hover { background: var(--color-bg-hover, var(--color-bg-secondary)); color: var(--color-text-bright); }
 }
 
 .ctx-backdrop { position: fixed; inset: 0; z-index: 2000; }
+
+// 인앱 확인 모달 / 토스트 (네이티브 dialog 대체 — 포커스 깨짐 방지)
+.modal-backdrop { position: fixed; inset: 0; z-index: 3000; background: rgba(0, 0, 0, 0.45); }
+.modal-box {
+  position: fixed;
+  z-index: 3001;
+  left: 50%; top: 40%;
+  transform: translate(-50%, -50%);
+  min-width: 300px;
+  max-width: 420px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  padding: 18px;
+}
+.modal-msg { margin: 0 0 16px; font-size: 13px; line-height: 1.5; color: var(--color-text); white-space: pre-wrap; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.modal-btn {
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text);
+  &:hover { background: var(--color-bg-hover, var(--color-bg-secondary)); }
+  &.danger { border-color: #fa5252; color: #fff; background: #fa5252; &:hover { filter: brightness(1.08); } }
+}
+.toast {
+  position: fixed;
+  z-index: 3100;
+  left: 50%; bottom: 32px;
+  transform: translateX(-50%);
+  max-width: 70%;
+  background: #fa5252;
+  color: #fff;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
 .ctx-menu {
   position: fixed;
   z-index: 2001;
@@ -337,36 +607,67 @@ watch(() => props.root, (root) => {
 
 .tree-body { flex: 1; overflow: auto; padding: 4px 0; }
 
+// IDE 행 — 컴팩트·chevron·아이콘
 .tree-row {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px 3px 0;
-  font-size: 12px;
+  gap: 6px;
+  padding: 4px 8px 4px 0;
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--color-text);
   cursor: pointer;
   user-select: none;
+  white-space: nowrap;
 
-  &:hover { background: var(--color-bg-tertiary); }
-  &.selected { background: rgba(34, 139, 230, 0.12); }
+  &:hover { background: var(--color-bg-hover, var(--color-bg-tertiary)); }
+  &.selected { background: var(--color-bg-active, rgba(34, 139, 230, 0.14)); }
 }
 
 .twisty {
-  width: 16px;
+  width: 12px;
+  min-width: 12px;
   background: transparent;
   border: none;
-  color: var(--color-text-light);
+  color: var(--color-text-muted);
   cursor: pointer;
-  font-size: 10px;
+  font-size: 9px;
   padding: 0;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.twisty-spacer { width: 16px; flex-shrink: 0; }
-.row-icon { flex-shrink: 0; }
+.twisty-spacer { width: 12px; min-width: 12px; flex-shrink: 0; }
+.row-icon { flex-shrink: 0; font-size: 13px; line-height: 1; opacity: 0.9; }
 .row-name {
-  white-space: nowrap;
+  flex: 1;            // 남는 폭을 채워 말줄임표가 자연스럽게 동작 + 점을 오른쪽 끝으로 밀어냄
+  min-width: 0;       // flex 자식이 내용보다 작게 줄어들 수 있어야 ellipsis 가 작동
   overflow: hidden;
   text-overflow: ellipsis;
+  &.is-dirty { color: var(--color-accent); }   // VS Code 식 — 수정된 파일명은 강조색
+}
+// 미저장(dirty) 마커 — IDE(VS Code) 식: 행 맨 오른쪽 고정 점. 저장/원복 시 사라짐.
+.dirty-dot {
+  flex-shrink: 0;
+  align-self: center;
+  margin-left: 6px;
+  color: var(--color-accent);
+  font-size: 8px;
+  line-height: 1;
+}
+.rename-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--color-bg);
+  color: var(--color-text-bright);
+  border: 1px solid var(--color-accent);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  user-select: text;   // 행의 user-select:none 상속 차단(입력 가능)
 }
 
 .analyze-btn {
@@ -396,29 +697,53 @@ watch(() => props.root, (root) => {
   min-width: 0;
 }
 .preview-header {
-  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
   border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
   font-size: 12px;
   font-weight: 600;
   color: var(--color-text-bright);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
-.preview-body { flex: 1; overflow: auto; }
+.preview-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.save-btn {
+  flex-shrink: 0;
+  background: var(--color-accent);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
+  &:hover:not(:disabled) { filter: brightness(1.08); }
+  &:disabled { opacity: 0.45; cursor: default; background: var(--color-bg-secondary); color: var(--color-text-muted); }
+}
+.preview-body { flex: 1; min-height: 0; display: flex; }
 .preview-placeholder {
+  flex: 1;
   padding: 24px;
   font-size: 12px;
   color: var(--color-text-muted);
   text-align: center;
 }
-.preview-text {
-  margin: 0;
+.preview-editor {
+  flex: 1;
+  width: 100%;
+  resize: none;
+  border: none;
+  outline: none;
   padding: 12px;
+  background: var(--color-bg);
+  color: var(--color-text);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
-  color: var(--color-text);
   white-space: pre;
+  overflow: auto;
+  tab-size: 4;
 }
 </style>

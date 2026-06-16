@@ -4,9 +4,11 @@
 
 **Created**: 2026-06-15
 
-**Status**: Backfilled (reverse-engineered)
+**Status**: Backfilled (reverse-engineered) · **Reconciled 2026-06-16** (commit 4574254 — 스키마 툴바 통일)
 
 **Input**: Existing code under `src/features/schema/` (SchemaView/SchemaCanvas/MermaidERView/TableDetailPanel + `schemaCanvas` Pinia store + `api.ts`), consuming robo-data-catalog(robo-analyzer) schema endpoints via the API Gateway. 역설계로 작성된 명세.
+
+> 🔄 **2026-06-16 정합(commit 4574254 + 미커밋 아이콘)**: 스키마 캔버스/Mermaid 전환 토글을 SchemaView 내부에서 **GraphTab의 통합 툴바로 이전**했다. SchemaView는 **순수 콘텐츠 컴포넌트**가 되어 로컬 상태를 버리고 `mode`('canvas'|'mermaid') prop만 받는다(상태=GraphTab `schemaMode`). 메인 뷰 스위처(Graph/UML/스키마)와 **같은 자리·스타일**로 일관화. 메뉴 아이콘은 `IconDatabase`→`IconTable`(features.ts SSoT). 기능·백엔드 계약 불변(순수 UI 리팩토링). FR-009·View modes·Assumptions 참조.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -79,7 +81,7 @@
 - **FR-006**: Users MUST be able to 컬럼 설명을 `PUT /robo/schema/tables/{table}/columns/{column}/description`로 편집·저장한다.
 - **FR-007**: System MUST 설명 저장 요청에 세션 헤더를 포함하여 사용자 작성 출처(user)로 기록되게 한다.
 - **FR-008**: Users MUST be able to FK 관계를 `POST /robo/schema/relationships`로 추가(카디널리티·매칭전략 포함)하고 `DELETE /robo/schema/relationships`로 삭제한다.
-- **FR-009**: System MUST 캔버스 뷰와 Mermaid ER 뷰 간 전환을 제공한다.
+- **FR-009**: System MUST 캔버스 뷰와 Mermaid ER 뷰 간 전환을 제공한다. 전환 토글은 **GraphTab 통합 툴바**(메인 Graph/UML/스키마 스위처와 같은 자리·스타일, `activeView==='schema'`일 때만 노출)에 두고, SchemaView는 `mode` prop만 받는 순수 콘텐츠로 둔다(두 자식은 v-show로 항상 마운트해 전환 시 상태 보존).
 - **FR-010**: System MUST 의미 기반 테이블 검색을 `POST /robo/schema/semantic-search`로 제공한다(robo 데이터소스 한정).
 - **FR-011**: System MUST 테이블/컬럼이 참조된 프로시저를 `GET /robo/schema/tables/{table}/references`로, 프로시저 statement·AI 설명을 `GET /robo/schema/procedures/{proc}/statements`로 조회한다.
 - **FR-012**: System MUST 테이블 데이터 미리보기를 Text2SQL `POST /text2sql/direct-sql/stream`(NDJSON 스트림)으로 실행하여 행/컬럼/실행시간을 표시한다.
@@ -92,7 +94,7 @@
 - **Column (RoboSchemaColumnInfo)**: name, table_name, dtype, nullable, description, description_source, analyzed_description. 노드 내부 행 및 상세 패널 행.
 - **Relationship (RoboSchemaRelationship)**: from/to (table·schema·column), relationship_type(FK_TO_TABLE·ONE_TO_MANY 등), description, source(ddl/code/user), column_pairs. 캔버스 엣지.
 - **Editable Description**: 테이블·컬럼의 사용자 편집 가능한 설명 텍스트. 저장 시 출처가 user로 기록됨.
-- **View modes**: SchemaView(전환 컨테이너) → SchemaCanvas(VueFlow 노드/엣지) / MermaidERView(텍스트 ERD); TableDetailPanel(우측 상세·편집).
+- **View modes**: SchemaView(**순수 콘텐츠**, `mode` prop) → SchemaCanvas(VueFlow 노드/엣지) / MermaidERView(텍스트 ERD)를 v-show로 동시 마운트; 전환 상태는 GraphTab `schemaMode`가 보유하고 통합 툴바가 제어. TableDetailPanel(우측 상세·편집).
 
 #### Backend endpoints (cross-service contract, robo-data-catalog/analyzer via Gateway)
 
@@ -118,6 +120,7 @@
 
 - 백엔드 robo-analyzer(robo-data-catalog)가 사전에 DDL/프로시저를 분석해 Neo4j에 테이블·컬럼·관계를 적재했다고 가정한다.
 - 모든 API는 단일 진입점인 API Gateway(`/api/gateway`, Vite 프록시 → Spring Gateway 9000)를 통해 호출된다.
-- 이 앱은 robo-architect 호스트에 임베드되며 memory history 라우터(`'/'` 단일 라우트)를 사용한다. 화면 전환은 라우트가 아니라 세션 탭/뷰 모드(`viewMode`)로 이루어진다.
+- 이 앱은 robo-architect 호스트에 임베드되며 memory history 라우터(`'/'` 단일 라우트)를 사용한다. 화면 전환은 라우트가 아니라 세션 탭/뷰 모드로 이루어진다. 스키마 캔버스/Mermaid 하위 전환 상태는 GraphTab의 `schemaMode`가 단일 보유(SchemaView 로컬 상태 아님).
+- 메뉴·탭 아이콘은 `src/shared/config/features.ts`가 단일 진실원천(SSoT) — SideNav·HomeView 모두 여기서 파생. 스키마('graph') 아이콘=`IconTable`.
 - 기본 데이터소스는 'robo'(Neo4j 분석 결과)이며, 'text2sql'(PostgreSQL 인제스천)은 컬럼 조회에 datasource가 필요하다.
 - 세션/인증(Neo4j 컨텍스트 포함)은 기존 sessionStore 헤더 메커니즘을 재사용한다.

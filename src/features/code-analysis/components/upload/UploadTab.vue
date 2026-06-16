@@ -414,27 +414,20 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
 
 <template>
   <div class="upload-tab">
-    <div class="upload-main" :class="{ 'is-path-mode': isPathMode }">
-      <!-- 좌측: (경로 모드) 폴더 분석 / (업로드 모드) 드롭존 또는 파일·DDL 목록 -->
-      <div class="upload-left">
-        <!-- 경로 모드(Electron): 로컬 폴더를 트리로 탐색 + 미리보기 + 포함/제외 후 분석 -->
-        <template v-if="isPathMode">
-          <div class="path-mode-panel">
-            <div class="path-mode-header">
-              <IconFolder :size="18" />
-              <span>로컬 폴더 분석</span>
-            </div>
-            <div class="path-mode-path" :title="projectRoot || ''">{{ projectRoot }}</div>
-            <ScopeBrowser
-              v-if="projectRoot"
-              :root="projectRoot"
-              :isProcessing="isProcessing"
-              @analyze="handleAnalyzePath"
-            />
-          </div>
-        </template>
+    <!-- 경로 모드(Electron): 전체 화면 로컬 폴더 브라우저 (업로드 grid 구조 미사용) -->
+    <ScopeBrowser
+      v-if="isPathMode && projectRoot"
+      class="path-browser"
+      :root="projectRoot"
+      :is-processing="isProcessing"
+      @analyze="handleAnalyzePath"
+    />
 
-        <template v-else-if="!hasUploadedFiles">
+    <!-- 업로드 모드: 드롭존/파일목록(좌) + 미리보기(우) -->
+    <div v-else class="upload-main">
+      <!-- 좌측: 드롭존 또는 파일·DDL 목록 -->
+      <div class="upload-left">
+        <template v-if="!hasUploadedFiles">
           <DropZone
             @files-drop="handleFilesDrop"
             @open-modal="handleOpenModal"
@@ -635,44 +628,11 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
   position: relative;
 }
 
-// 경로 모드: grid(300px 1fr) 해제 → 범위 브라우저가 전체폭을 쓰게 한다.
-.upload-main.is-path-mode {
-  display: block;
-}
-
-.path-mode-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  height: 100%;
-  padding: 16px;
-
-  // 헤더·경로 아래 남은 공간을 범위 브라우저가 채운다.
-  :deep(.scope-browser) {
-    flex: 1;
-    min-height: 0;
-  }
-}
-
-.path-mode-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.path-mode-path {
-  max-width: 100%;
-  padding: 10px 14px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-family: monospace;
-  font-size: 13px;
-  color: var(--color-text-light);
-  word-break: break-all;
+// 경로 모드: 전체 화면 로컬 폴더 브라우저 — upload-tab(flex 컬럼)의 직속 자식으로
+// 남은 영역(상단바 제외 전부)을 차지. 업로드 grid 구조와 무관한 독립 레이아웃.
+.path-browser {
+  flex: 1;
+  min-height: 0;
 }
 
 .upload-main {
