@@ -48,6 +48,8 @@ interface Props {
    *  - 'health'      → 건강지표(risk)별 색 — 나쁜 함수 강조. 지표 없는 노드는 회색.
    */
   colorMode?: 'label' | 'health'
+  /** 표시할 관계 타입 필터 (비어있으면 전체). 예: ['READS'] = 읽기만, ['WRITES'] = 쓰기만. */
+  relFilter?: string[]
 }
 
 interface NodeStat {
@@ -94,7 +96,8 @@ const NVL_OPTIONS = {
 const props = withDefaults(defineProps<Props>(), {
   labelFilters: () => [],
   groupHullBy: null,
-  colorMode: 'label'
+  colorMode: 'label',
+  relFilter: () => []
 })
 
 // 건강지표(risk)별 노드 색 — getNodeColor(공유 유틸)는 건드리지 않고 여기서만 override.
@@ -232,6 +235,12 @@ function matchesLabelFilter(node: GraphNode): boolean {
   return labels.some(label => targets.includes(label.toUpperCase()))
 }
 
+/** 관계 타입 필터 — 비어있으면 전체, 아니면 그 타입만(읽기만/쓰기만 보기). */
+function matchesRelFilter(link: GraphLink): boolean {
+  if (!props.relFilter || props.relFilter.length === 0) return true
+  return props.relFilter.includes(link.type)
+}
+
 // ============================================================================
 // 통계 (현재 캔버스 기준)
 // ============================================================================
@@ -281,6 +290,7 @@ async function initNvl(): Promise<void> {
   const visibleIds = new Set(nodes.map(n => n.id))
   for (const link of props.graphData.links) {
     if (!visibleIds.has(link.source) || !visibleIds.has(link.target)) continue
+    if (!matchesRelFilter(link)) continue
     const r = toNvlRelationship(link, props.selectedRelationshipId === link.id)
     relationshipMap.set(link.id, r)
     rels.push(r)
@@ -370,6 +380,7 @@ function syncGraph(): void {
   for (const link of props.graphData.links) {
     if (relationshipMap.has(link.id)) continue
     if (!targetIds.has(link.source) || !targetIds.has(link.target)) continue
+    if (!matchesRelFilter(link)) continue
     const r = toNvlRelationship(link, props.selectedRelationshipId === link.id)
     relationshipMap.set(link.id, r)
     newNvlRels.push(r)
@@ -607,6 +618,11 @@ watch(() => props.graphData, () => {
 
 watch(() => props.labelFilters, () => {
   syncGraph()
+}, { deep: true })
+
+// 관계 필터(읽기만/쓰기만)는 엣지 기준이라 노드중심 syncGraph 로 못 지움 → 재빌드.
+watch(() => props.relFilter, () => {
+  if (nvlInstance.value) { destroyNvl(); initNvl() }
 }, { deep: true })
 
 watch([() => props.selectedNodeId, () => props.selectedRelationshipId], ([newNodeId, newRelId], [oldNodeId, oldRelId]) => {

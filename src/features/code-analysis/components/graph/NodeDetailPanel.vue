@@ -313,8 +313,8 @@ function clearSearch(): void {
 function getNodeDisplayName(node: GraphNode): string {
   // 여러 속성에서 이름 추출 시도
   const props = node.properties || {}
-  const name = props.name?.toString() 
-    || props.fqn?.toString() 
+  const name = props.name?.toString()
+    || props.id?.toString()
     || props.title?.toString()
     || props.description?.toString()?.substring(0, 50)
     || ''

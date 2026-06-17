@@ -6,7 +6,9 @@
  */
 import { computed } from 'vue'
 import { useCanvasStore } from '@/features/code-analysis/graphCanvas'
+import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { useNavigatorStore, type NavigatorTreeItem } from '@/shared/stores/navigator'
+import { classifyNode } from '@/shared/utils/nodeClassify'
 
 interface Props {
   node: NavigatorTreeItem
@@ -16,6 +18,7 @@ const props = withDefaults(defineProps<Props>(), { depth: 0 })
 
 const canvasStore = useCanvasStore()
 const navigatorStore = useNavigatorStore()
+const projectStore = useAnalyzerStore()
 
 const hasChildren = computed(() => props.node.children.length > 0)
 /** 기본 동작: 전체 펼침. navigatorStore.collapsedNodes 에 있으면 접힘. */
@@ -51,38 +54,18 @@ function onDoubleClick() {
 }
 
 /**
- * 배지 문자. labels 를 우선 보고 명시적 매핑.
- * 함수 서브타입(Query/Command/Validation)은 모두 F 로 통일 — 다양한 문자로 쪼개면
- * Validation 의 'V' 가 변수처럼 보이는 등 혼동을 유발.
+ * 배지(문자·색) — 단일 판정처 nodeClassify 사용(전략 분기 한 곳, FW 무영향·회귀0).
+ * 배지는 라벨 직독(classifyNode): DBMS 구문도 자기 antlr type 라벨(:SELECT 등)이라 파싱 불필요.
+ * raw 노드(properties)는 store 조회 — tree item 엔 라벨만 있어 store 노드로 보강.
  */
-const badgeChar = computed(() => {
-  const labels = props.node.labels
-  if (labels.includes('PACKAGE')) return 'P'
-  if (labels.includes('MODULE') || labels.includes('FILE')) return 'M'
-  if (labels.includes('BusinessLogic')) return 'B'
-  if (labels.includes('TABLE')) return 'T'
-  if (labels.includes('COLUMN')) return 'C'
-  if (labels.includes('FUNCTION')) return 'F'
-  // fallback: nodeType 앞 글자
-  const t = props.node.nodeType
-  return t ? t.charAt(0).toUpperCase() : '?'
-})
-
-/** 라벨별 배지 스타일 클래스 (labels 배열을 우선 보고, 없으면 nodeType 패턴). */
-const badgeClass = computed(() => {
-  const labels = props.node.labels
-  if (labels.includes('PACKAGE')) return 'badge-package'
-  if (labels.includes('MODULE') || labels.includes('FILE')) return 'badge-module'
-  if (labels.includes('BusinessLogic')) return 'badge-bl'
-  if (labels.includes('TABLE')) return 'badge-table'
-  if (labels.includes('COLUMN')) return 'badge-column'
-  if (labels.includes('FUNCTION')) return 'badge-function'
-  const t = props.node.nodeType
-  if (/Class|CLASS/.test(t)) return 'badge-class'
-  if (/Interface|INTERFACE/.test(t)) return 'badge-interface'
-  if (/Function|Method|FUNCTION/.test(t)) return 'badge-function'
-  return 'badge-default'
-})
+const cls = computed(() =>
+  classifyNode(
+    projectStore.nodeMap.get(props.node.id)
+      ?? { id: props.node.id, labels: props.node.labels, properties: {} },
+  ),
+)
+const badgeChar = computed(() => cls.value.badgeChar)
+const badgeClass = computed(() => cls.value.badgeClass)
 </script>
 
 <template>
@@ -90,7 +73,7 @@ const badgeClass = computed(() => {
     <div
       class="nav-tree-label"
       :class="{ 'on-canvas': isOnCanvas, 'selected': isSelected }"
-      :style="{ paddingLeft: `${8 + depth * 14}px` }"
+      :style="{ paddingLeft: `${8 + depth * 12}px` }"
       draggable="true"
       @click="onSelect"
       @dragstart="onDragStart"
@@ -144,7 +127,7 @@ const badgeClass = computed(() => {
     &::after {
       content: '●';
       color: var(--color-success, #40c057);
-      font-size: 10px;
+      font-size: 8px;
       margin-left: 4px;
     }
   }
@@ -160,12 +143,20 @@ const badgeClass = computed(() => {
 }
 
 .chevron {
-  width: 10px;
+  width: 20px;
+  height: 20px;
+  line-height: 20px;
   color: var(--color-text-secondary, #868e96);
-  font-size: 9px;
+  font-size: 13px;
   text-align: center;
   flex-shrink: 0;
   cursor: pointer;
+  border-radius: 3px;
+
+  &:hover {
+    background: var(--color-bg-hover, #2c2e33);
+    color: var(--color-text, #c1c2c5);
+  }
 }
 
 .badge {

@@ -111,3 +111,92 @@ Navigator·노드패널은 `< >` 토글로 명시적으로 열고 닫으며 폭 
 3. 레이아웃 겹침 해소 + Navigator/패널 토글(FR-004·005).
 4. 데이터 스키마 캔버스 전용화(FR-006).
 5. 빌드 → 런타임 검증 → 회귀 점검.
+
+---
+
+# ★ 노드 보고서 + 전략/구조 인지 설계 확정 (2026-06-17 합의 — 전수조사 근거)
+
+## 목표(북극성)
+레거시 코드 분석 도구 — 그래프로 **가독성 있게 시각화**하여 **코드에 숨은 내용을 하나도 안 빠뜨리고** 분석가가 읽게 한다. 노드 패널 = **"이 노드 1개에 대한 분석 보고서"**.
+
+## 사실 확정 — DBMS vs Framework 구조 차이 (코드, file:line)
+analyzer는 **하나의 스키마를 두 방식으로** 채움(13노드/19엣지 공통). 차이는 딱 3개:
+- **DBMS-only**: 호출단위(프로시저/함수/트리거) **아래 구문 AST 트리**(PARENT_OF + `own_ast_type`: SELECT/INSERT/IF/LOOP/CURSOR/MERGE/UNION_ALL…). `graph_nodes.py:178` own_ast_type, `parent_of.py`.
+- **Framework-only**: ① sub_label(`:FUNCTION:METHOD`·`:MODULE:CLASS/INTERFACE`, ontology 도출, `graph_nodes.py:157` DBMS 빈값) ② DATA_TYPE+HAS_MEMBER(C struct만).
+- DBMS MODULE = **파일**(`antlr_json_reader.py:290` `_make_module(file_stem)`), 한 파일에 프로시저 N개 가능.
+- **없는 것(가짜 생성 금지)**: DB_LINK·LINKS_TO·UML 상속(EXTENDS/IMPLEMENTS)·DATA_FLOW — **그래프에 데이터 0**(exhaustive grep). → 분석가에게 "이 도구 미추출" **한계만 명시**.
+- READS/WRITES 분류(`link_dbms_tables_step.py`): SELECT/WITH→읽기, INSERT/UPDATE/DELETE/MERGE→쓰기, 제어문→엣지 없음. DBMS 엣지는 `dml_type`(graph_edges.py:88) 세분.
+- skip 노드 DECLARE/TRY/TRIGGER_BLOCK = 분석 제외(`batch_planner.py:23`) → summary 없음.
+
+## 보고서 3원칙
+1. **완전성(누락0, 잘라내기0)**: SUMMARY는 `[핵심]`만 X → **핵심+전체 내용** 표시(현재 220px 클립 제거). 유용한 데이터는 절대 생략 안 함.
+2. **무노이즈**: 빈 섹션 자동 숨김 / **내부 식별자(function_id·rule_hash·component_id) 비노출** / 중복 제거 / 코드토큰 대신 의미.
+3. **가독성**: 각 섹션 첫 줄 = 한 줄 종합("읽기3·쓰기1") 후 상세 / 배지로 한눈 사실 / 라인·관계 클릭→점프(탐색 허브) / architect `InspectorPanel` 톤.
+
+## 보고서 섹션 (위→아래 중요도순, 데이터 있을 때만)
+| 섹션 | 내용 | 전략 |
+|---|---|---|
+| 식별·위치 | 이름(구문=`라벨[라인]`/프로시저=이름) · 타입배지 · 역할(stereotype) · 위험(있으면) · 파일·라인→점프 | 공통 |
+| 개요 | summary `[핵심]`+**전체 내용**(도메인값·임계값 강조) | 공통 (skip노드="분석 제외 구문") |
+| 업무규칙·예시·질문 | RULE/EXAMPLE/QUESTION (un-hide 완료=semanticLinkMap) | 공통 |
+| 데이터 접근 | READS/WRITES + dml_type + 테이블역할 + 컬럼(table_insights) | DBMS 더 세분 |
+| 관계 | 호출/**피호출**(incoming) — 클릭→캔버스 | 공통 |
+| 구성(자식) | DBMS=내부 구문흐름(AstFlow) / FW모듈=멤버 메서드 / C=struct멤버 | **구조별 분기** |
+| 인터페이스 | params·return·annotations(데코레이터) | **Framework** |
+| 원문 코드 | 본문(접힘) | 공통 |
+
+## 아키텍처 (★수정원칙: 0순위 영역설계·DRY·탈바꿈 — 산발 strategy `if` 금지)
+```
+node-detail/
+ nodeClassify.ts   ★단일 판정처 — node→{strategy, role(컨테이너|호출단위|구문), astType,
+                    배지글자, 표시이름, 표시섹션}. 전략 분기는 "오직 여기".
+ NodeReport.vue    보고서 컨테이너(헤더+섹션 on/off, 데이터 유무로 자동)
+ sections/         OverviewSection·RulesSection·DataAccessSection·RelationsSection·SourceSection (공통)
+                   AstFlowSection (DBMS전용·분리) · InterfaceSection (FW전용·분리)
+ cards/(templateRouter)  노드종류별 + FallbackCard (★모든 노드 소화)
+```
+- 공통 5섹션 = 두 전략 공유(중복0). 다른 것만 전용 파일(AstFlow/Interface). 컴포넌트는 `if(dbms)` 안 씀 → nodeClassify가 준 "표시섹션"·데이터유무로만 렌더. 기존 NodeDetailBase를 공통 골격으로 **탈바꿈**(땜빵·재작성 X).
+
+## 배지(아이콘) — 글자 방식(Framework처럼), 이모지 X
+타입 **앞글자** 배지: 호출단위=F / DBMS 구문=own_ast_type 첫 글자(S/I/U/R/L/M…). Framework 무영향. (읽기/쓰기/흐름 색은 옵션.) 상세=017.
+
+## FR 추가
+- **FR-008**: 노드패널은 모든 노드 라벨을 소화한다(templateRouter+Fallback). 미지정 노드도 안전 렌더.
+- **FR-009**: DBMS/Framework 렌더는 **nodeClassify 단일 판정 + 데이터유무 기반**으로 분기하며, 컴포넌트에 strategy 조건문을 흩뿌리지 않는다(유지보수·DRY).
+- **FR-010**: SUMMARY는 전체 내용을 표시한다(핵심만 잘라내지 않음).
+- **FR-011**: 없는 데이터(DB링크·상속)는 생성하지 않고, 필요 시 "미추출" 한계만 명시한다(정직).
+
+---
+
+# ★★ 근본 전환 갱신 (2026-06-17 — analyzer가 깨끗한 속성 저장. 위 "파싱" 접근 폐기)
+
+> 이전 본문(특히 line 97 "signature 폴백", line 124·151·161 own_ast_type 프론트 도출/배지 파싱)은 **프론트가 `function_id`/`signature`를 파싱**하는 옛 접근이다. 전수조사 결과 **그게 'F'배지·오해의 근본 원인**이었다(데이터는 있는데 안 꺼내 쓰고 키를 쪼갬). 아래로 **대체**한다. 백엔드 계약 = analyzer 신규 스펙 [analyzer/016](../../../robo-data-analyzer/specs/016-node-display-properties/spec.md) — **DBMS 노드 라벨 = antlr type 그대로**(SELECT→`:SELECT`, PROCEDURE→`:PROCEDURE`; 더 이상 `:FUNCTION` 뭉개기 아님) + `name`·`code_text` 속성. 그러면 프론트는 **라벨·속성 직독**(파싱 0).
+
+## 전환 원칙 (사용자 확정)
+1. **타입은 라벨에서 직독(파싱·속성 X)**: 노드 타입·배지 = **primary 라벨**(DBMS=antlr type `:SELECT`/`:PROCEDURE`, Framework=sub-label `:METHOD`). 프론트 기존 `pickDisplayLabel`/`extractSubLabel`(역할라벨 제외 구체라벨 추출)이 **이미 둘 다 처리** — DBMS가 제대로 된 라벨만 받으면 'F' 대신 SELECT/PROCEDURE가 자동으로 나온다. ❌`ast_type` 속성 같은 건 없음(라벨이 타입). 표시이름 = `properties.name || (타입라벨 + '[' + start_line + ']')`. 식별 = **elementId** 단일. function_id·parent_id는 표시에 안 씀(트리는 PARENT_OF 엣지).
+2. **파싱 코드 삭제(탈바꿈)**: `nodeClassify.ts`의 `ownAstType`(signature 파싱)·`dbmsRoutineName`(signature DDL 정규식)·signature 기반 배지 도출 — **삭제**. `graphDisplay.ts technicalNodeName`의 signature 정규식·function_id 분해 — 삭제. nodeClassify는 `properties.ast_type`/`name`을 **읽기만** 한다.
+3. **유령필드 폴백 제거(오해소지 차단, 코드로 확정)**: analyzer가 **안 쓰는데** 프론트가 읽던 필드 = `procedure_name`·`class_name`·`method_id`·`table_id`·`title`(analyzer.ts:141·navigator.ts:113·graphDisplay.ts:47) → 폴백 체인에서 제거(정본=`name`·`logical_name`). `actor`(FunctionCard:59 역할, analyzer 0건) → **`stereotype`으로 정렬**(이미 있는 값). `code_text`(FunctionCard:60, 옛 유령) → 이제 analyzer가 저장(실데이터)로 전환 = 원문코드 섹션 정상화.
+4. **죽은 라벨/엣지 분기 제거**: `BusinessLogic` 라벨 + `HAS_BUSINESS_LOGIC`·HAS_PROCEDURE·HAS_METHOD·HAS_CLASS·CONTAINS·FROM·REFER_TO·FK_TO_TABLE·CALLS_SQL·USES 등은 **13노드/19엣지 계약에 없음**(grep 0) → navigator/nodeRelationships의 해당 분기는 데드코드, 정리(실재 계약: CALLS·READS·WRITES·AFFECTS_TABLE·PARENT_OF·HAS_FUNCTION·HAS_COLUMN·HAS_RULE/EXAMPLE/QUESTION·FK 등). ※주의: schema 기능의 `procedure_name`은 catalog 스키마 API 응답 필드라 거긴 실재 — 그래프 노드속성 맥락과 구분(건드리지 말 것).
+5. **테이블 상호작용 뷰 = 신규 제작 아님, 기존 확장**: 「모듈간 상호작용」 프리셋이 이미 FUNCTION→TABLE READS/WRITES를 가상링크 합성(`graphCanvas.ts:58-145`), READS/WRITES 분류상수 존재(`nodeRelationships.ts:59-70`), relSummary가 노드별 테이블상호작용 표시(`NodeDetailBase.vue:88-165`). → 새 프리셋 `table-interaction`을 **기존 프리셋 패턴에 추가** + 엣지타입 필터를 `matchesLabelFilter`(NvlGraph.vue:228) **형제로 추가**(읽기만/쓰기만 = READS/WRITES 분류). 「전체 테이블」(showAllTables)은 **제거**.
+6. **건강지표** = 데이터 있음(risk 453/456, lowercase). NvlGraph.vue:111 `properties.risk` 직독은 옳음 — colorMode='health' **토글 배선·재조회 타이밍**(risk는 step7 부여→/robo/graph 재조회에만) 디버그가 잔여 작업.
+
+## FR 대체·추가
+- **~~FR-001/FR-002의 "signature 폴백·own_ast_type 프론트 도출"~~ → 대체**: 타입·배지는 **primary 라벨 직독**(pickDisplayLabel 기존 로직), 이름은 `properties.name` 직독. function_id/signature 파싱 금지. ast_type 속성 없음.
+- **FR-007 정정**: 본 스펙은 더 이상 "백엔드 무영향"이 아니다 — **analyzer 016 의존**(DBMS 라벨=antlr type + name·code_text). analyzer 016 합의·구현·재분석 후 프론트 직독 전환.
+- **FR-012(신규)**: 프론트는 노드 식별에 elementId만 쓰고, function_id·parent_id·fqn를 표시 도출에 쓰지 않는다.
+- **FR-013(신규)**: 유령필드 폴백(procedure_name/class_name/method_id/table_id/title)과 계약 외 라벨/엣지 분기(BusinessLogic·HAS_PROCEDURE 등)를 제거한다. 역할=stereotype, 원문=code_text(analyzer 저장).
+- **FR-014(신규)**: 그래프 좌상단 플로팅 툴바(`GraphTab.vue` `.floating-controls.left-top`) 구성 = **논리/물리명 토글 · 모듈간 상호작용 · 영역 보기 · 건강 보기**. ★**「전체 테이블」 제거**(✅완료 — `showAllTables` 버튼·함수 삭제): 캔버스는 "노드 클릭→이웃 확장(필터)" 모델이라 전체 덤프는 중복·무의미(사용자 확인 2026-06-18). 함수↔테이블 읽기/쓰기 구분은 ⒜노드패널 "테이블 상호작용" 섹션(READS/WRITES per 노드)·⒝모듈간 상호작용 프리셋이 이미 보여줌. 별도 읽기만/쓰기만 **캔버스 엣지필터**는 `matchesLabelFilter` 형제로 추가(기존 인프라 확장, 중복 제작 금지) — 빌드 피드백 보며 마감.
+### ★ 노드패널 보고서 — 라이브 UX 피드백 (2026-06-17, 구문 노드 화면 기준)
+- **FR-021 북극성(패널 목적)**: 노드 클릭 시 **한눈에** ① 이 노드가 **뭐하는지**(요약·역할) ② **영향도**(호출/피호출·읽기/쓰기 테이블 = 바꾸면 뭐가 영향받나) ③ **누구와 관련**(관계) ④ 원문·위치 를 파악. **영향도(impact)를 핵심 축으로** 부각(관계 섹션을 "이 노드가 주는/받는 영향"으로 프레이밍). 예쁘고 스캔 가능한 구조.
+- **FR-022 건강지표 표시**: 노드패널 헤더/섹션에 이 노드의 **건강지표(risk·fan_in/out·loc·god_flag·table_coupling)**를 표시(있을 때). + 그래프 건강뷰(colorMode='health') 작동 점검 — risk는 step7 부여라 **/robo/graph 재조회 시점에만** 존재(스트림 node_event엔 없음) → 토글 배선·재조회 타이밍 디버그. 범례(GraphStylePanel) 표시 상태 점검.
+
+- **FR-016 헤더 식별 정리**: 선택 노드를 패널 **상단에 명확히** 표시. ★**elementId·raw id 절대 노출 금지**(현재 `4:eb66bfb2-…:72`가 이름 자리에 뜸 = 버그). 표시명 = `name` 있으면 name / 없으면(구문) **`타입[라인]`("IF [41~44]")** / `logical_name`은 보조 병기. 타입 배지·소속(파일)·라인범위를 **각 값에 라벨 달아 정렬**(뭐가 무슨 값인지 명확), 노이즈 제거.
+- **FR-017 Summary 전체(FR-010 강화)**: `[핵심]` 헤드라인 + **전체 본문**을 시각 구분해 모두 표시(핵심만 잘라내지 않음).
+- **FR-018 업무규칙·예시·질문 명확화**: 섹션이 무엇인지(코드에서 추출한 업무규칙/시나리오/확인질문 = Example Mapping) **한 줄 안내** + summary와 **내용 중복 제거** + 데이터 있을 때만. 사용자가 "왜 뜨는지" 알 수 있게.
+- **FR-019 원문코드 표시**: `code_text`(analyzer 016 저장) 섹션을 노드패널에 표시(접힘 기본 가능). 자기 요약 + 원문을 함께. (현재 미표시 = code_text 유령 → analyzer 016으로 채움.)
+- **FR-020 레이아웃 가독성 재구성**: 예쁘고 읽기 쉬운 레이아웃으로 재구성. **과도한 숨김 지양**(데이터 있을 때만 노출하되 균형 — 빈약/노이즈 둘 다 회피). 섹션 정렬·간격·타이포 정돈.
+
+- **FR-015(신규, 2026-06-17 사용자)**: 노드패널의 **설명 출처 라벨을 약어 없이 명확히** 한다. 현재 `TableCard.vue:106` 탭 버튼 **"DDL"**은 "이 설명(예 '웹 공급량 정보')의 출처 = 테이블 정의 SQL의 `COMMENT ON`/주석"이라는 뜻인데, 약어만 떠서 분석가가 의미를 모름(보고서 3원칙 "비개발자도 이해" 위반). → **"DDL" → "테이블 정의 주석"**(또는 툴팁 "테이블 생성 SQL의 주석에서 가져온 설명") / "코드 분석"(LLM 합성=analyzed_description) 유지. Column 설명 출처도 동일 적용. `description_source`(ddl/code/catalog) 값별 한국어 라벨 매핑.
+
+## 선행 의존
+analyzer 016(name·ast_type·code_text 저장) **먼저 구현·재분석** → 그래프에 새 속성 확인 → 그 다음 프론트 직독·파싱삭제(회귀 방지: 속성 없는 기존 데이터엔 빈값 폴백 안전 렌더).

@@ -47,11 +47,10 @@ function toggleHealthView(): void {
   colorMode.value = colorMode.value === 'health' ? 'label' : 'health'
 }
 
-/** 테이블 전체 보기 — 모든 TABLE 노드와 그 관계(FK 등)를 캔버스에 로드. */
-function showAllTables(): void {
-  labelFilters.value = []
-  canvasStore.setPreset(null)
-  canvasStore.loadNodesByLabels(['TABLE'])
+/** 관계 필터 — 읽기만(READS)/쓰기만(WRITES) 보기. 같은 걸 다시 누르면 해제. */
+const relFilter = ref<string[]>([])
+function toggleRelFilter(type: string): void {
+  relFilter.value = relFilter.value.length === 1 && relFilter.value[0] === type ? [] : [type]
 }
 
 // 분석 패널 모드: 'docked' (왼쪽 고정), 'floating' (플로팅), 'hidden' (완전 숨김)
@@ -509,6 +508,7 @@ watch(hasGraph, (has, prev) => {
           :labelFilters="labelFilters"
           :groupHullBy="groupHullBy"
           :colorMode="colorMode"
+          :relFilter="relFilter"
           @node-select="handleNodeSelect"
           @relationship-select="handleRelationshipSelect"
           @node-delete="handleNodeRemoveFromCanvas"
@@ -588,15 +588,23 @@ watch(hasGraph, (has, prev) => {
         🩺 건강 보기
       </button>
 
-      <!-- 테이블 전체: 모든 테이블 + 그 관계(FK 등)를 캔버스에 -->
+      <!-- 읽기만 / 쓰기만: 함수↔테이블 READS·WRITES 관계만 표시 (다시 누르면 해제) -->
       <button
         class="interaction-preset-btn"
-        title="모든 테이블과 그 관계(FK 등) 표시"
-        @click="showAllTables"
+        :class="{ active: relFilter.length === 1 && relFilter[0] === 'READS' }"
+        title="읽기만 — 함수가 테이블을 조회(READS)하는 관계만"
+        @click="toggleRelFilter('READS')"
       >
-        🗄️ 테이블 전체
+        👁 읽기만
       </button>
-
+      <button
+        class="interaction-preset-btn"
+        :class="{ active: relFilter.length === 1 && relFilter[0] === 'WRITES' }"
+        title="쓰기만 — 함수가 테이블을 변경(WRITES)하는 관계만"
+        @click="toggleRelFilter('WRITES')"
+      >
+        ✏️ 쓰기만
+      </button>
     </div>
     
     <!-- 플로팅: 노드 상세 패널 -->

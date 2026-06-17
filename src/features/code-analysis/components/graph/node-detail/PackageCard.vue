@@ -14,7 +14,7 @@ const props = defineProps<Props>()
 
 const projectStore = useAnalyzerStore()
 
-const fqn = computed(() => (props.node.properties?.fqn as string) || (props.node.properties?.name as string) || props.node.id)
+const fqn = computed(() => (props.node.properties?.id as string) || (props.node.properties?.name as string) || props.node.id)
 
 const childModules = computed(() => {
   const result: { id: string; name: string; type: string }[] = []
@@ -25,7 +25,7 @@ const childModules = computed(() => {
     const p = n?.properties || {}
     result.push({
       id: link.source,
-      name: (p.name as string) || (p.fqn as string)?.split('.').pop() || link.source,
+      name: (p.name as string) || (p.id as string)?.split('.').pop() || link.source,
       type: (p.type as string) || (n?.labels?.[0] as string) || '',
     })
   }

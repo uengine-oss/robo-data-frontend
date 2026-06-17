@@ -132,18 +132,14 @@ function resolveNodeName(
   labels: string[],
   nodeId: string,
 ): string {
+  const name = properties['name']
+  if (name) return String(name)
   const kind = extractSubLabel(labels) || (properties['type'] as string) || ''
-  const methodLast = typeof properties['method_id'] === 'string'
-    ? (properties['method_id'] as string).split('.').pop()
-    : ''
-  return String(
-    properties['name']
-    || properties['procedure_name']
-    || properties['class_name']
-    || methodLast
-    || properties['fileName']
-    || (kind ? `[${kind}] ${nodeId}` : (labels.length > 0 ? `[${labels.join(':')}] ${nodeId}` : nodeId))
-  )
+  const line = properties['start_line']
+  if (kind) return line != null && line !== 0 ? `${kind} [${line}]` : kind
+  const idVal = properties['id']
+  if (idVal) return String(idVal).split('.').pop() || String(idVal)
+  return nodeId
 }
 
 // ============================================================================
@@ -199,6 +195,15 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const linkMap = ref<Map<string, GraphLink>>(new Map())
 
   /**
+   * 의미데이터 전용 링크 채널 (HAS_RULE / HAS_EXAMPLE / HAS_QUESTION).
+   * 시각 그래프(캔버스·트리·graphData)에는 절대 넣지 않고 여기에만 적재 →
+   * 노드 디테일 패널이 함수→규칙→예시·질문을 보고서로 읽는 유일한 소스.
+   * (RULE/EXAMPLE/QUESTION 노드 자체는 nodeMap 에 그대로 존재하나, 이 링크가 없으면
+   *  어느 함수 소속인지 알 수 없어 과거엔 ingest 에서 통째로 버려졌음.)
+   */
+  const semanticLinkMap = ref<Map<string, GraphLink>>(new Map())
+
+  /**
    * 임시: 비즈니스 로직 메타 라벨은 화면에 표시하지 않음.
    * 풀려면 이 set 을 비우고 재인제스션하면 됨.
    */
@@ -220,6 +225,12 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     'AFFECTS_TABLE',
     'BRANCH',
   ])
+
+  /**
+   * 의미데이터 링크 — 시각 그래프엔 안 넣고 semanticLinkMap 으로 따로 적재(패널 전용).
+   * 과거엔 HIDDEN_LINK_TYPES 로 ingest 에서 버려졌으나, 노드패널 보고서를 위해 보존한다.
+   */
+  const SEMANTIC_LINK_TYPES = new Set(['HAS_RULE', 'HAS_EXAMPLE', 'HAS_QUESTION'])
 
   function isHiddenNode(node: GraphNode): boolean {
     return (node.labels || []).some(l => HIDDEN_NODE_LABELS.has(l))
@@ -246,6 +257,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   function updateGraphData(nodes: Neo4jNode[], relationships: Neo4jRelationship[]): void {
     const newNodeMap = new Map(nodeMap.value)
     const newLinkMap = new Map(linkMap.value)
+    const newSemanticMap = new Map(semanticLinkMap.value)
 
     for (const node of nodes) {
       const converted = convertNeo4jNode(node)
@@ -254,20 +266,26 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
     // 노드보다 관계가 먼저 도착하는 경우 (다른 batch · 다른 phase) 에도
     // 일단 link 는 등록. 노드는 이후 batch 에서 들어오면 자동으로 연결됨.
-    // hidden 타입 / hidden 노드 끝점인 관계는 데이터에 적재하지 않는다.
+    // 의미데이터 링크는 semanticLinkMap 으로 분리, hidden 타입/끝점은 적재 안 함.
     for (const rel of relationships) {
       const converted = convertNeo4jRelationship(rel)
+      if (SEMANTIC_LINK_TYPES.has(converted.type)) {
+        newSemanticMap.set(converted.id, converted)
+        continue
+      }
       if (isHiddenLink(converted, newNodeMap)) continue
       newLinkMap.set(converted.id, converted)
     }
 
     nodeMap.value = newNodeMap
     linkMap.value = newLinkMap
+    semanticLinkMap.value = newSemanticMap
   }
 
   function clearGraphData(): void {
     nodeMap.value = new Map()
     linkMap.value = new Map()
+    semanticLinkMap.value = new Map()
   }
 
   // ----- 콘솔 메시지 -----
@@ -338,6 +356,13 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
       target,
       type: relType,
       properties: props,
+    }
+    // 의미데이터 링크(HAS_RULE/EXAMPLE/QUESTION)는 패널 전용 채널로만 — 캔버스/트리/그래프 미오염.
+    if (SEMANTIC_LINK_TYPES.has(relType)) {
+      const nextSem = new Map(semanticLinkMap.value)
+      nextSem.set(link.id, link)
+      semanticLinkMap.value = nextSem
+      return
     }
     if (isHiddenLink(link, nodeMap.value)) return
     const next = new Map(linkMap.value)
@@ -846,6 +871,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     uploadedDdlFiles,
     nodeMap,
     linkMap,
+    semanticLinkMap,
     graphData,
     isProcessing,
     currentStep,

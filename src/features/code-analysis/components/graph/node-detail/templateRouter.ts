@@ -86,5 +86,8 @@ export function pickTemplate(node: GraphNode): TemplateType {
   // 9. 비코드 청크 (Framework)
   if (NON_CODE_LABELS.has(primary)) return 'nonCode'
 
+  // DML 외 DBMS 구문(IF/LOOP/CASE…)도 코드 노드면 구문 카드로 (raw fallback 방지).
+  if (node.properties?.start_line != null || node.properties?.code_text) return 'sqlStatement'
+
   return 'fallback'
 }

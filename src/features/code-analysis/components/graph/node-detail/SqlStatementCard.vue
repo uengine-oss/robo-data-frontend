@@ -19,12 +19,9 @@ const subLabel = computed(() => props.node.labels?.[0] || 'SQL')
 
 const subInfo = computed(() => {
   const p = props.node.properties || {}
-  const procedure = p.procedure_name as string | undefined
   const start = p.start_line ?? p.startLine
   const end = p.end_line ?? p.endLine
-  const lines = start && end ? `라인 ${start}~${end}` : ''
-  const token = p.token ? `토큰 ${p.token}` : ''
-  return [procedure, lines, token].filter(Boolean).join(' · ')
+  return start && end ? `라인 ${start}~${end}` : ''
 })
 
 const code = computed(() => {

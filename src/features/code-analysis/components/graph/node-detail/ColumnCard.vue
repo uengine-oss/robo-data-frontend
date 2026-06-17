@@ -16,8 +16,8 @@ const analyzedDesc = computed(() => (props.node.properties?.analyzed_description
 const source = computed(() => (props.node.properties?.description_source as string) || '')
 
 const subInfo = computed(() => {
-  const fqn = props.node.properties?.fqn as string | undefined
-  return fqn || ''
+  const idVal = props.node.properties?.id as string | undefined
+  return idVal || ''
 })
 </script>
 

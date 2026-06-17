@@ -98,10 +98,12 @@ function pickDisplayName(node: GraphNode): string {
     const ln = p['logical_name']
     if (ln) return String(ln)
   }
-  return String(
-    p['name'] ?? p['fqn'] ?? p['procedure_name']
-      ?? p['class_name'] ?? p['title'] ?? p['signature'] ?? node.id
-  )
+  const name = p['name']
+  if (name) return String(name)
+  // 이름 없는 DBMS 구문은 `타입[라인]` (예: SELECT [30]).
+  const type = pickDisplayLabel(node.labels)
+  const line = p['start_line']
+  return line != null && line !== 0 ? `${type} [${line}]` : (type || String(p['id'] ?? node.id))
 }
 
 /** BL 의 sequence 는 "1", "2", "2-1" 형식 — 튜플 비교로 정렬. */
@@ -139,6 +141,7 @@ function buildSubtree(
 
   const childIds = childIndex.get(nodeId) ?? []
   const blChildren: NavigatorTreeItem[] = []
+  const astChildren: NavigatorTreeItem[] = []   // DBMS 구문(PARENT_OF) — 소스 등장(라인) 순
   const otherChildren: NavigatorTreeItem[] = []
 
   for (const cid of childIds) {
@@ -146,10 +149,17 @@ function buildSubtree(
     if (!child) continue
     const rel = relIndex.get(nodeId)?.get(cid)
     if (rel === 'HAS_BUSINESS_LOGIC') blChildren.push(child)
+    else if (rel === 'PARENT_OF') {
+      // DBMS 구문 — AST 중첩(소스 등장순). 배지·이름은 라벨/name 직독(classifyNode·pickDisplayName).
+      astChildren.push(child)
+    }
     else otherChildren.push(child)
   }
 
   otherChildren.sort((a, b) => a.name.localeCompare(b.name))
+  // AST 구문은 실행 순서(시작 라인) — 알파벳 정렬하면 흐름이 깨짐.
+  const lineOf = (id: string) => Number(nodeMap.get(id)?.properties?.start_line ?? 0)
+  astChildren.sort((a, b) => lineOf(a.id) - lineOf(b.id))
   blChildren.sort((a, b) => {
     const na = nodeMap.get(a.id), nb = nodeMap.get(b.id)
     if (!na || !nb) return 0
@@ -166,22 +176,39 @@ function buildSubtree(
     name: pickDisplayName(node),
     nodeType: pickDisplayLabel(node.labels),
     labels: node.labels,
-    children: [...otherChildren, ...blChildren],
+    children: [...otherChildren, ...astChildren, ...blChildren],
   }
 }
 
-/** source → [targetIds] / source → (target → relType) 인덱스 빌드. */
+/** source → [targetIds] / source → (target → relType) 인덱스 빌드.
+ *  DBMS: 구문은 PARENT_OF 로 부모(프로시저/구문) 아래 **AST 그대로 중첩**.
+ *  그 구문이 모듈의 평면 자식(HAS_FUNCTION 등)으로 **중복 등장하지 않도록** 억제(중첩 우선). */
 function buildChildIndexes(linkMap: Map<string, GraphLink>) {
   const childIndex = new Map<string, string[]>()
   const relIndex = new Map<string, Map<string, string>>()
+  const FLAT_CONTAINER_RELS = new Set(['HAS_FUNCTION', 'HAS_PROCEDURE', 'HAS_METHOD'])
+
+  // 1) PARENT_OF 부모를 가진 노드(=DBMS 구문) 집합 — 평면 컨테이너 자식에서 제외 대상.
+  const hasParent = new Set<string>()
   for (const link of linkMap.values()) {
+    if (link.type === 'PARENT_OF') hasParent.add(link.target)
+  }
+
+  const add = (src: string, tgt: string, type: string) => {
+    const list = childIndex.get(src) ?? []
+    list.push(tgt)
+    childIndex.set(src, list)
+    const rmap = relIndex.get(src) ?? new Map<string, string>()
+    rmap.set(tgt, type)
+    relIndex.set(src, rmap)
+  }
+
+  for (const link of linkMap.values()) {
+    if (link.type === 'PARENT_OF') { add(link.source, link.target, 'PARENT_OF'); continue }
     if (!CHILD_REL_TYPES.has(link.type)) continue
-    const list = childIndex.get(link.source) ?? []
-    list.push(link.target)
-    childIndex.set(link.source, list)
-    const rmap = relIndex.get(link.source) ?? new Map<string, string>()
-    rmap.set(link.target, link.type)
-    relIndex.set(link.source, rmap)
+    // 구문(PARENT_OF 부모 보유)은 모듈 평면 자식으로 넣지 않음 — 중첩 위치(부모 아래)에만.
+    if (hasParent.has(link.target) && FLAT_CONTAINER_RELS.has(link.type)) continue
+    add(link.source, link.target, link.type)
   }
   return { childIndex, relIndex }
 }

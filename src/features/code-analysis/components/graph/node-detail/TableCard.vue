@@ -103,7 +103,8 @@ const fks = computed(() =>
             class="tab-btn"
             :class="{ active: activeTab === 'ddl' }"
             @click="activeTab = 'ddl'"
-          >DDL</button>
+            title="테이블 정의 SQL의 COMMENT/주석에서 가져온 설명"
+          >테이블 정의 주석</button>
           <button
             v-if="codeDescription"
             class="tab-btn"

@@ -68,7 +68,8 @@ const { value: panelWidth, isResizing, startResize } = useResize({
       </span>
       <div class="nav-actions">
         <span class="count">{{ totalNodeCount }}</span>
-        <button class="icon-btn" title="모두 접기" @click="navigatorStore.collapseAll()">⇱</button>
+        <button class="icon-btn" title="모두 펼치기" @click="navigatorStore.expandAll()">⊞</button>
+        <button class="icon-btn" title="모두 접기" @click="navigatorStore.collapseAll()">⊟</button>
         <button class="icon-btn close" title="닫기" @click="navigatorStore.setPanelOpen(false)">✕</button>
       </div>
     </header>
@@ -177,11 +178,11 @@ const { value: panelWidth, isResizing, startResize } = useResize({
   background: transparent;
   border: none;
   color: var(--color-text-secondary, #868e96);
-  width: 22px;
-  height: 22px;
-  border-radius: 3px;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 14px;
 
   &:hover {
     background: var(--color-bg-hover, #2c2e33);

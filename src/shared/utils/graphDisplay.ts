@@ -3,6 +3,7 @@
  */
 
 import type { GraphLink, GraphNode } from '@/shared/types'
+import { nodeTypeLabel } from './nodeClassify'
 
 /** C 계열 소스에서 블록/행 주석을 제거해 디테일 패널에 표시 (문자열 리터럴 내부는 미세 조정 안 함). */
 export function stripCStyleComments(source: string): string {
@@ -25,48 +26,37 @@ export function technicalNodeName(node: GraphNode | undefined): string {
   if (labels.includes('RULE')) {
     const st = typeof p.statement === 'string' ? p.statement.trim() : ''
     if (st) return st.length > 100 ? `${st.slice(0, 97)}…` : st
-    const h = p.rule_hash
+    const h = p.id
     return typeof h === 'string' && h ? h : node.id
   }
   if (labels.includes('QUESTION')) {
     const tx = typeof p.text === 'string' ? p.text.trim() : ''
     if (tx) return tx.length > 120 ? `${tx.slice(0, 117)}…` : tx
-    const qid = p.question_id
+    const qid = p.id
     return typeof qid === 'string' && qid ? qid : node.id
   }
   if (labels.includes('EXAMPLE')) {
     const d = typeof p.description === 'string' ? p.description.trim() : ''
     if (d) return d.length > 80 ? `${d.slice(0, 77)}…` : d
-    const eid = p.example_id
+    const eid = p.id
     return typeof eid === 'string' && eid ? eid : node.id
   }
   const name = p.name as string | undefined
   if (name) return String(name)
-  const fqn = p.fqn as string | undefined
-  if (fqn) return fqn.split('.').pop() || fqn
-  const tn = p.table_id ?? p.procedure_name ?? p.class_name
-  if (tn) return String(tn)
-  return node.id
+  // 표시명 없는 DB 노드(TABLE/COLUMN)는 id("db.schema.name")의 마지막 세그먼트.
+  const idVal = p.id as string | undefined
+  if (idVal) return idVal.split('.').pop() || idVal
+  // 이름 없는 DBMS 구문은 `타입[라인]`. raw id(elementId)는 표시하지 않는다.
+  const kind = nodeTypeLabel(node)
+  const line = p.start_line
+  if (kind) return line != null && line !== 0 ? `${kind} [${line}]` : kind
+  return labels[0] || node.id
 }
 
 /** 노드에 저장된 논리명 (비어 있으면 빈 문자열) */
 export function logicalNodeName(node: GraphNode | undefined): string {
-  if (!node) return ''
-  const p: any = node.properties || {}
-  const candidates = [
-    p.logical_name,
-    p.logicalName,
-    p.logical_nm,
-    p.logicalNm,
-    p.logical,
-    p.caption_ko,
-    p.name_ko,
-    p.ko_name,
-  ]
-  for (const c of candidates) {
-    if (typeof c === 'string' && c.trim()) return c.trim()
-  }
-  return ''
+  const ln = node?.properties?.logical_name
+  return typeof ln === 'string' ? ln.trim() : ''
 }
 
 /**

@@ -48,6 +48,8 @@
 - **FR-002**: 펼침 셰브론의 클릭 히트박스를 ~18px로 확대하고 hover 어포던스를 준다. 셰브론 클릭=토글, 행(이름) 클릭=선택의 분리는 유지한다.
 - **FR-003**: Navigator 헤더에 "모두 펼치기" 버튼을 추가해 기존 `expandAll()`을 호출한다(신규 스토어 액션 없음). 기존 "모두 접기"와 쌍으로 배치.
 - **FR-004**: 백엔드 계약·데이터·분석 파이프라인 무영향(순수 프론트 CSS/마크업/기존 액션 와이어링).
+- **FR-005**(신규, 2026-06-17 사용자): 트리 **계층 들여쓰기**를 살짝 좁힌다. ✅구현: `NavigatorTreeNode.vue:79` `8+depth*14` → `8+depth*12`.
+- **FR-006**(신규, 2026-06-17 사용자): ⒜ **모두 펼치기/접기 아이콘을 명확히 반대되는 쌍**으로(기존 ⮃/⇱ 헷갈림). ✅구현: `NavigatorPanel.vue` ⮃→**⊞**(펼치기)·⇱→**⊟**(접기). ⒝ 개별 노드 **셰브론 살짝 더 크게**. ✅구현: `NavigatorTreeNode.vue` `.chevron` 18→**20px**, font 12→13.
 
 ## 영향 범위 (Blast Radius — file:line, 착수 전 확정)
 
@@ -69,3 +71,46 @@
 2. NavigatorTreeNode.vue: 상태점 8px + 셰브론 히트박스 확대(CSS only).
 3. NavigatorPanel.vue: "모두 펼치기" 버튼 추가(expandAll 연결).
 4. `npx vite build`(npm run build는 vue-tsc 게이트) → 런타임 GUI 검증(상태점·셰브론·두 버튼·선택 회귀0).
+
+---
+
+# ★ 전략/구조 인지 트리 설계 확정 (2026-06-17 합의 — 전수조사 근거)
+
+## 배경 (코드 확정)
+DBMS와 Framework는 **자식 AST 구조가 다름**(analyzer 단일 스키마, 두 방식). Framework: 모듈(클래스/파일)→메서드(잎). DBMS: 파일(MODULE)→프로시저/함수/트리거(호출단위)→**중첩 구문(SELECT/IF/UPDATE…, PARENT_OF)**. 구문도 `FUNCTION` 라벨이라 현재 전부 'F'로 떠 함수처럼 보이는 게 문제. (판정: `own_ast_type`/`parent_id`/전략 — 데이터에 이미 있음, 백엔드 무변경. 상세 사실=016.)
+
+## 결정
+- **FR-101 트리=AST 그대로**: DBMS는 프로시저→중첩 구문을 **원래 AST 구조대로** 펼침(PARENT_OF 순회). Framework는 현행(모듈→메서드). → 분석가가 제어흐름을 트리로 탐색. (017의 모두 펼치기/접기가 여기 유용.)
+- **FR-102 노드 이름 = `라벨[시작라인]`**: 구문 노드는 `SELECT [123]`·`IF [145]` 형식(이름 없으니). → 같은 SELECT 다수도 라인으로 구분(이름 중복 완화). 호출단위/Framework는 실제 이름(논리명 토글 유지).
+- **FR-103 배지 = 타입 앞글자(이모지 X, Framework처럼)**: DBMS 구문은 `own_ast_type` 첫 글자(S/I/U/R/L/M…), 호출단위=F, 컨테이너=P/M. Framework 경로 무변경(회귀0). 읽기/쓰기/흐름 색 구분은 옵션.
+- **FR-104 판정 단일화**: 트리·배지·이름·패널이 같은 **nodeClassify 판정처(016 아키텍처)**를 공유 — strategy 조건문 산발 금지(유지보수·DRY).
+
+## Blast Radius (착수 전, file:line)
+| 파일 | 변경 |
+|---|---|
+| `NavigatorTreeNode.vue` | badgeChar/badgeClass에 DBMS 구문 분기(own_ast_type 첫 글자) + 이름 `라벨[라인]`. Framework 경로 무변경 |
+| `navigator.ts` buildModulesTree | DBMS 구문 자식을 AST대로(PARENT_OF) 노출하도록 CHILD_REL 정합(현 HAS_FUNCTION flat → AST 중첩 확인 후) |
+| `node-detail/nodeClassify.ts`(신규, 016) | 트리·배지·패널 공유 판정 단일처 |
+
+## Success Criteria 추가
+- **SC-101**: DBMS 트리가 프로시저→구문 AST 구조대로 보이고, 구문은 `라벨[라인]`+앞글자 배지(F 아님).
+- **SC-102**: Framework 트리·배지 회귀 0.
+- **SC-103**: 트리·배지·이름·패널이 단일 판정처를 공유(산발 분기 0).
+
+## ~~★검증된 데이터 계약 (2026-06-17 초안)~~ → ★★근본 전환으로 대체(아래)
+> 아래 옛 블록은 **프론트가 function_id/signature를 파싱**하는 접근(ownAstType·dbmsRoutineName이 function_id·signature 사용)이었다. 이게 반복 실패·'F'배지·오해의 근본 원인 → **폐기**. analyzer가 깨끗한 속성을 저장하는 [analyzer/016-node-display-properties](../../../robo-data-analyzer/specs/016-node-display-properties/spec.md)로 전환, 프론트는 직독한다.
+
+<details><summary>(폐기된 옛 파싱 계약 — 이력 보존)</summary>
+
+- 프론트 `GraphNode.id` = Neo4j elementId. `properties.function_id` = DBMS `{parent_id}:{TYPE}:{line}`. own_ast_type = function_id에서 parent_id 떼고 첫 세그먼트. 콜러블 이름 = function_id 2번째 세그먼트(파싱). → ownAstType/dbmsRoutineName이 function_id/signature 사용.
+</details>
+
+## ★★ 근본 전환 — 라벨·속성 직독 (2026-06-17 확정, analyzer 016 의존)
+- **식별 = elementId 단일**(GraphNode.id). function_id·parent_id·fqn는 **표시·트리 도출에 안 씀**.
+- **표시 타입 = primary 라벨 직독**: analyzer 016이 **DBMS 노드를 antlr type으로 라벨링**(`:SELECT`/`:PROCEDURE`/`:IF`…, 더 이상 `:FUNCTION` 뭉개기 아님). 프론트 기존 `pickDisplayLabel`(역할라벨 제외 구체라벨)이 DBMS·Framework 둘 다 자동 처리 → 'F' 대신 SELECT/PROCEDURE. 배지 = 타입 라벨 앞글자(S/I/U/P/T…). `ast_type` 속성 없음(라벨이 타입). signature/function_id 파싱 금지.
+- **표시 이름 = `properties.name` 직독**(콜러블=루틴명). 구문(name 빈값)은 `${타입라벨} [${start_line}]`. 논리명 토글 시 `logical_name`. `dbmsRoutineName`(signature DDL 정규식)·`ownAstType`(signature/function_id 파싱) **삭제**.
+- **트리 중첩 = PARENT_OF 엣지**로(parent_id 속성 파싱 아님). `start_line` 정렬 유지.
+- **FR-102 대체**: 구문 이름 = `타입라벨[start_line]`, 콜러블 = `properties.name`.
+- **FR-103 대체**: 배지 = primary 라벨 앞글자(파싱·속성 아님). Framework 경로 무변경(회귀0).
+- **FR-104 유지**: 트리·배지·이름·패널이 단일 판정처(nodeClassify) 공유 — nodeClassify는 **파싱이 아니라 node.labels(타입라벨)·properties.name을 읽는** 판정처로 탈바꿈.
+- **선행 의존**: analyzer 016(DBMS 라벨=antlr type) 구현·재분석 후 전환. 옛 `:FUNCTION` 데이터엔 폴백 안전 렌더.

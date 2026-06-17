@@ -19,7 +19,7 @@
  *   - DB 링크                    : LINKS_TO / DB_LINK
  */
 
-import type { GraphLink } from '@/shared/types'
+import type { GraphLink, GraphNode } from '@/shared/types'
 
 // ─────────────────────────────────────────────────────────────────────────
 // 의미 그룹 정의 — 백엔드 `report.py` 의 ENTITY_*_REL_TYPES 와 일치
@@ -175,4 +175,70 @@ export function getAttachedByType(
   relType: string,
 ): GraphLink[] {
   return groups.attached.filter(l => l.type === relType)
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 의미데이터 보고서 — 함수→규칙→예시 + 질문 (노드패널 전용, semanticLinkMap 소스)
+// 백엔드 emit 구조: FUNCTION -HAS_RULE-> RULE -HAS_EXAMPLE-> EXAMPLE,
+//                  FUNCTION|RULE -HAS_QUESTION-> QUESTION.
+// ─────────────────────────────────────────────────────────────────────────
+
+/** 한 규칙 + 그 규칙에 매달린 예시들. */
+export interface SemanticRule {
+  node: GraphNode
+  examples: GraphNode[]
+}
+
+/** 선택 함수의 의미데이터 보고서. 모두 비어있을 수 있음(데이터 없을 때 섹션 숨김). */
+export interface SemanticReport {
+  rules: SemanticRule[]
+  questions: GraphNode[]
+}
+
+export const EMPTY_SEMANTIC_REPORT: SemanticReport = { rules: [], questions: [] }
+
+/**
+ * 선택 노드(보통 FUNCTION)의 업무규칙·예시·질문을 의미데이터 채널에서 조회.
+ * @param nodeId         대상 노드 id
+ * @param semanticLinks  analyzerStore.semanticLinkMap 의 values (HAS_RULE/EXAMPLE/QUESTION)
+ * @param nodes          analyzerStore.nodeMap (RULE/EXAMPLE/QUESTION 노드 해석용)
+ */
+export function getSemanticReport(
+  nodeId: string,
+  semanticLinks: Iterable<GraphLink>,
+  nodes: Map<string, GraphNode>,
+): SemanticReport {
+  // 출발지(source)별로 타입 버킷 구성 — 한 번만 순회.
+  const rulesBySource = new Map<string, GraphLink[]>()
+  const examplesBySource = new Map<string, GraphLink[]>()
+  const questionsBySource = new Map<string, GraphLink[]>()
+  const push = (m: Map<string, GraphLink[]>, k: string, l: GraphLink) => {
+    const arr = m.get(k)
+    if (arr) arr.push(l)
+    else m.set(k, [l])
+  }
+  for (const link of semanticLinks) {
+    if (link.type === 'HAS_RULE') push(rulesBySource, link.source, link)
+    else if (link.type === 'HAS_EXAMPLE') push(examplesBySource, link.source, link)
+    else if (link.type === 'HAS_QUESTION') push(questionsBySource, link.source, link)
+  }
+
+  const resolve = (links: GraphLink[] | undefined): GraphNode[] =>
+    (links ?? [])
+      .map(l => nodes.get(l.target))
+      .filter((n): n is GraphNode => !!n)
+
+  const ruleNodes = resolve(rulesBySource.get(nodeId))
+  const rules: SemanticRule[] = ruleNodes.map(node => ({
+    node,
+    examples: resolve(examplesBySource.get(node.id)),
+  }))
+
+  // 질문은 함수 직속 + 각 규칙 소속 둘 다 수집(emit from 이 둘 중 하나).
+  const questionNodes: GraphNode[] = [...resolve(questionsBySource.get(nodeId))]
+  for (const r of ruleNodes) questionNodes.push(...resolve(questionsBySource.get(r.id)))
+  const seen = new Set<string>()
+  const questions = questionNodes.filter(q => (seen.has(q.id) ? false : (seen.add(q.id), true)))
+
+  return { rules, questions }
 }

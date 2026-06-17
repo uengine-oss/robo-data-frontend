@@ -10,7 +10,7 @@ import type { GraphNode } from '@/shared/types'
 import { getRelationshipGroups } from '@/shared/utils/nodeRelationships'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import TextViewer from '@/shared/components/TextViewer.vue'
-import { relationshipRowParts } from '@/shared/utils/graphDisplay'
+import { relationshipRowParts, technicalNodeName } from '@/shared/utils/graphDisplay'
 
 interface Props {
   node: GraphNode
@@ -34,14 +34,22 @@ const slots = useSlots()
 const hasSubHeader = computed(() => Boolean(slots['sub-header']?.()))
 const hasIdentityExtra = computed(() => Boolean(slots['identity-extra']?.()))
 
-const nodeName = computed(() => {
-  const props_ = props.node.properties || {}
-  return (
-    (props_.name as string) ||
-    (props_.fqn as string)?.split('.').pop() ||
-    props.node.id
-  )
+const nodeName = computed(() => technicalNodeName(props.node))
+
+// 건강지표 — risk 등 있으면 헤더에 표시.
+const health = computed(() => {
+  const p = props.node.properties || {}
+  const risk = typeof p.risk === 'string' ? p.risk : ''
+  if (!risk && p.fan_in == null && p.loc == null) return null
+  const num = (v: unknown) => (typeof v === 'number' ? v : undefined)
+  return {
+    risk,
+    fanIn: num(p.fan_in), fanOut: num(p.fan_out), loc: num(p.loc),
+    tableCoupling: num(p.table_coupling),
+    god: p.god_flag === true, inCycle: p.in_cycle === true,
+  }
 })
+const RISK_LABEL: Record<string, string> = { high: '높음', medium: '보통', low: '낮음' }
 
 const displayHeaderTitle = computed(() =>
   (props.headerTitle && props.headerTitle.trim()) ? props.headerTitle.trim() : nodeName.value,
@@ -117,6 +125,15 @@ const relSummary = computed<RelSummaryItem[]>(() => {
       targets: g.calls.map(l => ({
         linkId: l.id,
         ...relationshipRowParts(l, peer(l.target)),
+      })),
+    },
+    {
+      label: '피호출',
+      count: g.incomingCalls.length,
+      hint: '이 노드를 부르는 곳 (영향 분석)',
+      targets: g.incomingCalls.map(l => ({
+        linkId: l.id,
+        ...relationshipRowParts(l, peer(l.source)),
       })),
     },
     {
@@ -209,6 +226,17 @@ const relStripToneClass = computed(() => {
             <span class="detail-locate__k">소속</span>
             <span class="detail-locate__v">{{ subInfo }}</span>
           </div>
+          <div v-if="health" class="detail-health">
+            <span v-if="health.risk" class="health-risk" :class="'health-risk--' + health.risk" title="건강지표(위험도)">
+              위험 {{ RISK_LABEL[health.risk] ?? health.risk }}
+            </span>
+            <span v-if="health.fanIn != null" class="health-metric" title="이 노드를 부르는 곳 수 (피호출)">피호출 {{ health.fanIn }}</span>
+            <span v-if="health.fanOut != null" class="health-metric" title="이 노드가 부르는 수 (호출)">호출 {{ health.fanOut }}</span>
+            <span v-if="health.loc != null" class="health-metric" title="코드 줄 수">LOC {{ health.loc }}</span>
+            <span v-if="health.tableCoupling" class="health-metric" title="접근하는 테이블 수">테이블 {{ health.tableCoupling }}</span>
+            <span v-if="health.god" class="health-flag" title="크고 복잡(God 함수)">God</span>
+            <span v-if="health.inCycle" class="health-flag" title="호출 순환에 포함">순환</span>
+          </div>
           <div v-if="hasIdentityExtra" class="detail-identity-extra">
             <slot name="identity-extra" />
           </div>
@@ -228,7 +256,7 @@ const relStripToneClass = computed(() => {
           v-if="summaryDetail"
           class="summary-detail"
           :content="summaryDetail"
-          :max-height="220"
+          :max-height="1200"
           format="auto"
           compact
         />
@@ -353,6 +381,34 @@ const relStripToneClass = computed(() => {
   color: var(--color-text-muted);
   letter-spacing: 0.04em;
 }
+
+.detail-health {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+.health-risk, .health-metric, .health-flag {
+  font-size: 0.64rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+.health-metric {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  font-weight: 600;
+}
+.health-flag {
+  background: rgba(250, 82, 82, 0.15);
+  color: #ff8787;
+  border: 1px solid rgba(250, 82, 82, 0.3);
+}
+.health-risk--high   { background: rgba(250, 82, 82, 0.18);  color: #ff8787; }
+.health-risk--medium { background: rgba(255, 169, 77, 0.18); color: #ffc078; }
+.health-risk--low    { background: rgba(81, 207, 102, 0.16); color: #8ce99a; }
 
 .summary-headline {
   margin: 0 0 8px;
