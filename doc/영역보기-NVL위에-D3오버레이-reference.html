@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>영역 보기 — NVL 캔버스 + D3 hull 오버레이 (동기) 참고</title>
+<style>
+  html,body{margin:0;height:100%;background:#0f1115;overflow:hidden;font-family:system-ui,sans-serif;color:#ddd}
+  #graph{position:absolute;inset:0}                 /* NVL 캔버스(아래) */
+  #overlay{position:absolute;inset:0;pointer-events:none;z-index:1} /* D3 SVG(위), 클릭 통과 */
+  .hull{stroke-width:2;stroke-dasharray:6 4;fill-opacity:.13}
+  .hull-label{font-size:12px;font-weight:600}
+  #help{position:fixed;left:12px;top:12px;font-size:12px;background:#1b1e24;padding:10px 12px;border-radius:8px;line-height:1.6;max-width:400px;z-index:2}
+  #err{position:fixed;left:12px;bottom:12px;color:#ff8787;font-size:12px;z-index:2}
+  b{color:#74b9ff} code{color:#ffd43b}
+</style>
+</head>
+<body>
+<div id="help">
+  <b>영역 보기 — NVL + D3 (노드·경계선 동기) 참고</b><br/>
+  아래=NVL 캔버스 그래프, 위=<b>D3 SVG hull 오버레이</b>(같은 group 색영역).<br/>
+  · 드래그=팬/노드이동 · 휠=줌 → D3 영역이 NVL 노드와 <b>동기</b>.<br/>
+  동기 핵심(=과거 desync 해결): NVL 자체 변환을 그대로 미러링 —<br/>
+  <code>screenX=(worldX−panX)·scale/dpr + cssW/2</code> (pan은 빼고·dpr로 나누고·원점=중앙).<br/>
+  <code>nvl.getScale()/getPan()/getNodePositions()</code> + 매 프레임 rAF redraw.<br/>
+  (robo <code>useGroupHulls.ts</code> 와 동일 기법, 오버레이만 canvas→D3 SVG)
+</div>
+<div id="graph"></div>
+<svg id="overlay"></svg>
+<div id="err"></div>
+
+<script type="module">
+import { NVL } from 'https://esm.sh/@neo4j-nvl/base@1';
+import { PanInteraction, ZoomInteraction, DragNodeInteraction }
+  from 'https://esm.sh/@neo4j-nvl/interaction-handlers@1';
+import * as d3 from 'https://esm.sh/d3@7';
+
+const PALETTE = d3.schemeTableau10;
+
+// ── 더미 그래프 (group 속성 부여) ─────────────────────────────────────
+const nodes = [], rels = [];
+let id = 0;
+for (let g = 0; g < 4; g++) {
+  const ids = [];
+  for (let i = 0; i < 6; i++) {
+    const nid = 'n' + (id++);
+    ids.push(nid);
+    nodes.push({ id: nid, caption: 'C' + g + '-' + i, color: PALETTE[g % PALETTE.length],
+                 group: 'C' + g, gi: g });           // ← group 속성으로 영역 묶음
+  }
+  for (let i = 1; i < ids.length; i++) rels.push({ id: 'r' + g + i, from: ids[0], to: ids[i] });
+}
+const groupOf = new Map(nodes.map(n => [n.id, n]));
+
+// ── NVL 생성 ─────────────────────────────────────────────────────────
+const container = document.getElementById('graph');
+let nvl;
+try {
+  nvl = new NVL(container, nodes, rels, { initialZoom: 1, layout: 'forceDirected' });
+  new PanInteraction(nvl);
+  new ZoomInteraction(nvl);
+  new DragNodeInteraction(nvl);
+} catch (e) {
+  document.getElementById('err').textContent =
+    'NVL 로드 실패(esm.sh): ' + e.message + ' — 오프라인이거나 CDN 차단 시 로컬 번들 필요.';
+}
+
+// ── D3 오버레이 셋업 ─────────────────────────────────────────────────
+const svg = d3.select('#overlay');
+const gHull = svg.append('g');
+
+// world → screen (NVL mapToRelativePosition 동일 미러링)
+function toScreen(wx, wy, scale, pan, dpr, cx, cy) {
+  return [ (wx - pan.x) * scale / dpr + cx, (wy - pan.y) * scale / dpr + cy ];
+}
+
+// 패딩 둥근 hull path (d3.polygonHull + catmullRom)
+function hullPath(pts, pad = 30) {
+  if (pts.length === 1) { const [p] = pts; return `M${p[0]-pad},${p[1]}a${pad},${pad} 0 1,0 ${pad*2},0a${pad},${pad} 0 1,0 ${-pad*2},0`; }
+  const src = pts.length === 2 ? [...pts, [pts[0][0]+0.1, pts[0][1]+0.1]] : pts;
+  const hull = d3.polygonHull(src);
+  if (!hull) return '';
+  const cx = d3.mean(hull, d => d[0]), cy = d3.mean(hull, d => d[1]);
+  const ex = hull.map(([x,y]) => { const dx=x-cx, dy=y-cy, L=Math.hypot(dx,dy)||1; return [x+dx/L*pad, y+dy/L*pad]; });
+  return d3.line().curve(d3.curveCatmullRomClosed)(ex);
+}
+
+// ── redraw: NVL 변환을 읽어 D3 영역을 다시 그림 ──────────────────────
+function redraw() {
+  if (!nvl) return;
+  const w = container.clientWidth, h = container.clientHeight;
+  svg.attr('width', w).attr('height', h);
+  const scale = nvl.getScale(), pan = nvl.getPan();
+  const dpr = window.devicePixelRatio || 1, cx = w/2, cy = h/2;
+
+  // id → screen 좌표
+  const screenById = new Map();
+  for (const p of nvl.getNodePositions()) {
+    if (typeof p.x === 'number' && !Number.isNaN(p.x))
+      screenById.set(p.id, toScreen(p.x, p.y, scale, pan, dpr, cx, cy));
+  }
+  // group → screen 점들
+  const groups = d3.group([...screenById.entries()], ([nid]) => groupOf.get(nid)?.group);
+  const data = Array.from(groups, ([key, arr]) => ({
+    key, gi: groupOf.get(arr[0][0])?.gi ?? 0, pts: arr.map(([,p]) => p)
+  })).filter(d => d.key != null).sort((a,b) => b.pts.length - a.pts.length); // 큰 그룹 먼저
+
+  gHull.selectAll('path.hull').data(data, d => d.key).join('path')
+    .attr('class','hull').attr('d', d => hullPath(d.pts))
+    .attr('fill', d => PALETTE[d.gi % PALETTE.length]).attr('stroke', d => PALETTE[d.gi % PALETTE.length]);
+  gHull.selectAll('text.hull-label').data(data, d => d.key).join('text')
+    .attr('class','hull-label').attr('text-anchor','middle')
+    .attr('fill', d => PALETTE[d.gi % PALETTE.length])
+    .attr('x', d => d3.mean(d.pts, p => p[0]))
+    .attr('y', d => d3.min(d.pts, p => p[1]) - 36)
+    .text(d => '영역 ' + d.key);
+}
+
+// 매 프레임 동기 (rAF 루프 = 팬/줌/드래그/레이아웃 어떤 변화든 항상 따라감)
+(function loop(){ redraw(); requestAnimationFrame(loop); })();
+window.addEventListener('resize', redraw);
+</script>
+</body>
+</html>
