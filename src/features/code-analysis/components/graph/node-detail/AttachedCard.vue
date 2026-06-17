@@ -50,13 +50,13 @@ function safeJsonString(v: unknown): string {
   <NodeDetailBase :node="node" :icon="icon" :label-badge="primary">
     <template #body>
       <!-- Rule -->
-      <section v-if="primary === 'Rule' && statement" class="content-section">
+      <section v-if="primary === 'RULE' && statement" class="content-section">
         <h4 class="section-title">규칙</h4>
         <TextViewer :content="statement" :max-height="200" />
       </section>
 
       <!-- Example -->
-      <template v-if="primary === 'Example'">
+      <template v-if="primary === 'EXAMPLE'">
         <section v-if="description" class="content-section">
           <h4 class="section-title">설명</h4>
           <TextViewer :content="description" :max-height="160" />
@@ -76,7 +76,7 @@ function safeJsonString(v: unknown): string {
       </template>
 
       <!-- Question -->
-      <template v-if="primary === 'Question'">
+      <template v-if="primary === 'QUESTION'">
         <section v-if="text" class="content-section">
           <h4 class="section-title">질문</h4>
           <TextViewer :content="text" :max-height="160" />

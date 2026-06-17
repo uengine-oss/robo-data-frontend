@@ -2,7 +2,7 @@
  * features/graph/stores/navigator.ts
  *
  * Navigator 사이드 패널의 모든 상태를 관리한다:
- *   - UI 상태        : 패널 열림/닫힘, 현재 Graph 하위 뷰(schema/uml/graph)
+ *   - UI 상태        : 패널 열림/닫힘
  *   - 트리 상태      : 섹션 확장, 노드 확장, 검색어
  *   - 파생 트리 뷰   : MODULES / TABLES (projectStore 기반 computed)
  *
@@ -20,7 +20,6 @@ import type { GraphLink, GraphNode } from '@/shared/types'
 // ═══════════════════════════════════════════════════════════════════════════
 
 export type NavigatorSection = 'MODULES' | 'TABLES'
-export type GraphSubView = 'schema' | 'uml' | 'graph'
 
 export interface NavigatorTreeItem {
   id: string
@@ -52,7 +51,7 @@ const ROLE_LABELS = new Set([
 /** 트리에서 제외할 라벨 — 변수/상수는 트리에 안 보인다. */
 const EXCLUDED_LABELS = new Set([
   'VARIABLE', 'CONSTANT', 'GLOBAL_VARIABLE', 'DEFINE',
-  'Rule', 'Example', 'Question',
+  'RULE', 'EXAMPLE', 'QUESTION',
 ])
 
 /** 자식으로 확장할 관계 타입.
@@ -101,7 +100,7 @@ function pickDisplayName(node: GraphNode): string {
   }
   return String(
     p['name'] ?? p['fqn'] ?? p['procedure_name']
-      ?? p['class_name'] ?? p['title'] ?? node.id
+      ?? p['class_name'] ?? p['title'] ?? p['signature'] ?? node.id
   )
 }
 
@@ -288,7 +287,7 @@ function buildTablesTree(
   const { childIndex, relIndex } = buildChildIndexes(linkMap)
   const roots: NavigatorTreeItem[] = []
   for (const node of nodeMap.values()) {
-    if (!node.labels.includes('Table')) continue
+    if (!node.labels.includes('TABLE')) continue
     const tree = buildSubtree(node.id, nodeMap, childIndex, relIndex, 0, new Set())
     if (tree) roots.push(tree)
   }
@@ -318,7 +317,6 @@ export const useNavigatorStore = defineStore('navigator', () => {
 
   // ── UI 상태 ──
   const isPanelOpen = ref(false)
-  const activeView = ref<GraphSubView>('schema')
 
   // ── 트리 상태 ──
   // 기본 동작: 모든 노드가 펼쳐진 상태. 사용자가 접은 것만 collapsedNodes 에 들어간다.
@@ -350,10 +348,6 @@ export const useNavigatorStore = defineStore('navigator', () => {
   // ── UI 액션 ──
   function setPanelOpen(open: boolean): void {
     isPanelOpen.value = open
-  }
-
-  function setActiveView(view: GraphSubView): void {
-    activeView.value = view
   }
 
   function toggleSection(section: NavigatorSection): void {
@@ -410,9 +404,7 @@ export const useNavigatorStore = defineStore('navigator', () => {
   return {
     // UI
     isPanelOpen,
-    activeView,
     setPanelOpen,
-    setActiveView,
     // 논리명/물리명 토글
     showLogicalNames,
     toggleLogicalNames,

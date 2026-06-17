@@ -21,8 +21,7 @@ import {
 const sessionStore = useSessionStore()
 const navigatorStore = useNavigatorStore()
 const { activeTab } = storeToRefs(sessionStore)
-const { isPanelOpen: isNavigatorPanelOpen, activeView: graphActiveView }
-  = storeToRefs(navigatorStore)
+const { isPanelOpen: isNavigatorPanelOpen } = storeToRefs(navigatorStore)
 
 const isEmbedded = inject<boolean>('isEmbedded', false)
 
@@ -93,8 +92,8 @@ const toggleNavigator = () => navigatorStore.setPanelOpen(!isNavigatorPanelOpen.
         </button>
       </template>
 
-      <!-- Navigator 패널 토글 (GraphTab 의 Graph 하위 뷰일 때만) -->
-      <template v-if="activeTab === 'graph' && graphActiveView === 'graph'">
+      <!-- Navigator 패널 토글 (「코드 그래프」 탭일 때만) -->
+      <template v-if="activeTab === 'graph'">
         <div class="nav-divider"></div>
         <button class="nav-item" :class="{ active: isNavigatorPanelOpen }"
           @click="toggleNavigator" title="Project Navigator">

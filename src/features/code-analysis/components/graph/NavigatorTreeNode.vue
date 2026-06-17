@@ -60,8 +60,8 @@ const badgeChar = computed(() => {
   if (labels.includes('PACKAGE')) return 'P'
   if (labels.includes('MODULE') || labels.includes('FILE')) return 'M'
   if (labels.includes('BusinessLogic')) return 'B'
-  if (labels.includes('Table')) return 'T'
-  if (labels.includes('Column')) return 'C'
+  if (labels.includes('TABLE')) return 'T'
+  if (labels.includes('COLUMN')) return 'C'
   if (labels.includes('FUNCTION')) return 'F'
   // fallback: nodeType 앞 글자
   const t = props.node.nodeType
@@ -74,8 +74,8 @@ const badgeClass = computed(() => {
   if (labels.includes('PACKAGE')) return 'badge-package'
   if (labels.includes('MODULE') || labels.includes('FILE')) return 'badge-module'
   if (labels.includes('BusinessLogic')) return 'badge-bl'
-  if (labels.includes('Table')) return 'badge-table'
-  if (labels.includes('Column')) return 'badge-column'
+  if (labels.includes('TABLE')) return 'badge-table'
+  if (labels.includes('COLUMN')) return 'badge-column'
   if (labels.includes('FUNCTION')) return 'badge-function'
   const t = props.node.nodeType
   if (/Class|CLASS/.test(t)) return 'badge-class'

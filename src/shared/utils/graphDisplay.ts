@@ -22,19 +22,19 @@ export function technicalNodeName(node: GraphNode | undefined): string {
   if (!node) return ''
   const p = node.properties || {}
   const labels = node.labels || []
-  if (labels.includes('Rule')) {
+  if (labels.includes('RULE')) {
     const st = typeof p.statement === 'string' ? p.statement.trim() : ''
     if (st) return st.length > 100 ? `${st.slice(0, 97)}…` : st
     const h = p.rule_hash
     return typeof h === 'string' && h ? h : node.id
   }
-  if (labels.includes('Question')) {
+  if (labels.includes('QUESTION')) {
     const tx = typeof p.text === 'string' ? p.text.trim() : ''
     if (tx) return tx.length > 120 ? `${tx.slice(0, 117)}…` : tx
     const qid = p.question_id
     return typeof qid === 'string' && qid ? qid : node.id
   }
-  if (labels.includes('Example')) {
+  if (labels.includes('EXAMPLE')) {
     const d = typeof p.description === 'string' ? p.description.trim() : ''
     if (d) return d.length > 80 ? `${d.slice(0, 77)}…` : d
     const eid = p.example_id

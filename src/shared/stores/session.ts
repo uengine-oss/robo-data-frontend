@@ -147,7 +147,7 @@ export const useSessionStore = defineStore('session', () => {
   // 스키마 검색으로 이동
   const navigateToSchemaSearch = (query: string) => {
     pendingSchemaSearch.value = query
-    activeTab.value = 'graph'
+    activeTab.value = 'schema'
   }
 
   // 스키마 검색 데이터 소비 (사용 후 초기화)

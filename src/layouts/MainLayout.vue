@@ -8,21 +8,16 @@ import FloatingProgressPanel from '@/shared/components/FloatingProgressPanel.vue
 import { RouterView } from 'vue-router'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { useSessionStore } from '@/shared/stores/session'
-import { useNavigatorStore } from '@/shared/stores/navigator'
 
 // host(robo-architect)에 임베드되면 architect 상단바를 쓰므로 analyzer 자체 TopToolbar 는 숨긴다.
 const isEmbedded = inject<boolean>('isEmbedded', false)
 
 const projectStore = useAnalyzerStore()
 const sessionStore = useSessionStore()
-const navigatorStore = useNavigatorStore()
 const { activeTab } = storeToRefs(sessionStore)
-const { activeView: graphActiveView } = storeToRefs(navigatorStore)
 
-/** Navigator 는 Graph 탭의 "Graph" 하위 뷰에서만 렌더. */
-const showNavigator = computed(
-  () => activeTab.value === 'graph' && graphActiveView.value === 'graph'
-)
+/** Navigator 는 「코드 그래프」 탭에서만 렌더. */
+const showNavigator = computed(() => activeTab.value === 'graph')
 
 // 앱 초기화 시 Neo4j에서 기존 그래프 데이터 로드
 onMounted(async () => {

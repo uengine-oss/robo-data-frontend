@@ -202,7 +202,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
    * 임시: 비즈니스 로직 메타 라벨은 화면에 표시하지 않음.
    * 풀려면 이 set 을 비우고 재인제스션하면 됨.
    */
-  const HIDDEN_NODE_LABELS = new Set(['Rule', 'Example', 'Question'])
+  const HIDDEN_NODE_LABELS = new Set(['RULE', 'EXAMPLE', 'QUESTION'])
 
   /**
    * 화면에 노출하지 않는 관계 타입.

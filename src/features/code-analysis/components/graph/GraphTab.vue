@@ -4,20 +4,14 @@
  * 그래프 및 UML 다이어그램 탭 - 개선된 플로팅 UI
  */
 
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { logger } from '@/shared/utils/logger'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
-import { useSessionStore } from '@/shared/stores/session'
-import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
 import { useCanvasStore } from '@/features/code-analysis/graphCanvas'
 import { useNavigatorStore } from '@/shared/stores/navigator'
 import { storeToRefs } from 'pinia'
 import NvlGraph from './NvlGraph.vue'
 import NodeDetailPanel from './NodeDetailPanel.vue'
 import GraphStylePanel from './GraphStylePanel.vue'
-import VueFlowClassDiagram from './VueFlowClassDiagram.vue'
-import { SchemaView } from '@/features/schema'
-import { getClassName, getDirectory, CLASS_LABELS } from '@/shared/utils/classDiagram'
 import type { GraphNode, GraphLink } from '@/shared/types'
 import { useResize } from '@/shared/composables/useResize'
 import { useDrag } from '@/shared/composables/useDrag'
@@ -25,31 +19,20 @@ import { getNodeColor, getRelationshipColor } from '@/shared/config/graphStyles'
 import { storageVersion } from '@/shared/utils/graphStyleStorage'
 
 const projectStore = useAnalyzerStore()
-const sessionStore = useSessionStore()
-const schemaCanvasStore = useSchemaCanvasStore()
 const canvasStore = useCanvasStore()
 const navigatorStore = useNavigatorStore()
 const {
   graphData,
   isProcessing,
   currentStep,
-  sourceType,
   consoleMessages,
   graphEvents,
 } = storeToRefs(projectStore)
 const { canvasGraphData } = storeToRefs(canvasStore)
 const { showLogicalNames } = storeToRefs(navigatorStore)
 
-const MAX_SEARCH_RESULTS = 8
-
-/** activeView 는 navigator 스토어에 저장 — MainLayout/SideNav 가 Navigator 노출 조건으로 참조. */
-const activeView = computed({
-  get: () => navigatorStore.activeView,
-  set: (v) => navigatorStore.setActiveView(v),
-})
 const showNodePanel = ref(false)
 const showConsole = ref(false)
-const showSearch = ref(false)
 const progressPanelCollapsed = ref(false) // 진행 패널 축소 상태
 const labelFilters = ref<string[]>([]) // 레전드 필터 (노드 라벨)
 /** 그룹 영역(바운디드 컨텍스트) 오버레이 기준 — null=끔, 'component_id'=켬. */
@@ -64,14 +47,11 @@ function toggleHealthView(): void {
   colorMode.value = colorMode.value === 'health' ? 'label' : 'health'
 }
 
-/** 스키마 하위 뷰(캔버스/Mermaid) — 전환 버튼을 공통 툴바로 끌어올려 SchemaView 가 제어받게 함. */
-const schemaMode = ref<'canvas' | 'mermaid'>('canvas')
-
 /** 테이블 전체 보기 — 모든 TABLE 노드와 그 관계(FK 등)를 캔버스에 로드. */
 function showAllTables(): void {
   labelFilters.value = []
   canvasStore.setPreset(null)
-  canvasStore.loadNodesByLabels(['Table'])
+  canvasStore.loadNodesByLabels(['TABLE'])
 }
 
 // 분석 패널 모드: 'docked' (왼쪽 고정), 'floating' (플로팅), 'hidden' (완전 숨김)
@@ -81,9 +61,7 @@ const analysisPanelMode = ref<'docked' | 'floating' | 'hidden'>('hidden')
 // 인제스천 시작 시 그래프 뷰로 자동 전환 (분석 진행 상황을 볼 수 있도록)
 watch(isProcessing, (newVal, oldVal) => {
   if (newVal && !oldVal) {
-    // 인제스천이 시작되면 그래프 뷰로 전환
-    activeView.value = 'graph'
-    // 분석 패널도 표시
+    // 인제스천 시작 시 분석 패널 표시
     if (analysisPanelMode.value === 'hidden') {
       analysisPanelMode.value = 'docked'
     }
@@ -139,7 +117,6 @@ const { value: panelWidth, isResizing: isPanelResizing, startResize: startPanelR
   fromEnd: true
 })
 
-const searchQuery = ref('')
 const selectedNode = ref<GraphNode | null>(null)
 const selectedRelationship = ref<GraphLink | null>(null)
 const selectedNodeType = ref<string | null>(null)
@@ -148,43 +125,10 @@ const stylePanelTop = ref<number>(0)
 /** 현재 스타일 패널이 노드용인지 관계용인지 */
 const stylePanelCategory = ref<'node' | 'relationship'>('node')
 const nvlGraphRef = ref<InstanceType<typeof NvlGraph> | null>(null)
-const selectedClasses = ref<Array<{ className: string; directory: string }>>([])
-
-// UML 깊이 설정 (UML 뷰 전용) — TopToolbar/SettingsModal 이 localStorage 저장 + custom event 발행.
-// 여기서는 마운트 시 한번 읽고 이후 'umlDepthChange' 이벤트로 동기화.
-const umlDepth = ref(3)
-try {
-  const savedUmlDepth = localStorage.getItem('umlDepth')
-  if (savedUmlDepth) {
-    const parsed = parseInt(savedUmlDepth)
-    if (!isNaN(parsed)) umlDepth.value = parsed
-  }
-} catch (e) {
-  logger.warn('localStorage 접근 실패:', e)
-}
-
-function handleUmlDepthChange(event: Event) {
-  const customEvent = event as CustomEvent
-  umlDepth.value = customEvent.detail
-}
 
 onMounted(() => {
-  window.addEventListener('umlDepthChange', handleUmlDepthChange)
-
   // Graph 탭 진입 시 Navigator 자동 오픈 (VSCode Explorer 스타일)
   navigatorStore.setPanelOpen(true)
-
-  // 상단 검색에서 전달된 스키마 검색어 처리
-  const pendingQuery = sessionStore.consumeSchemaSearch()
-  if (pendingQuery) {
-    activeView.value = 'schema'
-    schemaCanvasStore.searchQuery = pendingQuery
-    schemaCanvasStore.performSemanticSearch(pendingQuery)
-  }
-})
-
-onUnmounted(() => {
-  window.removeEventListener('umlDepthChange', handleUmlDepthChange)
 })
 
 // Navigator 트리 단일 클릭 → 디테일 패널에 즉시 표시.
@@ -269,7 +213,6 @@ const overallRelationshipStats = computed(() => {
 const hasGraph = computed(() => canvasGraphData.value.nodes.length > 0)
 // 프로젝트 전체에 로드된 데이터가 있는지 (Navigator에서 탐색 가능한지)
 const hasAnyData = computed(() => (graphData.value?.nodes.length ?? 0) > 0)
-const showUmlTab = computed(() => sourceType.value === 'java' || sourceType.value === 'python')
 
 // 로그가 있을 때 자동으로 콘솔 표시
 watch(consoleMessages, (messages) => {
@@ -277,21 +220,6 @@ watch(consoleMessages, (messages) => {
     showConsole.value = true
   }
 }, { immediate: true })
-
-const filteredNodes = computed(() => {
-  const query = searchQuery.value.trim().toLowerCase()
-  if (!graphData.value || !query) return []
-  
-  return graphData.value.nodes.filter(node => {
-    const labels = node.labels || []
-    if (!labels.some(label => CLASS_LABELS.includes(label))) return false
-    
-    const name = ((node.properties?.name as string) || '').toLowerCase()
-    const className = ((node.properties?.class_name as string) || '').toLowerCase()
-    
-    return name.includes(query) || className.includes(query)
-  })
-})
 
 /** 스타일 패널 상태 초기화 */
 function resetStylePanel(): void {
@@ -346,60 +274,6 @@ function handleRelTypeSelect(relType: string, topOffset: number): void {
 
 function handleStylePanelClose(): void {
   resetStylePanel()
-}
-
-function handleSearchSelect(node: GraphNode): void {
-  selectedRelationship.value = null
-  resetStylePanel()
-  selectedNode.value = node
-  showNodePanel.value = true
-  
-  const directory = getDirectory(node)
-  const className = getClassName(node)
-  
-  if (!className) return
-  
-  if (activeView.value === 'uml') {
-    const exists = selectedClasses.value.some(
-      c => c.className === className && c.directory === directory
-    )
-    if (!exists) {
-      selectedClasses.value = [...selectedClasses.value, { className, directory }]
-    }
-  }
-  
-  searchQuery.value = ''
-  showSearch.value = false
-}
-
-function handleVueFlowClassClick(nodeId: string): void {
-  // 클릭한 노드의 ID로 직접 찾기 (우회 없이)
-  const node = graphData.value?.nodes.find(n => n.id === nodeId)
-  if (node) {
-    selectedNode.value = node
-    selectedRelationship.value = null
-    resetStylePanel()
-    showNodePanel.value = true
-  }
-}
-
-function handleVueFlowClassExpand(className: string, directory: string): void {
-  const exists = selectedClasses.value.some(
-    c => c.className === className && c.directory === directory
-  )
-  if (!exists) {
-    selectedClasses.value = [...selectedClasses.value, { className, directory }]
-  }
-}
-
-function clearSelectedClasses(): void {
-  selectedClasses.value = []
-}
-
-function removeSelectedClass(className: string, directory: string): void {
-  selectedClasses.value = selectedClasses.value.filter(
-    c => !(c.className === className && c.directory === directory)
-  )
 }
 
 /**
@@ -512,9 +386,9 @@ watch(hasGraph, (has, prev) => {
 <template>
   <div class="graph-tab">
     
-    <!-- 왼쪽 통합 분석 패널 (Graph/UML 모드에서만 표시) -->
-    <div 
-      v-if="activeView !== 'schema' && analysisPanelMode !== 'hidden'"
+    <!-- 왼쪽 통합 분석 패널 -->
+    <div
+      v-if="analysisPanelMode !== 'hidden'"
       class="analysis-panel"
       :class="{ 
         collapsed: progressPanelCollapsed, 
@@ -625,7 +499,7 @@ watch(hasGraph, (has, prev) => {
 
     <!-- 메인 콘텐츠 -->
     <div class="content-area">
-      <div class="view-container" v-show="activeView === 'graph'">
+      <div class="view-container">
         <!-- 캔버스는 항상 마운트 — drop 이벤트를 받아야 하므로 v-if 로 제거하지 않음 -->
         <NvlGraph
           ref="nvlGraphRef"
@@ -659,26 +533,10 @@ watch(hasGraph, (has, prev) => {
           </template>
         </div>
       </div>
-      
-      <div class="view-container" v-show="activeView === 'uml'">
-        <VueFlowClassDiagram
-          :graph-nodes="graphData?.nodes || []"
-          :graph-links="graphData?.links || []"
-          :selected-classes="selectedClasses"
-          :depth="umlDepth"
-          @class-click="handleVueFlowClassClick"
-          @class-expand="handleVueFlowClassExpand"
-          @relationship-select="handleRelationshipSelect"
-        />
-      </div>
-      
-      <div class="view-container" v-show="activeView === 'schema'">
-        <SchemaView :mode="schemaMode" />
-      </div>
-      
-      <!-- 플로팅: 우측 패널 토글 (그래프 뷰에서만) -->
-      <button 
-        v-if="!showNodePanel && (activeView === 'graph' || activeView === 'uml')"
+
+      <!-- 플로팅: 우측 패널 토글 -->
+      <button
+        v-if="!showNodePanel"
         class="panel-toggle right"
         @click="showNodePanel = !showNodePanel"
       >
@@ -688,47 +546,8 @@ watch(hasGraph, (has, prev) => {
     
     <!-- 플로팅: 좌측 상단 컨트롤 -->
     <div class="floating-controls left-top">
-      <div class="view-switcher">
-        <button
-          :class="{ active: activeView === 'schema' }"
-          @click="activeView = 'schema'"
-        >
-          스키마
-        </button>
-        <button 
-          :class="{ active: activeView === 'uml', disabled: !showUmlTab }"
-          :disabled="!showUmlTab"
-          @click="activeView = 'uml'"
-        >
-          UML
-        </button>
-        <button
-          :class="{ active: activeView === 'graph' }"
-          @click="activeView = 'graph'"
-        >
-          Graph
-        </button>
-      </div>
-
-      <!-- 스키마 하위 전환(캔버스/Mermaid) — 메인 뷰 스위처와 같은 자리·스타일로 일관 -->
-      <div class="view-switcher" v-if="activeView === 'schema'">
-        <button
-          :class="{ active: schemaMode === 'canvas' }"
-          @click="schemaMode = 'canvas'"
-        >
-          📐 캔버스
-        </button>
-        <button
-          :class="{ active: schemaMode === 'mermaid' }"
-          @click="schemaMode = 'mermaid'"
-        >
-          📊 Mermaid ER
-        </button>
-      </div>
-
-      <!-- 논리명 / 물리명 토글: 그래프·UML 뷰에서만 의미. Navigator·NvlGraph 캡션 동기화. -->
+      <!-- 논리명 / 물리명 토글. Navigator·NvlGraph 캡션 동기화. -->
       <label
-        v-if="activeView === 'graph' || activeView === 'uml'"
         class="name-toggle"
         :title="showLogicalNames ? '논리명 표시 중 — 클릭하면 물리명' : '물리명 표시 중 — 클릭하면 논리명'"
         @click.prevent="navigatorStore.toggleLogicalNames()"
@@ -741,7 +560,6 @@ watch(hasGraph, (has, prev) => {
 
       <!-- 모듈간 상호작용 보기: 누르면 모듈+함수+테이블 라벨만 표시 (다시 누르면 해제) -->
       <button
-        v-if="activeView === 'graph'"
         class="interaction-preset-btn"
         :class="{ active: isInteractionPresetActive }"
         title="모듈간 상호작용 보기 — 모듈/함수/테이블 만 표시 (다시 누르면 해제)"
@@ -752,7 +570,6 @@ watch(hasGraph, (has, prev) => {
 
       <!-- 영역 보기: 같은 컴포넌트(바운디드 컨텍스트) 노드를 색 영역으로 묶어 표시 -->
       <button
-        v-if="activeView === 'graph'"
         class="interaction-preset-btn"
         :class="{ active: groupHullBy !== null }"
         title="영역 보기 — 같은 컴포넌트끼리 색 영역으로 묶기 (다시 누르면 해제)"
@@ -763,7 +580,6 @@ watch(hasGraph, (has, prev) => {
 
       <!-- 건강 보기: 함수 노드를 건강지표(risk)별 색으로 — 위험(빨강)/주의(주황)/양호(초록) -->
       <button
-        v-if="activeView === 'graph'"
         class="interaction-preset-btn"
         :class="{ active: colorMode === 'health' }"
         title="건강 보기 — 위험한 함수를 색으로 강조 (빨강=위험/주황=주의/초록=양호, 다시 누르면 해제)"
@@ -774,7 +590,6 @@ watch(hasGraph, (has, prev) => {
 
       <!-- 테이블 전체: 모든 테이블 + 그 관계(FK 등)를 캔버스에 -->
       <button
-        v-if="activeView === 'graph'"
         class="interaction-preset-btn"
         title="모든 테이블과 그 관계(FK 등) 표시"
         @click="showAllTables"
@@ -782,50 +597,13 @@ watch(hasGraph, (has, prev) => {
         🗄️ 테이블 전체
       </button>
 
-      <template v-if="activeView === 'uml'">
-        <button class="control-btn" @click="showSearch = !showSearch" title="클래스 명 검색">
-          🔍
-        </button>
-      </template>
-      
-      <div class="search-panel" v-if="showSearch && activeView === 'uml'">
-        <input 
-          v-model="searchQuery"
-          placeholder="클래스 명 검색..."
-          @keyup.escape="showSearch = false"
-          autofocus
-        />
-        <div class="search-results" v-if="searchQuery && filteredNodes.length > 0">
-          <button 
-            v-for="node in filteredNodes.slice(0, MAX_SEARCH_RESULTS)" 
-            :key="node.id"
-            @click="handleSearchSelect(node)"
-          >
-            <span class="tag">{{ node.labels?.join(' / ') || 'Unknown' }}</span>
-            <span class="node-info">
-              <span class="node-name">{{ node.properties?.name || node.properties?.class_name || node.id }}</span>
-              <span class="node-dir" v-if="getDirectory(node)">{{ getDirectory(node) }}</span>
-            </span>
-          </button>
-        </div>
-      </div>
-      
-      <div class="selected-tags" v-if="activeView === 'uml' && selectedClasses.length > 0">
-        <span v-for="cls in selectedClasses" :key="`${cls.directory}::${cls.className}`" class="tag">
-          {{ cls.className }}
-          <button @click="removeSelectedClass(cls.className, cls.directory)">✕</button>
-        </span>
-        <button class="clear-btn" @click="clearSelectedClasses">지우기</button>
-      </div>
-      
     </div>
     
-    <!-- 플로팅: 노드 패널 -->
-    <!-- 노드 상세 패널 (그래프 뷰에서만 표시) -->
+    <!-- 플로팅: 노드 상세 패널 -->
     <Transition name="slide-right">
-      <div 
-        class="floating-panel right" 
-        v-if="showNodePanel && (activeView === 'graph' || activeView === 'uml')"
+      <div
+        class="floating-panel right"
+        v-if="showNodePanel"
         :style="{ width: `${panelWidth}px` }"
       >
         <div class="panel-header">

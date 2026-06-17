@@ -33,7 +33,7 @@ export type TemplateType =
   | 'nonCode'
   | 'fallback'
 
-const ATTACHED_LABELS = new Set(['Rule', 'Example', 'Question', 'Actor'])
+const ATTACHED_LABELS = new Set(['RULE', 'EXAMPLE', 'QUESTION', 'Actor'])
 const FUNCTION_LABELS = new Set(['PROCEDURE', 'FUNCTION', 'TRIGGER'])
 const VARIABLE_LABELS = new Set(['VARIABLE', 'CONSTANT'])
 const NON_CODE_LABELS = new Set(['ARTIFACT_CHUNK', 'CONFIG_SECTION'])
@@ -57,8 +57,8 @@ export function pickTemplate(node: GraphNode): TemplateType {
   if (labels.some(l => ATTACHED_LABELS.has(l))) return 'attached'
 
   // 2. 공통 노드
-  if (labels.includes('Table')) return 'table'
-  if (labels.includes('Column')) return 'column'
+  if (labels.includes('TABLE')) return 'table'
+  if (labels.includes('COLUMN')) return 'column'
 
   // 3. MODULE — sub-label 로 file/module 분기
   if (primary === 'MODULE') {
