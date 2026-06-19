@@ -43,7 +43,7 @@ const labelFilters = ref<string[]>([]) // 레전드 필터 (노드 라벨)
  *
  *  - 'default' : 프리셋 끔, hull 끔, 색=라벨별
  *  - 'module'  : 모듈간 상호작용 프리셋(가상 그래프)
- *  - 'area'    : 컴포넌트별 색 영역(hull, component_id 기준)
+ *  - 'area'    : 협력 군집(hull, component_id=CALL Leiden 군집 기준). ※구조적 "영역(파일/모듈)"과 별개
  *  - 'health'  : 위험도(risk_level)별 노드 색 강조
  *
  * groupHullBy / colorMode / preset 은 viewMode 에서 파생(computed)되므로
@@ -168,7 +168,7 @@ const autoPopulateHint = ref('')
 const activeViewLabel = computed(() => {
   switch (viewMode.value) {
     case 'module': return '모듈간'
-    case 'area': return '영역'
+    case 'area': return '협력 군집'
     case 'health': return '건강'
     default: return '기본'
   }
@@ -676,8 +676,8 @@ watch(hasGraph, (has, prev) => {
               <span class="vm-check">{{ viewMode === 'module' ? '✓' : '' }}</span>
             </button>
             <button class="view-menu-item" :class="{ active: viewMode === 'area' }" @click="selectViewMode('area')">
-              <span class="vm-icon">🗺️</span>
-              <span class="vm-text"><b>영역 보기</b><small>컴포넌트별 색 영역</small></span>
+              <span class="vm-icon">🧩</span>
+              <span class="vm-text"><b>협력 군집</b><small>호출(CALL)로 뭉친 루틴 묶음</small></span>
               <span class="vm-check">{{ viewMode === 'area' ? '✓' : '' }}</span>
             </button>
             <button class="view-menu-item" :class="{ active: viewMode === 'health' }" @click="selectViewMode('health')">
