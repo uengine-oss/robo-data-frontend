@@ -363,14 +363,19 @@ function handleStylePanelClose(): void {
 }
 
 /**
- * 레전드 라벨 토글 — 클릭하면 필터에 추가, 다시 클릭하면 제거.
- * 다중 선택 (OR) 가능.
+ * 오버뷰 노드 라벨 칩 클릭 = "이것만 보기"(isolate, spec 020 FR-004).
+ * 빈 캔버스여도 그 종류를 **로드**해 띄운다(loadNodesByLabels) — "필터인데 비었음" 혼란 제거.
+ * 같은 라벨을 다시 누르면 해제(캔버스 비움). 종류 다중 끄고/켜기는 별도 필터(필터 ▾)가 담당.
  */
 function handleLabelFilter(label: string): void {
-  const set = new Set(labelFilters.value)
-  if (set.has(label)) set.delete(label)
-  else set.add(label)
-  labelFilters.value = [...set]
+  const isActive = labelFilters.value.length === 1 && labelFilters.value[0] === label
+  if (isActive) {
+    labelFilters.value = []
+    canvasStore.clearCanvas()
+  } else {
+    labelFilters.value = [label]
+    canvasStore.loadNodesByLabels([label])   // 그 종류를 캔버스에 로드(빈 캔버스도)
+  }
 }
 
 /**
