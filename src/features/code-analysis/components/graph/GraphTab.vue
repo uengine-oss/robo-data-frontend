@@ -88,8 +88,8 @@ const hullLevels = computed<HullLevel[]>(() => {
       },
     ]
   }
-  if (viewMode.value === 'module') {
-    // 모듈간: 패키지 1겹으로 모듈을 감싼다(테이블은 헐 제외). external 모듈은 '__external__' 그룹.
+  if (viewMode.value === 'module' || viewMode.value === 'health') {
+    // 모듈간·건강: 패키지 1겹으로 루틴을 감싼다(테이블은 헐 제외). external 은 '__external__' 그룹.
     const hmap = canvasStore.buildHierarchyMap()
     return [{
       keyOf: (n) => {
@@ -110,7 +110,7 @@ const hullLevels = computed<HullLevel[]>(() => {
  *  - 그 외: null(분리 안 함 — 영역구조는 중첩이라 분리 불필요, 건강은 단일)
  */
 const clusterKeyOf = computed<((n: GraphNode) => string | null) | null>(() => {
-  if (viewMode.value === 'module') {
+  if (viewMode.value === 'module' || viewMode.value === 'health') {
     const hmap = canvasStore.buildHierarchyMap()
     return (n) => (n.labels || []).includes('TABLE')
       ? '__tables__'
@@ -131,7 +131,7 @@ const clusterKeyOf = computed<((n: GraphNode) => string | null) | null>(() => {
  * __ungrouped__)·component_id 가 섞이므로 보기별로 사람이 읽을 이름으로 푼다.
  */
 const clusterLabelOf = computed<((key: string) => string) | null>(() => {
-  if (viewMode.value === 'module') {
+  if (viewMode.value === 'module' || viewMode.value === 'health') {
     return (key) =>
       key === '__tables__' ? '테이블'
         : key === '__external__' ? 'external (외부 호출)'
@@ -206,8 +206,10 @@ function applyViewMode(mode: ViewMode): void {
     // FR-010: 합성 결과가 비면 빈 화면 침묵 대신 사유 안내(전략·DDL 무관, 데이터 유무로만).
     hintIfEmpty('모듈 간 상호작용을 그릴 데이터가 없습니다 — 모듈·호출(CALLS)·테이블 R/W 정보가 있어야 합니다')
   } else if (mode === 'health') {
-    // 건강: 위험도 루틴만(테이블·R/W 제거, spec 021). 위험색은 colorMode='health'.
-    ensureNodesForView('risk_level')
+    // 건강(spec 022): 위험 루틴 + 그들이 닿는 모든 관계(R/W 테이블·CALL 루틴). 위험색=colorMode.
+    labelFilters.value = []
+    canvasStore.setPreset('health-rw')
+    hintIfEmpty('위험도 정보를 가진 함수가 없습니다 — 분석을 끝까지 실행해 주세요')
   } else if (mode === 'area') {
     ensureNodesForView('component_id')
   } else if (mode === 'area-struct') {

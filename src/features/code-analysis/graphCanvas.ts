@@ -25,7 +25,7 @@ import type { GraphData, GraphLink, GraphNode } from '@/shared/types'
  *   - 'module-interaction' : MODULE/TABLE 만 노출, 둘 사이 가상 링크 합성(루틴 R/W를 모듈로 압축).
  * (spec 021: 건강 보기는 테이블 제거 → 프리셋 폐기, risk_level 루틴만 속성로드로 표시.)
  */
-export type CanvasPreset = 'module-interaction' | null
+export type CanvasPreset = 'module-interaction' | 'health-rw' | null
 
 /** 노드별 계층 조상(파일/패키지) — 중첩 헐(spec 021) 그룹핑용. */
 export interface HierarchyInfo {
@@ -76,10 +76,14 @@ export const useCanvasStore = defineStore('canvas', () => {
    *      원본 관계 타입(READS/WRITES/FROM/...) 과 op 등 속성을 그대로 보존.
    *      → 색상/캡션이 일반 그래프와 동일하게 자동 적용됨.
    */
-  function buildModuleInteractionGraph(): GraphData {
+  /**
+   * 공유 인덱스(모듈간·건강 보기 공통):
+   *  - funcToModule: 루틴 id → 소유 그릇(모듈) id  (그릇 -HAS_MEMBER-> 루틴)
+   *  - childToParent: 자식 id → 부모 id           (부모 -PARENT_OF-> 자식, 역방향)
+   * funcToModule 의 키 집합 = "루틴(호출가능 노드) id" 이기도 하다(구문→루틴 해소에 사용).
+   */
+  function buildModuleIndexes(): { funcToModule: Map<string, string>; childToParent: Map<string, string> } {
     const funcToModule = new Map<string, string>()
-    // 구문 노드 → 부모 노드(그릇 또는 상위 구문) id. PARENT_OF 는 parent→child 라
-    // child(=link.target) 로 부모(=link.source) 를 찾는다. 한 번 훑어 인덱스.
     const childToParent = new Map<string, string>()
     for (const link of projectStore.linkMap.values()) {
       if (STATEMENT_PARENT_REL.has(link.type)) {
@@ -90,11 +94,38 @@ export const useCanvasStore = defineStore('canvas', () => {
       const moduleNode = projectStore.nodeMap.get(link.source)
       const funcNode = projectStore.nodeMap.get(link.target)
       if (!moduleNode || !funcNode) continue
-      // 그릇(타입집합)→호출가능(타입집합) 정합 — 역할 라벨 폐기(spec 019).
       if (!isContainerNode(moduleNode.labels || [])) continue
       if (!(funcNode.labels || []).some(l => CALLABLE_LABELS.has(l))) continue
       funcToModule.set(funcNode.id, moduleNode.id)
     }
+    return { funcToModule, childToParent }
+  }
+
+  /**
+   * 구문 노드 → 소유 **루틴** id 해소기(건강 보기용). PARENT_OF 를 거슬러 올라가 funcToModule
+   * 키(=루틴)를 처음 만나면 그 루틴을 반환. 못 찾으면 null. memoize.
+   * (모듈간의 resolveModule 은 루틴의 *그릇*을 반환 — 여기선 루틴 자체가 필요해 별도.)
+   */
+  function makeRoutineResolver(funcToModule: Map<string, string>, childToParent: Map<string, string>) {
+    const cache = new Map<string, string | null>()
+    return function resolveRoutine(nodeId: string): string | null {
+      const path: string[] = []
+      const seen = new Set<string>()
+      let cur: string | undefined = nodeId
+      let result: string | null = null
+      while (cur !== undefined && !seen.has(cur)) {
+        const memo = cache.get(cur)
+        if (memo !== undefined) { result = memo; break }
+        if (funcToModule.has(cur)) { result = cur; break }   // cur 자체가 루틴
+        seen.add(cur); path.push(cur); cur = childToParent.get(cur)
+      }
+      for (const id of path) cache.set(id, result)
+      return result
+    }
+  }
+
+  function buildModuleInteractionGraph(): GraphData {
+    const { funcToModule, childToParent } = buildModuleIndexes()
 
     // 구문 노드(READS/WRITES 의 source) → 소유 그릇 id 해소.
     // 자신이 루틴이면 funcToModule 에 바로 있고, 중첩 구문이면 PARENT_OF 를 거슬러
@@ -238,6 +269,67 @@ export const useCanvasStore = defineStore('canvas', () => {
   }
 
   /**
+   * 건강 보기 가상 그래프(spec 022) — **위험(risk_level) 루틴 + 그들이 닿는 모든 관계**를 보여준다.
+   * 위험한 코드가 어떤 테이블을 R/W 하고 어떤 루틴을 호출하는지(호출 사용처) 한눈에.
+   *   위험 루틴 -[READS/WRITES]-> TABLE  (구문→루틴 해소 후 루틴 단위로 집계)
+   *   위험 루틴 -[CALLS]-> 루틴         (한쪽이라도 위험이면 포함)
+   * 관계가 없는 고립 위험 루틴도 포함(빠짐없이). 색은 colorMode='health'(위험도)로 칠해진다.
+   */
+  function buildHealthGraph(): GraphData {
+    const { funcToModule, childToParent } = buildModuleIndexes()
+    const resolveRoutine = makeRoutineResolver(funcToModule, childToParent)
+    const isRisk = (id: string): boolean => {
+      const r = projectStore.nodeMap.get(id)?.properties?.risk_level
+      return r === 'low' || r === 'medium' || r === 'high'
+    }
+
+    const ids = new Set<string>()
+    const links: GraphLink[] = []
+
+    // 위험 루틴의 R/W (구문 발 → 소유 루틴으로 끌어올림, 루틴×테이블×타입 dedup)
+    const seenRW = new Set<string>()
+    for (const link of projectStore.linkMap.values()) {
+      if (!FUNCTION_TO_TABLE_REL.has(link.type)) continue
+      const routine = resolveRoutine(link.source)
+      if (!routine || !isRisk(routine)) continue
+      const table = projectStore.nodeMap.get(link.target)
+      if (!table || !hasLabel(table, 'TABLE')) continue
+      const key = `${link.type} ${routine} ${table.id}`
+      if (seenRW.has(key)) continue
+      seenRW.add(key)
+      ids.add(routine); ids.add(table.id)
+      links.push({
+        id: `vh:${link.type}:${routine}->${table.id}`,
+        source: routine, target: table.id, type: link.type,
+        properties: { ...(link.properties || {}), virtual: true },
+      })
+    }
+
+    // 위험 루틴의 CALL (양끝 루틴 해소, 한쪽이라도 위험이면 포함)
+    const seenCall = new Set<string>()
+    for (const link of projectStore.linkMap.values()) {
+      if (link.type !== 'CALLS') continue
+      const from = resolveRoutine(link.source), to = resolveRoutine(link.target)
+      if (!from || !to || from === to) continue
+      if (!isRisk(from) && !isRisk(to)) continue
+      const key = `${from} ${to}`
+      if (seenCall.has(key)) continue
+      seenCall.add(key)
+      ids.add(from); ids.add(to)
+      links.push({ id: `vh:CALLS:${from}->${to}`, source: from, target: to, type: 'CALLS', properties: { virtual: true } })
+    }
+
+    // 고립 위험 루틴도 포함(관계 없어도 빠짐없이)
+    for (const node of projectStore.nodeMap.values()) {
+      if (isRisk(node.id)) ids.add(node.id)
+    }
+
+    const nodes: GraphNode[] = []
+    for (const id of ids) { const n = projectStore.nodeMap.get(id); if (n) nodes.push(n) }
+    return { nodes, links: links.filter(l => ids.has(l.source) && ids.has(l.target)) }
+  }
+
+  /**
    * 계층 조상 맵 (spec 021) — 노드별 {파일, 패키지} 그룹 키/라벨. 중첩 헐의 단일 도출처(DRY).
    * 기존 그래프 엣지로 도출 → 백엔드 무변경·재분석 0:
    *   파일→패키지 = `FILE -BELONGS_TO-> PACKAGE`
@@ -280,6 +372,9 @@ export const useCanvasStore = defineStore('canvas', () => {
   const canvasGraphData = computed<GraphData>(() => {
     if (presetMode.value === 'module-interaction') {
       return buildModuleInteractionGraph()
+    }
+    if (presetMode.value === 'health-rw') {
+      return buildHealthGraph()
     }
 
     const ids = canvasNodeIds.value
