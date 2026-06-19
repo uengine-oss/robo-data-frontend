@@ -49,8 +49,8 @@ const labelFilters = ref<string[]>([]) // 레전드 필터 (노드 라벨)
  * groupHullBy / colorMode / preset 은 viewMode 에서 파생(computed)되므로
  * 단일 진실원천은 viewMode 하나다. (NvlGraph/canvasStore 가 소비하는 prop 계약은 불변)
  */
-// 'area'=협력 군집(component_id=CALL 군집) / 'area-struct'=영역(구조, 파일 단위) / 'module'=모듈간 / 'health'=건강
-type ViewMode = 'default' | 'module' | 'area' | 'area-struct' | 'health'
+// 'area'=협력 군집 / 'area-struct'=영역(구조,파일) / 'module'=모듈간 / 'health'=건강 / 'table-flow'=테이블 흐름
+type ViewMode = 'default' | 'module' | 'area' | 'area-struct' | 'health' | 'table-flow'
 const viewMode = ref<ViewMode>('default')
 
 /** 영역(hull) 기준 — 협력군집='component_id', 영역(구조)='file_path', 그 외 null. NvlGraph :groupHullBy 소비. */
@@ -123,6 +123,9 @@ function applyViewMode(mode: ViewMode): void {
     ensureNodesForView('file_path', 'routine')
   } else if (mode === 'health') {
     ensureNodesForView('risk_level', 'routine')
+  } else if (mode === 'table-flow') {
+    autoPopulateHint.value = ''
+    canvasStore.loadTableFlow()   // 테이블 + R/W 하는 DML 구문만
   } else {
     autoPopulateHint.value = ''
   }
@@ -178,6 +181,7 @@ const activeViewLabel = computed(() => {
     case 'area': return '협력 군집'
     case 'area-struct': return '영역(구조)'
     case 'health': return '건강'
+    case 'table-flow': return '테이블 흐름'
     default: return '기본'
   }
 })
@@ -705,6 +709,11 @@ watch(hasGraph, (has, prev) => {
               <span class="vm-icon">🩺</span>
               <span class="vm-text"><b>건강 보기</b><small>위험 함수 색 강조</small></span>
               <span class="vm-check">{{ viewMode === 'health' ? '✓' : '' }}</span>
+            </button>
+            <button class="view-menu-item" :class="{ active: viewMode === 'table-flow' }" @click="selectViewMode('table-flow')">
+              <span class="vm-icon">🗄️</span>
+              <span class="vm-text"><b>테이블 흐름</b><small>테이블·DML·읽기/쓰기</small></span>
+              <span class="vm-check">{{ viewMode === 'table-flow' ? '✓' : '' }}</span>
             </button>
 
           </div>

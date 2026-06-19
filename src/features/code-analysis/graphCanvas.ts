@@ -362,6 +362,23 @@ export const useCanvasStore = defineStore('canvas', () => {
     canvasNodeIds.value = next
   }
 
+  /**
+   * 테이블 흐름 보기(spec 020 US5) — R/W에 참여하는 노드만(테이블 + 그걸 읽고/쓰는 DML 구문).
+   * READS/WRITES 엣지의 양 끝(구문 source + 테이블 target)만 캔버스에 올린다 → 엣지가 자연히 그려짐.
+   * 전체 SELECT 수백 개가 아니라 실제 테이블 접근만 → 데이터 흐름에 집중.
+   */
+  function loadTableFlow(): void {
+    presetMode.value = null
+    const ids = new Set<string>()
+    for (const link of projectStore.linkMap.values()) {
+      if (link.type === 'READS' || link.type === 'WRITES') {
+        ids.add(link.source)
+        ids.add(link.target)
+      }
+    }
+    canvasNodeIds.value = ids
+  }
+
   return {
     canvasNodeIds,
     canvasGraphData,
@@ -372,6 +389,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     removeFromCanvas,
     clearCanvas,
     loadNodesByLabels,
+    loadTableFlow,
     setCanvasNodes,
     setPreset,
     isolateLabel,
