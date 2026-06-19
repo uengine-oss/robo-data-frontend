@@ -129,6 +129,32 @@ const clusterKeyOf = computed<((n: GraphNode) => string | null) | null>(() => {
   return null
 })
 
+/**
+ * 클러스터 키 → 앵커(대표 노드) 라벨(spec 022). clusterKeyOf 와 짝 — NvlGraph 가 각 클러스터
+ * 중심에 이 라벨의 앵커 노드를 둔다. 키는 노드 id(패키지)·합성키(__tables__/__external__/
+ * __ungrouped__)·component_id 가 섞이므로 보기별로 사람이 읽을 이름으로 푼다.
+ */
+const clusterLabelOf = computed<((key: string) => string) | null>(() => {
+  if (viewMode.value === 'module') {
+    return (key) =>
+      key === '__tables__' ? '테이블'
+        : key === '__external__' ? 'external (외부 호출)'
+          : (projectStore.nodeMap.get(key)?.properties?.name as string) || '모듈'
+  }
+  if (viewMode.value === 'area') {
+    return (key) => {
+      if (key === '__ungrouped__') return '기타'
+      for (const n of projectStore.nodeMap.values()) {
+        if (String(n.properties?.component_id ?? '') === key) {
+          return (n.properties?.component_name as string) || `군집 ${key}`
+        }
+      }
+      return `군집 ${key}`
+    }
+  }
+  return null
+})
+
 /** 노드 색 기준 — health 모드면 'health', 그 외 'label'. NvlGraph :colorMode 소비. */
 const colorMode = computed<'label' | 'health'>(() => (viewMode.value === 'health' ? 'health' : 'label'))
 
@@ -695,6 +721,7 @@ watch(hasGraph, (has, prev) => {
           :labelFilters="labelFilters"
           :hullLevels="hullLevels"
           :clusterKeyOf="clusterKeyOf"
+          :clusterLabelOf="clusterLabelOf"
           :colorMode="colorMode"
           :relFilter="relFilter"
           :hiddenRelTypes="hiddenRelTypes"

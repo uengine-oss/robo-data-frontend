@@ -103,26 +103,6 @@ function convexHull(points: Pt[]): Pt[] {
   return lower.concat(upper)
 }
 
-/** 점이 폴리곤 내부인가 (ray-casting). 헐 드래그 hit-test 용. */
-function pointInPolygon(x: number, y: number, poly: Pt[]): boolean {
-  let inside = false
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y
-    const intersect = (yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi
-    if (intersect) inside = !inside
-  }
-  return inside
-}
-
-/** 점에서 선분(a-b)까지 최단거리. 2노드 캡슐 hit-test 용. */
-function distToSegment(p: Pt, a: Pt, b: Pt): number {
-  const dx = b.x - a.x, dy = b.y - a.y
-  const len2 = dx * dx + dy * dy
-  let t = len2 === 0 ? 0 : ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2
-  t = Math.max(0, Math.min(1, t))
-  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
-}
-
 // ============================================================================
 // 컴포저블
 // ============================================================================
@@ -143,10 +123,6 @@ export function useGroupHulls(
   let wakeUntil = 0         // 휠 줌 등 버튼 없는 전이를 잠깐 추종하는 마감 시각(ms)
   let downHandler: ((e: MouseEvent) => void) | null = null
   let upHandler: (() => void) | null = null
-
-  // 헐 드래그 hit-test 용 — redraw 시 그린 그룹 지오메트리/노드 스크린좌표(반지름 포함) 기록.
-  let drawnGroups: { pts: Pt[]; padding: number; nodeIds: string[] }[] = []
-  let nodeScreens: { id: string; x: number; y: number; r: number }[] = []
 
   // ── 오버레이 캔버스 부착/해제 ─────────────────────────────────────────
   function attach(): void {
@@ -236,8 +212,6 @@ export function useGroupHulls(
     const w = containerRef.value.clientWidth
     const h = containerRef.value.clientHeight
     ctx.clearRect(0, 0, w, h)
-    drawnGroups = []
-    nodeScreens = []
 
     const nvl = nvlInstance.value
     const cfg = getConfig()
@@ -263,15 +237,6 @@ export function useGroupHulls(
       }
     }
     const nodes = getNodes()
-
-    // 노드 스크린 좌표+반지름 기록(헐 드래그 시 "노드 위 클릭이면 노드드래그 양보" 판정용).
-    for (const node of nodes) {
-      const world = posById.get(node.id)
-      if (world) {
-        const s = toScreen(world.x, world.y)
-        nodeScreens.push({ id: node.id, x: s.x, y: s.y, r: (getNodeSize(node.labels || []) / 2) * scale })
-      }
-    }
 
     // 바깥 레벨(패키지)부터 안 레벨(파일)까지 순서대로 그린다 → 중첩 헐(원 안의 원).
     // 안 레벨은 바깥 레벨의 부분집합 그룹이라 같은 좌표 기준상 자연히 안쪽에 들어간다.
@@ -305,37 +270,8 @@ export function useGroupHulls(
         // 밴드 반폭 R = 고정여백 + 정확반지름×1.08(테두리/링) + 4px(AA 고정안전). 타이트하면서 절대 안삐짐.
         const effPad = level.padding + nodeR * 1.08 + 4
         drawGroup(ctx, g.pts, hashColor(key), level.labelOf(key, g.nodes), effPad, nodeR)
-        // hit-test 기록(드래그 대상 = 폴리곤 내부 가장 안쪽 그룹). 안 레벨일수록 배열 뒤 → 역순탐색.
-        drawnGroups.push({ pts: g.pts.slice(), padding: effPad, nodeIds: g.nodes.map(n => n.id) })
       }
     }
-  }
-
-  /** 점이 한 그룹의 그려진 영역 안인가 — drawGroup(Minkowski 합)과 동일: 헐에서 거리 ≤ R. */
-  function pointInGroup(x: number, y: number, g: { pts: Pt[]; padding: number }): boolean {
-    const { pts, padding: R } = g
-    if (pts.length === 0) return false
-    if (pts.length === 1) return (pts[0].x - x) ** 2 + (pts[0].y - y) ** 2 <= R * R
-    const hull = pts.length >= 3 ? convexHull(pts) : pts
-    if (pts.length >= 3 && pointInPolygon(x, y, hull)) return true
-    const edges = pts.length >= 3 ? hull.length : hull.length - 1
-    for (let i = 0; i < edges; i++) {
-      if (distToSegment({ x, y }, hull[i], hull[(i + 1) % hull.length]) <= R) return true
-    }
-    return false
-  }
-
-  /** 커서가 어떤 헐 내부면 그 그룹 멤버 node ids(가장 안쪽 우선), 아니면 null. */
-  function hitTest(x: number, y: number): string[] | null {
-    for (let i = drawnGroups.length - 1; i >= 0; i--) {
-      if (pointInGroup(x, y, drawnGroups[i])) return drawnGroups[i].nodeIds
-    }
-    return null
-  }
-
-  /** 커서가 노드 위인가 — 노드 드래그에 양보하기 위한 판정. ★줌비례 실반지름 사용(고정28px 폐기). */
-  function isNearNode(x: number, y: number): boolean {
-    return nodeScreens.some(n => (n.x - x) ** 2 + (n.y - y) ** 2 < (n.r + 6) ** 2)
   }
 
   /**
@@ -414,5 +350,5 @@ export function useGroupHulls(
     c.closePath()
   }
 
-  return { attach, detach, redraw, kick, sizeCanvas, hitTest, isNearNode }
+  return { attach, detach, redraw, kick, sizeCanvas }
 }

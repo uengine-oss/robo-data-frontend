@@ -48,6 +48,11 @@ interface Props {
    */
   clusterKeyOf?: ((node: GraphNode) => string | null) | null
   /**
+   * 클러스터 키 → 앵커(대표 노드) 라벨(spec 022). clusterKeyOf 와 짝. 각 클러스터 중심에
+   * 이 라벨의 합성 앵커 노드를 두고, 끌면 그룹째 이동한다. 미지정이면 키를 그대로 라벨로.
+   */
+  clusterLabelOf?: ((key: string) => string) | null
+  /**
    * 노드 색 기준.
    *  - 'label'(기본) → 라벨별 색(getNodeColor)
    *  - 'health'      → 건강지표(risk)별 색 — 나쁜 함수 강조. 지표 없는 노드는 회색.
@@ -105,6 +110,11 @@ const NVL_OPTIONS = {
 const CLUSTER_NODE_SPACING = 78
 const CLUSTER_GAP = 200
 
+// 그룹 앵커(대표 노드, spec 022). 합성 노드 id 접두사 + 강조색/크기(일반 노드와 구분).
+const ANCHOR_PREFIX = '__anchor__:'
+const ANCHOR_COLOR = '#f59f00'   // 주황 — 앵커 전용(라벨색과 충돌 없음)
+const ANCHOR_SIZE = 66
+
 // ============================================================================
 // Props & Emits
 // ============================================================================
@@ -113,6 +123,7 @@ const props = withDefaults(defineProps<Props>(), {
   labelFilters: () => [],
   hullLevels: () => [],
   clusterKeyOf: null,
+  clusterLabelOf: null,
   colorMode: 'label',
   relFilter: () => [],
   hiddenRelTypes: () => [],
@@ -353,7 +364,8 @@ function fitView(): void {
   const nvl = nvlInstance.value
   const host = containerRef.value
   if (!nvl || !host) return
-  const pts = nvl.getNodePositions().filter(p => nodeMap.has(p.id) && typeof p.x === 'number' && !Number.isNaN(p.x))
+  const pts = nvl.getNodePositions().filter(p =>
+    (nodeMap.has(p.id) || anchorMembers.has(p.id)) && typeof p.x === 'number' && !Number.isNaN(p.x))
   if (pts.length === 0) return
 
   const xs = pts.map(p => p.x), ys = pts.map(p => p.y)
@@ -389,7 +401,8 @@ function fitView(): void {
 function layoutClusters(): void {
   const keyOf = props.clusterKeyOf
   const nvl = nvlInstance.value
-  if (!keyOf || !nvl) return
+  if (!nvl) return
+  if (!keyOf) { clearAnchors(); return }   // 클러스터 보기 아님 → 앵커 제거, 배치 안 함
 
   // 1) 보기 그룹키로 멤버 분류 — 실제 캔버스에 그려진 노드만(nodeMap).
   const groups = new Map<string, string[]>()
@@ -400,9 +413,9 @@ function layoutClusters(): void {
     if (ids) ids.push(node.id)
     else groups.set(key, [node.id])
   }
-  if (groups.size <= 1) return
+  if (groups.size === 0) { clearAnchors(); return }
 
-  // 2) 각 그룹을 컴팩트 원반(phyllotaxis) 로컬좌표로 — index 0 은 중심(추후 앵커 자리).
+  // 2) 각 그룹을 컴팩트 원반(phyllotaxis)으로 — 중심은 앵커가 차지하므로 멤버는 그 둘레에.
   const clusters = [...groups.entries()].map(([key, ids]) => {
     const local = phyllotaxisDisc(ids.length, CLUSTER_NODE_SPACING)
     const radius = local.reduce((m, p) => Math.max(m, Math.hypot(p.x, p.y)), CLUSTER_NODE_SPACING)
@@ -410,28 +423,73 @@ function layoutClusters(): void {
   })
 
   // 3) 그룹 중심을 정사각 격자 셀에 하나씩(셀 = 최대 그룹 지름 + 간격) → 셀 분리로 겹침 0.
+  //    각 그룹 중심엔 합성 앵커 노드를 둔다(끌면 그룹째 이동, US2). 이전 앵커는 걷어내고 새로.
   const cell = clusters.reduce((m, c) => Math.max(m, 2 * c.radius), 0) + CLUSTER_GAP
   const cols = Math.ceil(Math.sqrt(clusters.length))
+  const labelOf = props.clusterLabelOf
+  rebuildAnchors(clusters.map((c, ci) => ({
+    key: c.key,
+    memberIds: c.ids,
+    label: labelOf ? labelOf(c.key) : c.key,
+    cx: (ci % cols) * cell,
+    cy: Math.floor(ci / cols) * cell,
+  })))
+
   const updates: { id: string; x: number; y: number }[] = []
   clusters.forEach((c, ci) => {
     const cx = (ci % cols) * cell
     const cy = Math.floor(ci / cols) * cell
     c.ids.forEach((id, i) => updates.push({ id, x: cx + c.local[i].x, y: cy + c.local[i].y }))
+    updates.push({ id: ANCHOR_PREFIX + c.key, x: cx, y: cy })   // 앵커 = 그룹 정중앙
   })
-
   try { nvl.setNodePositions(updates as unknown as NvlNode[], false) } catch { /* 무해 */ }
 }
 
-/** 해바라기(phyllotaxis) 원반 — n개 점을 (0,0) 주위에 균일·컴팩트하게. 결정적. index 0 = 정중앙. */
+/** 해바라기(phyllotaxis) 원반 — n개 점을 (0,0) 둘레에 균일·컴팩트하게. 중심(0,0)은 앵커 몫으로 비운다. */
 function phyllotaxisDisc(n: number, spacing: number): { x: number; y: number }[] {
   const GOLDEN = Math.PI * (3 - Math.sqrt(5))   // 황금각 ≈137.5°
   const pts: { x: number; y: number }[] = []
   for (let i = 0; i < n; i++) {
-    const r = spacing * Math.sqrt(i)
+    const r = spacing * Math.sqrt(i + 1)        // i=0 도 중심에서 떨어뜨려 앵커와 안 겹침
     const a = i * GOLDEN
     pts.push({ x: r * Math.cos(a), y: r * Math.sin(a) })
   }
   return pts
+}
+
+/**
+ * 그룹 앵커(대표 노드) 동기화(spec 022) — 클러스터마다 합성 노드 `__anchor__:<key>` 를 NVL 에
+ * 주입한다. 이전 앵커는 모두 제거 후 새로 만들어 보기 전환에도 잔재가 없다. 앵커는 props.graphData
+ * 에 없는 가상 노드라 stats/selection 에서 자연히 제외된다(소비처가 props.graphData 기준).
+ */
+function rebuildAnchors(specs: Array<{ key: string; memberIds: string[]; label: string; cx: number; cy: number }>): void {
+  const nvl = nvlInstance.value
+  if (!nvl) return
+  const oldIds = [...anchorMembers.keys()]
+  if (oldIds.length) { try { nvl.removeNodesWithIds(oldIds) } catch { /* 무해 */ } }
+  anchorMembers.clear()
+
+  const nodes: NvlNode[] = specs.map(s => {
+    const id = ANCHOR_PREFIX + s.key
+    anchorMembers.set(id, s.memberIds)
+    return {
+      id,
+      caption: s.label,
+      color: ANCHOR_COLOR,
+      size: ANCHOR_SIZE,
+      selected: false,
+      properties: { __anchor: true },
+    }
+  })
+  if (nodes.length) { try { nvl.addAndUpdateElementsInGraph(nodes, []) } catch { /* 무해 */ } }
+}
+
+/** 현재 보기에 앵커가 없도록 모두 제거(클러스터 키 없는 보기로 전환 시). */
+function clearAnchors(): void {
+  const nvl = nvlInstance.value
+  const ids = [...anchorMembers.keys()]
+  if (nvl && ids.length) { try { nvl.removeNodesWithIds(ids) } catch { /* 무해 */ } }
+  anchorMembers.clear()
 }
 
 function destroyNvl(): void {
@@ -443,6 +501,8 @@ function destroyNvl(): void {
   }
   nodeMap.clear()
   relationshipMap.clear()
+  anchorMembers.clear()
+  onGroupDragUp()   // 드래그 중 파괴 시 window 리스너 정리
   isInitializing.value = false
   visibleNodeCount.value = 0
 }
@@ -523,48 +583,54 @@ function syncGraph(): void {
 
 let contextMenuHandler: ((e: MouseEvent) => void) | null = null
 let documentClickHandler: ((e: MouseEvent) => void) | null = null
-let hullMouseDownHandler: ((e: MouseEvent) => void) | null = null
+let anchorMouseDownHandler: ((e: MouseEvent) => void) | null = null
 
-// ── 헐(영역) 드래그 (spec 021) ──────────────────────────────────────────
-// 헐 영역(노드 위 아님)을 끌면 그 그룹 멤버 노드가 통째로 같이 이동(setNodePositions).
+// ── 그룹 앵커 드래그 (spec 022) ──────────────────────────────────────────
+// 각 클러스터 중심의 합성 앵커 노드를 끌면 그 그룹 멤버 전부 + 앵커가 같은 델타로 이동한다
+// (타 그룹 불변). hit 판정은 NVL getHits(insideNode) — 노드 반지름 추측 폐기.
 // NVL 은 mousedown/move/up 으로 팬·노드드래그를 처리하므로, capture 단계 mousedown 에서
-// 헐 hit 이면 stopPropagation 으로 NVL 을 차단하고 직접 그룹 이동을 수행한다.
-let hullDrag: { ids: Set<string>; lastX: number; lastY: number } | null = null
+// 앵커 hit 이면 stopPropagation 으로 NVL(단일노드 드래그)을 차단하고 직접 그룹 이동한다.
+// 일반 노드는 가로채지 않아 NVL 기본 드래그(그 노드만 이동)가 그대로 동작한다.
+const anchorMembers = new Map<string, string[]>()   // anchorId → 멤버 노드 id[]
+let groupDrag: { ids: string[]; lastX: number; lastY: number } | null = null
 
-function onHullMouseDown(e: MouseEvent): void {
-  if (e.button !== 0 || !nvlInstance.value || !containerRef.value) return
-  const rect = containerRef.value.getBoundingClientRect()
-  const x = e.clientX - rect.left, y = e.clientY - rect.top
-  if (groupHulls.isNearNode(x, y)) return        // 노드 위 → NVL 노드 드래그에 양보
-  const ids = groupHulls.hitTest(x, y)
-  if (!ids || ids.length === 0) return            // 빈 영역 → NVL 팬에 양보
-  hullDrag = { ids: new Set(ids), lastX: e.clientX, lastY: e.clientY }
+function isAnchorId(id: string): boolean { return id.startsWith(ANCHOR_PREFIX) }
+
+function onAnchorMouseDown(e: MouseEvent): void {
+  if (e.button !== 0 || !nvlInstance.value) return
+  const hits = nvlInstance.value.getHits(e, ['node'])?.nvlTargets?.nodes ?? []
+  const anchor = hits.find(h => h.insideNode && isAnchorId(h.data.id))
+  if (!anchor) return                              // 앵커 아님 → NVL 노드/팬에 양보
+  const members = anchorMembers.get(anchor.data.id)
+  if (!members) return
+  groupDrag = { ids: [anchor.data.id, ...members], lastX: e.clientX, lastY: e.clientY }
   e.stopPropagation()
   e.preventDefault()
-  window.addEventListener('mousemove', onHullMouseMove, true)
-  window.addEventListener('mouseup', onHullMouseUp, true)
+  window.addEventListener('mousemove', onGroupDragMove, true)
+  window.addEventListener('mouseup', onGroupDragUp, true)
 }
 
-function onHullMouseMove(e: MouseEvent): void {
+function onGroupDragMove(e: MouseEvent): void {
   const nvl = nvlInstance.value
-  if (!hullDrag || !nvl) return
+  if (!groupDrag || !nvl) return
   const scale = nvl.getScale() || 1
   const dpr = window.devicePixelRatio || 1
-  const dxW = (e.clientX - hullDrag.lastX) * dpr / scale
-  const dyW = (e.clientY - hullDrag.lastY) * dpr / scale
+  const dxW = (e.clientX - groupDrag.lastX) * dpr / scale
+  const dyW = (e.clientY - groupDrag.lastY) * dpr / scale
+  const set = new Set(groupDrag.ids)
   const updates = nvl.getNodePositions()
-    .filter(p => hullDrag!.ids.has(p.id))
+    .filter(p => set.has(p.id))
     .map(p => ({ id: p.id, x: p.x + dxW, y: p.y + dyW }))
   if (updates.length) nvl.setNodePositions(updates as unknown as NvlNode[], false)
-  hullDrag.lastX = e.clientX
-  hullDrag.lastY = e.clientY
+  groupDrag.lastX = e.clientX
+  groupDrag.lastY = e.clientY
   groupHulls.redraw()
 }
 
-function onHullMouseUp(): void {
-  hullDrag = null
-  window.removeEventListener('mousemove', onHullMouseMove, true)
-  window.removeEventListener('mouseup', onHullMouseUp, true)
+function onGroupDragUp(): void {
+  groupDrag = null
+  window.removeEventListener('mousemove', onGroupDragMove, true)
+  window.removeEventListener('mouseup', onGroupDragUp, true)
 }
 
 function setupInteractions(): void {
@@ -628,9 +694,9 @@ function setupInteractions(): void {
   containerRef.value.addEventListener('contextmenu', contextMenuHandler)
   document.addEventListener('click', documentClickHandler as EventListener)
 
-  // 헐 드래그 — capture 단계로 NVL(canvas) 보다 먼저 mousedown 가로채기.
-  hullMouseDownHandler = onHullMouseDown
-  containerRef.value.addEventListener('mousedown', hullMouseDownHandler, true)
+  // 앵커 드래그 — capture 단계로 NVL(canvas) 보다 먼저 mousedown 가로채기(앵커일 때만 차단).
+  anchorMouseDownHandler = onAnchorMouseDown
+  containerRef.value.addEventListener('mousedown', anchorMouseDownHandler, true)
 
   new DragNodeInteraction(nvl)
 
@@ -775,10 +841,10 @@ onUnmounted(() => {
   if (documentClickHandler) {
     document.removeEventListener('click', documentClickHandler)
   }
-  if (containerRef.value && hullMouseDownHandler) {
-    containerRef.value.removeEventListener('mousedown', hullMouseDownHandler, true)
+  if (containerRef.value && anchorMouseDownHandler) {
+    containerRef.value.removeEventListener('mousedown', anchorMouseDownHandler, true)
   }
-  onHullMouseUp()   // 혹시 드래그 중 unmount 시 window 리스너 정리
+  onGroupDragUp()   // 혹시 드래그 중 unmount 시 window 리스너 정리
   destroyNvl()
 })
 
