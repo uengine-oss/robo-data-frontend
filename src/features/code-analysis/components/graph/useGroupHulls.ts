@@ -25,6 +25,7 @@
 import type { NVL } from '@neo4j-nvl/base'
 import type { Ref } from 'vue'
 import type { GraphNode } from '@/shared/types'
+import { getNodeSize } from '@/shared/config/graphStyles'
 
 // ============================================================================
 // 타입
@@ -39,8 +40,10 @@ export interface HullLevel {
   keyOf: (node: GraphNode) => string | null
   /** 그룹 키 → 표시 라벨. */
   labelOf: (key: string, nodes: GraphNode[]) => string
-  /** 영역 바깥 여백(px, 스크린 기준). 바깥 레벨일수록 크게. */
+  /** 영역 바깥 여백(px, 스크린 기준 고정). 노드 반지름은 useGroupHulls 가 줌비례로 별도 가산. */
   padding: number
+  /** 이 레벨에서 헐을 그릴 최소 그룹 노드 수(기본 1). 예: 파일레벨 2 = 1노드 파일 링 생략. */
+  minSize?: number
 }
 
 export interface GroupHullConfig {
@@ -100,19 +103,6 @@ function convexHull(points: Pt[]): Pt[] {
   return lower.concat(upper)
 }
 
-/** 무게중심(단순 평균 — 항상 유한)에서 바깥으로 padding 만큼 밀어 여백을 준다. */
-function expandFromCentroid(hull: Pt[], padding: number): Pt[] {
-  const c = hull.reduce((a, p) => ({ x: a.x + p.x, y: a.y + p.y }), { x: 0, y: 0 })
-  c.x /= hull.length
-  c.y /= hull.length
-  return hull.map(p => {
-    const dx = p.x - c.x
-    const dy = p.y - c.y
-    const len = Math.hypot(dx, dy) || 1
-    return { x: p.x + (dx / len) * padding, y: p.y + (dy / len) * padding }
-  })
-}
-
 /** 점이 폴리곤 내부인가 (ray-casting). 헐 드래그 hit-test 용. */
 function pointInPolygon(x: number, y: number, poly: Pt[]): boolean {
   let inside = false
@@ -150,9 +140,9 @@ export function useGroupHulls(
   let resizeObserver: ResizeObserver | null = null
   let rafId = 0
 
-  // 헐 드래그 hit-test 용 — redraw 시 그린 그룹 지오메트리/노드 스크린좌표 기록.
+  // 헐 드래그 hit-test 용 — redraw 시 그린 그룹 지오메트리/노드 스크린좌표(반지름 포함) 기록.
   let drawnGroups: { pts: Pt[]; padding: number; nodeIds: string[] }[] = []
-  let nodeScreens: { id: string; x: number; y: number }[] = []
+  let nodeScreens: { id: string; x: number; y: number; r: number }[] = []
 
   // ── 오버레이 캔버스 부착/해제 ─────────────────────────────────────────
   function attach(): void {
@@ -249,10 +239,13 @@ export function useGroupHulls(
     }
     const nodes = getNodes()
 
-    // 노드 스크린 좌표 기록(헐 드래그 시 "노드 위 클릭이면 노드드래그 양보" 판정용).
+    // 노드 스크린 좌표+반지름 기록(헐 드래그 시 "노드 위 클릭이면 노드드래그 양보" 판정용).
     for (const node of nodes) {
       const world = posById.get(node.id)
-      if (world) { const s = toScreen(world.x, world.y); nodeScreens.push({ id: node.id, x: s.x, y: s.y }) }
+      if (world) {
+        const s = toScreen(world.x, world.y)
+        nodeScreens.push({ id: node.id, x: s.x, y: s.y, r: (getNodeSize(node.labels || []) / 2) * scale })
+      }
     }
 
     // 바깥 레벨(패키지)부터 안 레벨(파일)까지 순서대로 그린다 → 중첩 헐(원 안의 원).
@@ -270,25 +263,41 @@ export function useGroupHulls(
         else groups.set(key, { pts: [screen], nodes: [node] })
       }
       // 큰 그룹 먼저 → 작은 그룹이 위에 보이도록
+      const minSize = level.minSize ?? 1
       const ordered = [...groups.entries()].sort((a, b) => b[1].pts.length - a[1].pts.length)
       for (const [key, g] of ordered) {
-        drawGroup(ctx, g.pts, hashColor(key), level.labelOf(key, g.nodes), level.padding)
+        if (g.nodes.length < minSize) continue   // 1노드 파일 등은 링 생략(도배 방지)
+        // ★줌해도 절대 안 삐져나오게: padding = 고정여백(level.padding) + 노드 스크린 반지름.
+        // 헐은 노드 중심 기준으로 그려지므로, 노드 원(반지름=size/2·줌비례)을 감싸려면
+        // 그 반지름만큼 더 확장해야 한다(줌인하면 노드가 커지니 반지름도 scale 비례로 증가).
+        // ★NVL 노드 화면반지름 = (size/2)·scale (dpr 미분할 — 노드 렌더는 CSS px 에서 scale 만 적용).
+        //  과거 /dpr 로 나눠 레티나(dpr=2)서 밴드가 노드의 절반이던 버그 제거. 위치(toScreen)는 /dpr 유지.
+        let nodeR = 0
+        for (const n of g.nodes) {
+          const r = (getNodeSize(n.labels || []) / 2) * scale
+          if (r > nodeR) nodeR = r
+        }
+        // 밴드 반폭 R = 고정여백 + 정확반지름×1.08(테두리/링) + 4px(AA 고정안전). 타이트하면서 절대 안삐짐.
+        const effPad = level.padding + nodeR * 1.08 + 4
+        drawGroup(ctx, g.pts, hashColor(key), level.labelOf(key, g.nodes), effPad, nodeR)
         // hit-test 기록(드래그 대상 = 폴리곤 내부 가장 안쪽 그룹). 안 레벨일수록 배열 뒤 → 역순탐색.
-        drawnGroups.push({ pts: g.pts.slice(), padding: level.padding, nodeIds: g.nodes.map(n => n.id) })
+        drawnGroups.push({ pts: g.pts.slice(), padding: effPad, nodeIds: g.nodes.map(n => n.id) })
       }
     }
   }
 
-  /** 점이 한 그룹의 그려진 영역 안인가 — drawGroup 의 1/2/≥3노드 기하 그대로 재현. */
+  /** 점이 한 그룹의 그려진 영역 안인가 — drawGroup(Minkowski 합)과 동일: 헐에서 거리 ≤ R. */
   function pointInGroup(x: number, y: number, g: { pts: Pt[]; padding: number }): boolean {
-    const { pts, padding } = g
+    const { pts, padding: R } = g
     if (pts.length === 0) return false
-    if (pts.length === 1) {
-      const r = padding + 18
-      return (pts[0].x - x) ** 2 + (pts[0].y - y) ** 2 <= r * r
+    if (pts.length === 1) return (pts[0].x - x) ** 2 + (pts[0].y - y) ** 2 <= R * R
+    const hull = pts.length >= 3 ? convexHull(pts) : pts
+    if (pts.length >= 3 && pointInPolygon(x, y, hull)) return true
+    const edges = pts.length >= 3 ? hull.length : hull.length - 1
+    for (let i = 0; i < edges; i++) {
+      if (distToSegment({ x, y }, hull[i], hull[(i + 1) % hull.length]) <= R) return true
     }
-    if (pts.length === 2) return distToSegment({ x, y }, pts[0], pts[1]) <= padding + 14
-    return pointInPolygon(x, y, expandFromCentroid(convexHull(pts), padding))
+    return false
   }
 
   /** 커서가 어떤 헐 내부면 그 그룹 멤버 node ids(가장 안쪽 우선), 아니면 null. */
@@ -299,86 +308,73 @@ export function useGroupHulls(
     return null
   }
 
-  /** 커서가 노드 위(근처)인가 — 노드 드래그에 양보하기 위한 판정. */
+  /** 커서가 노드 위인가 — 노드 드래그에 양보하기 위한 판정. ★줌비례 실반지름 사용(고정28px 폐기). */
   function isNearNode(x: number, y: number): boolean {
-    const R = 28
-    return nodeScreens.some(n => (n.x - x) ** 2 + (n.y - y) ** 2 < R * R)
+    return nodeScreens.some(n => (n.x - x) ** 2 + (n.y - y) ** 2 < (n.r + 6) ** 2)
   }
 
-  function drawGroup(c: CanvasRenderingContext2D, pts: Pt[], color: string, label: string, padding: number): void {
+  /**
+   * 그룹 영역 그리기 — ★Minkowski 합 방식(절대 안 삐져나옴).
+   * 노드 중심들의 볼록헐(폴리곤)을 **두께 2R 둥근 선**으로 칠하면, 그 영역 = 모든 노드 중심에서
+   * 반경 R 이내. R = padding(=고정여백+노드반지름·줌비례)이라 노드 원이 수학적으로 반드시 내부.
+   * (과거의 무게중심 방사확장 + 베지어 코너깎임이 길쭉배치·꼭짓점 노드를 밖으로 흘리던 근본결함 제거.)
+   */
+  function drawGroup(c: CanvasRenderingContext2D, pts: Pt[], color: string, label: string, R: number, nodeR: number): void {
     if (pts.length === 0) return
-    const fill = hexToRgba(color, 0.13)
-    const stroke = hexToRgba(color, 0.85)
+    // 반투명 채움 — 둥근 굵은선(2R)의 바깥 가장자리가 자연히 크리스프 경계가 된다.
+    const fill = hexToRgba(color, 0.16)
 
     c.save()
     c.lineJoin = 'round'
-    c.lineWidth = 2
+    c.lineCap = 'round'
 
-    let anchor: Pt
+    let labelX: number, topCenterY: number
+
     if (pts.length === 1) {
       const p = pts[0]
-      c.beginPath()
-      c.arc(p.x, p.y, padding + 18, 0, Math.PI * 2)
-      c.fillStyle = fill
-      c.fill()
-      c.strokeStyle = stroke
-      c.stroke()
-      anchor = { x: p.x, y: p.y - (padding + 18) }
-    } else if (pts.length === 2) {
-      // 캡슐: 굵은 둥근 선으로 두 점을 감싼다
-      c.beginPath()
-      c.moveTo(pts[0].x, pts[0].y)
-      c.lineTo(pts[1].x, pts[1].y)
-      c.strokeStyle = fill
-      c.lineCap = 'round'
-      c.lineWidth = (padding + 14) * 2
-      c.stroke()
-      c.beginPath()
-      c.moveTo(pts[0].x, pts[0].y)
-      c.lineTo(pts[1].x, pts[1].y)
-      c.strokeStyle = stroke
-      c.lineWidth = 2
-      c.stroke()
-      anchor = { x: (pts[0].x + pts[1].x) / 2, y: Math.min(pts[0].y, pts[1].y) - (padding + 14) }
+      c.beginPath(); c.arc(p.x, p.y, R, 0, Math.PI * 2); c.fillStyle = fill; c.fill()
+      labelX = p.x; topCenterY = p.y
     } else {
-      const hull = expandFromCentroid(convexHull(pts), padding)
-      const n = hull.length
-      const mid = (a: Pt, b: Pt) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
-      // 변(중점)을 지나며 정점을 제어점으로 → 둥근 blob
-      c.beginPath()
-      const start = mid(hull[n - 1], hull[0])
-      c.moveTo(start.x, start.y)
-      for (let i = 0; i < n; i++) {
-        const cur = hull[i]
-        const m = mid(cur, hull[(i + 1) % n])
-        c.quadraticCurveTo(cur.x, cur.y, m.x, m.y)
+      const hull = pts.length >= 3 ? convexHull(pts) : pts
+      const closed = hull.length >= 3
+      const buildPath = () => {
+        c.beginPath()
+        c.moveTo(hull[0].x, hull[0].y)
+        for (let i = 1; i < hull.length; i++) c.lineTo(hull[i].x, hull[i].y)
+        if (closed) c.closePath()
       }
-      c.closePath()
-      c.fillStyle = fill
-      c.fill()
-      c.strokeStyle = stroke
-      c.stroke()
-      const top = hull.reduce((t, p) => (p.y < t.y ? p : t), hull[0])
-      anchor = { x: top.x, y: top.y - 4 }
+      // 채움 밴드(두께 2R 둥근선 = Minkowski 합) + 내부 채움(닫힌 폴리곤 가운데).
+      buildPath(); c.strokeStyle = fill; c.lineWidth = 2 * R; c.stroke()
+      if (closed) { buildPath(); c.fillStyle = fill; c.fill() }
+      labelX = hull.reduce((s, p) => s + p.x, 0) / hull.length
+      topCenterY = Math.min(...hull.map(p => p.y))
     }
 
-    drawLabel(c, anchor.x, anchor.y, label, color)
     c.restore()
+    // 라벨 = 영역 맨 위 바깥·가로중앙. 밴드 위(R)에 두되, 극단 줌서 너무 멀어지지 않게 상한(노드 바로 위 수준)으로 캡.
+    const labelGap = Math.min(R, nodeR * 1.3 + 26)
+    drawLabel(c, labelX, topCenterY - labelGap - 6, label, color)
   }
 
   function drawLabel(c: CanvasRenderingContext2D, x: number, y: number, text: string, color: string): void {
     c.save()
-    c.font = '600 12px system-ui, sans-serif'
+    // 폰트는 고정 px(줌해도 크기 그대로 = 항상 읽기 좋음). 가독성 위해 14px 볼드 + 진한 알약 + 그림자.
+    c.font = '700 14px system-ui, sans-serif'
     c.textAlign = 'center'
-    c.textBaseline = 'bottom'
+    c.textBaseline = 'middle'
     const tw = c.measureText(text).width
-    const px = 8
-    const ph = 16
-    c.fillStyle = hexToRgba(color, 0.92)
-    roundRect(c, x - tw / 2 - px, y - ph, tw + px * 2, ph, 8)
+    const px = 9
+    const ph = 20
+    const cy = y - ph / 2
+    c.shadowColor = 'rgba(0,0,0,0.45)'
+    c.shadowBlur = 6
+    c.shadowOffsetY = 1
+    c.fillStyle = hexToRgba(color, 0.96)
+    roundRect(c, x - tw / 2 - px, cy - ph / 2, tw + px * 2, ph, 9)
     c.fill()
+    c.shadowColor = 'transparent'
     c.fillStyle = '#ffffff'
-    c.fillText(text, x, y - 2)
+    c.fillText(text, x, cy + 0.5)
     c.restore()
   }
 

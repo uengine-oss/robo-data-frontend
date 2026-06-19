@@ -588,9 +588,13 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
    */
   function applyProcessingEvent(event: AnalyzeEvent): void {
     if (event.status !== 'done') return
+    const rawKind = event.entity_kind ?? ''
+    // ★'Batch'는 CodeNode 와 같은 '코드'로 매핑되는데 카운터가 종류별로 분리돼 있어,
+    //  코드 진행 카운트가 두 갈래(Batch/CodeNode)로 따로 올라가 "리셋"처럼 보였다(사용자 피드백).
+    //  코드 진행은 CodeNode(코드노드 1개 단위)로만 집계해 단조 증가 1줄로 만든다.
+    if (rawKind === 'Batch') return
     const id = event.entity_id ?? ''
     if (!id) return
-    const rawKind = event.entity_kind ?? ''
     // 같은 처리 대상(코드노드 1개)이 여러 sub_action(done) 으로 와도 1회만 센다.
     let seen = processedIds.get(rawKind)
     if (!seen) { seen = new Set(); processedIds.set(rawKind, seen) }
@@ -601,7 +605,10 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     // 첫 건은 바로(시작 신호), 이후엔 throttle 건마다 한 줄(플러드 방지).
     if (count !== 1 && count % throttle !== 0) return
     const kind = PROCESSING_KIND_KO[rawKind] ?? '항목'
-    addMessage('message', `🧠 ${kind} ${count}개를 이해했어요 — 계속 진행 중이에요`)
+    // "무엇을" 처리 중인지 보이게 — 현재 대상의 사람이름(스트림으로 nodeMap 에 이미 적재됨).
+    const name = (nodeMap.value.get(id)?.properties?.name as string) || ''
+    const ctx = name ? ` (${name})` : ''
+    addMessage('message', `🧠 ${kind} ${count}개째 분석 중${ctx}`)
   }
 
   /** node_event/relationship_event(라이브 그래프) → 그래프 병합. */

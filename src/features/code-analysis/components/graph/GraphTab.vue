@@ -76,15 +76,16 @@ const hullLevels = computed<HullLevel[]>(() => {
   if (viewMode.value === 'area-struct') {
     const hmap = canvasStore.buildHierarchyMap()
     return [
-      { // 바깥 = 패키지(스키마/폴더)
+      { // 바깥 = 패키지(스키마/폴더). padding=고정여백만(노드반지름은 useGroupHulls가 줌비례로 더함)
         keyOf: (n) => hmap.get(n.id)?.packageKey ?? null,
         labelOf: (_k, nodes) => hmap.get(nodes[0].id)?.packageLabel || _k,
-        padding: 52,
+        padding: 26,
       },
-      { // 안 = 파일(모듈)
+      { // 안 = 파일(모듈). 노드 2개 이상인 파일만 헐 표시(1개짜리는 링 생략 → 도배 방지)
         keyOf: (n) => hmap.get(n.id)?.fileKey ?? null,
         labelOf: (_k, nodes) => hmap.get(nodes[0].id)?.fileLabel || _k,
-        padding: 22,
+        padding: 8,
+        minSize: 2,
       },
     ]
   }
@@ -100,7 +101,7 @@ const hullLevels = computed<HullLevel[]>(() => {
         const first = nodes.find(n => !(n.labels || []).includes('TABLE')) ?? nodes[0]
         return hmap.get(first.id)?.packageLabel || _k
       },
-      padding: 46,
+      padding: 22,
     }]
   }
   return []
@@ -108,11 +109,8 @@ const hullLevels = computed<HullLevel[]>(() => {
 /** 노드 색 기준 — health 모드면 'health', 그 외 'label'. NvlGraph :colorMode 소비. */
 const colorMode = computed<'label' | 'health'>(() => (viewMode.value === 'health' ? 'health' : 'label'))
 
-/** 관계 필터 — 읽기만(READS)/쓰기만(WRITES) 보기. 보기모드와 별개 축(동시 적용 가능). 같은 걸 다시 누르면 해제. */
+/** 관계 필터(READS/WRITES whitelist) — spec 021서 읽기만/쓰기만 UI 제거. NvlGraph prop 계약은 유지(빈 배열=필터 없음). */
 const relFilter = ref<string[]>([])
-function toggleRelFilter(type: string): void {
-  relFilter.value = relFilter.value.length === 1 && relFilter.value[0] === type ? [] : [type]
-}
 
 /**
  * 필터 ▾ (spec 020) — 관계 종류 끄고/켜기(blacklist). 보기모드와 직교(동시 적용).
@@ -799,18 +797,6 @@ watch(hasGraph, (has, prev) => {
             >
               <span class="vm-icon">{{ isRelTypeShown(rt.type) ? '☑' : '☐' }}</span>
               <span class="vm-text"><b>{{ rt.type }}</b><small>{{ rt.count }}개</small></span>
-            </button>
-            <div class="vm-divider"></div>
-            <div class="vm-section-label">빠른 보기 <span class="vm-section-hint">하나만</span></div>
-            <button class="view-menu-item" :class="{ active: relFilter.length === 1 && relFilter[0] === 'READS' }" @click="toggleRelFilter('READS')">
-              <span class="vm-icon">👁</span>
-              <span class="vm-text"><b>읽기만</b><small>테이블 조회(READS)</small></span>
-              <span class="vm-check">{{ relFilter.length === 1 && relFilter[0] === 'READS' ? '✓' : '' }}</span>
-            </button>
-            <button class="view-menu-item" :class="{ active: relFilter.length === 1 && relFilter[0] === 'WRITES' }" @click="toggleRelFilter('WRITES')">
-              <span class="vm-icon">✏️</span>
-              <span class="vm-text"><b>쓰기만</b><small>테이블 변경(WRITES)</small></span>
-              <span class="vm-check">{{ relFilter.length === 1 && relFilter[0] === 'WRITES' ? '✓' : '' }}</span>
             </button>
           </div>
         </Transition>
