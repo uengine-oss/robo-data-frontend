@@ -106,6 +106,29 @@ const hullLevels = computed<HullLevel[]>(() => {
   }
   return []
 })
+
+/**
+ * 클러스터 분리 키(spec 022) — NvlGraph :clusterKeyOf 소비. 노드를 이 키로 묶어 화면에서 떨어뜨림.
+ *  - 모듈간: 모듈=패키지(external은 '__external__'), 테이블='__tables__' → 3 클러스터 분리(뒤섞임 해소)
+ *  - 협력군집: component_id(미보유='__ungrouped__') → 군집/기타 분리
+ *  - 그 외: null(분리 안 함 — 영역구조는 중첩이라 분리 불필요, 건강은 단일)
+ */
+const clusterKeyOf = computed<((n: GraphNode) => string | null) | null>(() => {
+  if (viewMode.value === 'module') {
+    const hmap = canvasStore.buildHierarchyMap()
+    return (n) => (n.labels || []).includes('TABLE')
+      ? '__tables__'
+      : (hmap.get(n.id)?.packageKey ?? null)
+  }
+  if (viewMode.value === 'area') {
+    return (n) => {
+      const v = n.properties?.component_id
+      return (v === undefined || v === null || v === '') ? '__ungrouped__' : String(v)
+    }
+  }
+  return null
+})
+
 /** 노드 색 기준 — health 모드면 'health', 그 외 'label'. NvlGraph :colorMode 소비. */
 const colorMode = computed<'label' | 'health'>(() => (viewMode.value === 'health' ? 'health' : 'label'))
 
@@ -671,6 +694,7 @@ watch(hasGraph, (has, prev) => {
           :selectedRelationshipId="selectedRelationship?.id"
           :labelFilters="labelFilters"
           :hullLevels="hullLevels"
+          :clusterKeyOf="clusterKeyOf"
           :colorMode="colorMode"
           :relFilter="relFilter"
           :hiddenRelTypes="hiddenRelTypes"

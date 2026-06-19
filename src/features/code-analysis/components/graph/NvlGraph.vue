@@ -42,6 +42,12 @@ interface Props {
    */
   hullLevels?: HullLevel[]
   /**
+   * 클러스터 분리 키(spec 022) — 노드를 이 키로 묶어 **각 그룹을 화면의 떨어진 구역으로 평행이동**
+   * 해서 영역 겹침을 없앤다. force 레이아웃으로 그룹 내부 구조는 살리고 그룹째 이동만 한다.
+   * null/미지정이면 분리 안 함. 그룹키/closure는 GraphTab이 주입.
+   */
+  clusterKeyOf?: ((node: GraphNode) => string | null) | null
+  /**
    * 노드 색 기준.
    *  - 'label'(기본) → 라벨별 색(getNodeColor)
    *  - 'health'      → 건강지표(risk)별 색 — 나쁜 함수 강조. 지표 없는 노드는 회색.
@@ -97,6 +103,7 @@ const NVL_OPTIONS = {
 const props = withDefaults(defineProps<Props>(), {
   labelFilters: () => [],
   hullLevels: () => [],
+  clusterKeyOf: null,
   colorMode: 'label',
   relFilter: () => [],
   hiddenRelTypes: () => []
@@ -310,6 +317,7 @@ async function initNvl(): Promise<void> {
       onLayoutStep: () => groupHulls.redraw(),
       onLayoutDone: () => {
         isInitializing.value = false
+        separateClusters()   // 그룹별로 떨어뜨려 겹침 제거(spec 022) — fit 전에 위치 확정
         fitView()
         groupHulls.redraw()
       }
@@ -333,6 +341,63 @@ function fitView(): void {
   const ids = [...nodeMap.keys()]
   if (ids.length === 0) return
   try { nvl.fit(ids) } catch { /* 레이아웃 준비 전 호출은 무해 */ }
+}
+
+/**
+ * 클러스터 분리(spec 022) — clusterKeyOf 로 노드를 그룹지어, **각 그룹을 통째로 떨어진
+ * 위치(큰 원 둘레)로 평행이동**한다. force 레이아웃이 만든 그룹 내부 구조는 보존하고
+ * 그룹간 거리만 벌려 영역(헐) 겹침을 없앤다. 2그룹 미만이면 분리할 게 없어 무동작.
+ */
+function separateClusters(): void {
+  const keyOf = props.clusterKeyOf
+  const nvl = nvlInstance.value
+  if (!keyOf || !nvl) return
+  const positions = nvl.getNodePositions()
+  if (positions.length === 0) return
+
+  const nodeById = new Map(props.graphData.nodes.map(n => [n.id, n]))
+  const posById = new Map(positions.map(p => [p.id, { x: p.x, y: p.y }]))
+
+  // 그룹별 멤버 + 무게중심
+  const groups = new Map<string, { ids: string[]; cx: number; cy: number }>()
+  for (const p of positions) {
+    const node = nodeById.get(p.id)
+    if (!node || typeof p.x !== 'number' || Number.isNaN(p.x)) continue
+    const k = keyOf(node) ?? '__ungrouped__'
+    let g = groups.get(k)
+    if (!g) { g = { ids: [], cx: 0, cy: 0 }; groups.set(k, g) }
+    g.ids.push(p.id); g.cx += p.x; g.cy += p.y
+  }
+  if (groups.size <= 1) return   // 분리 불필요
+
+  // 각 그룹 반경 → 둘레 간격 확보한 ring 반지름
+  const arr = [...groups.values()].map(g => {
+    g.cx /= g.ids.length; g.cy /= g.ids.length
+    let r = 60
+    for (const id of g.ids) {
+      const p = posById.get(id)!
+      const d = Math.hypot(p.x - g.cx, p.y - g.cy)
+      if (d > r) r = d
+    }
+    return { ids: g.ids, cx: g.cx, cy: g.cy, r }
+  })
+  const GAP = 160
+  const circumference = arr.reduce((s, g) => s + 2 * g.r + GAP, 0)
+  const ringR = Math.max(circumference / (2 * Math.PI), 320)
+
+  // 각 그룹을 ring 위 목표 지점으로 평행이동(내부 구조 보존)
+  const updates: { id: string; x: number; y: number }[] = []
+  arr.forEach((g, i) => {
+    const angle = (i / arr.length) * Math.PI * 2 - Math.PI / 2
+    const tx = Math.cos(angle) * ringR
+    const ty = Math.sin(angle) * ringR
+    const dx = tx - g.cx, dy = ty - g.cy
+    for (const id of g.ids) {
+      const p = posById.get(id)!
+      updates.push({ id, x: p.x + dx, y: p.y + dy })
+    }
+  })
+  try { nvl.setNodePositions(updates as unknown as NvlNode[], false) } catch { /* 무해 */ }
 }
 
 function destroyNvl(): void {
@@ -406,9 +471,12 @@ function syncGraph(): void {
     nvlInstance.value.addAndUpdateElementsInGraph(newNvlNodes, newNvlRels)
   }
 
-  // 대량 주입(보기모드 전환 등)이면 카메라를 노드에 맞춤. 드래그-드롭 단건(1~2개)은
-  // 기존 화면을 유지하려고 재맞춤하지 않는다.
-  if (newNvlNodes.length >= 3) fitView()
+  // 대량 주입(보기모드 전환 등)이면 클러스터 분리 후 카메라 맞춤. 드래그-드롭 단건(1~2개)은
+  // 기존 화면을 유지하려고 재배치/재맞춤하지 않는다(수동 배치 보존).
+  if (newNvlNodes.length >= 3) {
+    separateClusters()
+    fitView()
+  }
 
   updateStats()
   visibleNodeCount.value = nodeMap.size
@@ -714,6 +782,11 @@ watch([() => props.selectedNodeId, () => props.selectedRelationshipId], ([newNod
 
 watch(() => props.hullLevels, () => {
   groupHulls.redraw()
+})
+
+// 클러스터 키가 바뀌면(보기 전환) 기존 위치를 새 그룹 기준으로 다시 분리.
+watch(() => props.clusterKeyOf, () => {
+  if (nvlInstance.value) { separateClusters(); fitView(); groupHulls.redraw() }
 })
 
 // 색 기준(라벨↔건강) 전환 시 이미 그려진 노드 색을 즉시 갱신
