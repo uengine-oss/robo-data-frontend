@@ -495,6 +495,8 @@ function clearAnchors(): void {
 function destroyNvl(): void {
   closeContextMenu()
   groupHulls.detach()
+  for (const it of interactions) { try { it.destroy() } catch { /* 무해 */ } }
+  interactions = []
   if (nvlInstance.value) {
     nvlInstance.value.destroy()
     nvlInstance.value = null
@@ -584,6 +586,9 @@ function syncGraph(): void {
 let contextMenuHandler: ((e: MouseEvent) => void) | null = null
 let documentClickHandler: ((e: MouseEvent) => void) | null = null
 let anchorMouseDownHandler: ((e: MouseEvent) => void) | null = null
+// NVL 인터랙션 핸들러(Click/Drag/Pan/Zoom) — 각자 컨테이너에 리스너를 단다. destroyNvl 에서
+// destroy() 해야 init/destroy 반복(필터 토글) 시 리스너가 누적되지 않는다.
+let interactions: Array<{ destroy(): void }> = []
 
 // ── 그룹 앵커 드래그 (spec 022) ──────────────────────────────────────────
 // 각 클러스터 중심의 합성 앵커 노드를 끌면 그 그룹 멤버 전부 + 앵커가 같은 델타로 이동한다
@@ -638,6 +643,7 @@ function setupInteractions(): void {
 
   const nvl = nvlInstance.value
   const click = new ClickInteraction(nvl)
+  interactions.push(click)
 
   // 더블클릭 탐지 (NVL 은 별도 onNodeDoubleClick 훅이 없으므로 onNodeClick 에서 판정)
   let lastClickNodeId: string | null = null
@@ -698,7 +704,7 @@ function setupInteractions(): void {
   anchorMouseDownHandler = onAnchorMouseDown
   containerRef.value.addEventListener('mousedown', anchorMouseDownHandler, true)
 
-  new DragNodeInteraction(nvl)
+  interactions.push(new DragNodeInteraction(nvl))
 
   // 캔버스 줌/이동 시 영역 오버레이를 같은 변환으로 다시 그림 (NVL 과 desync 방지).
   // NVL 은 setPan/setZoom 을 콜백 호출 전에 실행하고 콜백 반환값은 무시하므로
@@ -706,8 +712,10 @@ function setupInteractions(): void {
   // 팬/줌은 버튼 없는 전이(휠)도 있어 idle 루프가 안 돈다 → kick 으로 잠깐 깨워 추종.
   const panInteraction = new PanInteraction(nvl)
   panInteraction.updateCallback('onPan', () => groupHulls.kick())
+  interactions.push(panInteraction)
   const zoomInteraction = new ZoomInteraction(nvl)
   zoomInteraction.updateCallback('onZoom', () => groupHulls.kick())
+  interactions.push(zoomInteraction)
 }
 
 function closeContextMenu(): void {
