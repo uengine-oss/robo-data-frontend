@@ -157,6 +157,23 @@ export const useCanvasStore = defineStore('canvas', () => {
       tableIds.add(tableId)
     }
 
+    // ── 모듈↔모듈 CALL 집계 (spec 020 US3) — 루틴간 호출을 모듈로 끌어올림(R/W와 동일 방식) ──
+    // CALLS 끝점(caller/callee)을 resolveModule로 소유 모듈에 해소 → 다른 모듈이면 가상 링크.
+    interface CallVirtual { fromMod: string; toMod: string; viaFuncIds: Set<string> }
+    const callVirtuals = new Map<string, CallVirtual>()
+    for (const link of projectStore.linkMap.values()) {
+      if (link.type !== 'CALLS') continue
+      const fromMod = resolveModule(link.source)
+      const toMod = resolveModule(link.target)
+      if (!fromMod || !toMod || fromMod === toMod) continue
+      const key = `${fromMod} ${toMod}`
+      let cv = callVirtuals.get(key)
+      if (!cv) { cv = { fromMod, toMod, viaFuncIds: new Set() }; callVirtuals.set(key, cv) }
+      cv.viaFuncIds.add(link.source)
+      moduleIds.add(fromMod)
+      moduleIds.add(toMod)
+    }
+
     // 노드 — dedupe(같은 id 중복 push 금지). 실제 push된 id 집합으로 링크 끝점을 가드한다.
     const nodes: GraphNode[] = []
     const presentIds = new Set<string>()
@@ -194,6 +211,18 @@ export const useCanvasStore = defineStore('canvas', () => {
           via_count: info.viaFuncIds.size,
           via_sample: viaNames,
         },
+      })
+    }
+
+    // 모듈↔모듈 CALL 가상 링크 (양 끝 모듈 노드 존재 시).
+    for (const cv of callVirtuals.values()) {
+      if (!presentIds.has(cv.fromMod) || !presentIds.has(cv.toMod)) continue
+      links.push({
+        id: `virtual:CALLS:${cv.fromMod}->${cv.toMod}`,
+        source: cv.fromMod,
+        target: cv.toMod,
+        type: 'CALLS',
+        properties: { virtual: true, via_count: cv.viaFuncIds.size },
       })
     }
 
