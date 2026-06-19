@@ -313,10 +313,18 @@ const overallRelationshipStats = computed(() => {
   return stats
 })
 
-/** 필터 ▾ 관계 토글 목록 — {type, count} 배열(Map v-for 타입추론 회피). */
-const relTypeList = computed(() =>
-  Array.from(overallRelationshipStats.value, ([type, stat]) => ({ type, count: stat.count })),
-)
+/**
+ * 필터 ▾ 관계 토글 목록 — **현재 캔버스(NvlGraph)에 그려진 관계** 기준(전체 그래프 X).
+ * 캔버스에 있는 것만 끄고/켜는 게 직관적(없는 관계는 목록에 안 뜸). 숨긴 타입도 canvasGraphData엔
+ * 남아 있어(렌더 단계 필터라) 목록에 계속 보여 다시 켤 수 있다.
+ */
+const relTypeList = computed(() => {
+  const counts = new Map<string, number>()
+  for (const link of canvasGraphData.value?.links ?? []) {
+    counts.set(link.type, (counts.get(link.type) ?? 0) + 1)
+  }
+  return Array.from(counts, ([type, count]) => ({ type, count }))
+})
 
 // 캔버스(NvlGraph)에 표시 중인 그래프가 있는지
 const hasGraph = computed(() => canvasGraphData.value.nodes.length > 0)
