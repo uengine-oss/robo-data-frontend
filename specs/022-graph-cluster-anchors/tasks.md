@@ -4,27 +4,33 @@
 
 `F/` = `robo-data-frontend/src/`
 
-## Phase 1: 클러스터 분리 배치 + 위치 고정 (US1·US3) 🎯
-- [ ] T101 `F/.../graphCanvas.ts` — `buildClusterPlan(viewMode)`: 보기별 그룹키로 멤버 분류 + 클러스터 center 분산배치(겹침 최소) + 멤버 초기좌표. 계층맵 캐시(linkMap 버전).
-- [ ] T102 `F/.../NvlGraph.vue` — NVL `layout:'free'`(or 초기 force 1회 후 고정) + `setNodePositions(plan)`. 노드 추가/선택 시 재레이아웃 0 확인.
-- [ ] T103 `F/.../GraphTab.vue` — 보기 진입 시 clusterPlan 구성·전달. (구) preset/force 분기 정리.
-- [ ] T104 검증 — 모듈/테이블/external 클러스터 분리·헐 안겹침, 노드선택 후 위치고정. Playwright(dpr2). 커밋.
+## Phase 1: 클러스터 분리 배치 + 위치 고정 (US1·US3) 🎯 ✅
+- [x] T101 클러스터 배치 — **NvlGraph.layoutClusters** 로 구현(plan 의 graphCanvas.buildClusterPlan 대신: NVL world 좌표가 필요해 NvlGraph 가 적소). 그룹키로 멤버 분류 → 각 그룹 phyllotaxis 원반 → 정사각 격자 셀 분리배치.
+- [x] T102 `NvlGraph.vue` — forceDirected 결과를 무시하고 `setNodePositions(plan, false)` 로 결정적 배치 → 재레이아웃 0. onLayoutDone 비의존(rAF 1회 마감).
+- [x] T103 `GraphTab.vue` — clusterKeyOf 그대로 사용(보기별 그룹키). 사후 평행이동 separateClusters 폐기.
+- [x] T104 검증 — 모듈간 3클러스터(package/external/tables) 분리·헐 안겹침·노드선택 후 위치고정 Playwright(dpr2) 통과. + **fitView 가 우측 패널 가림(rightInset) 빼고 프레임**(범위 외 발견 버그 동시 수정). 커밋 ccfc1ac.
 
-## Phase 2: 그룹 앵커 + 앵커 드래그 (US2)
-- [ ] T201 `F/.../graphCanvas.ts` — 앵커 합성(실노드 없을 때, id `__anchor__:`) + anchorToMembers 맵. 앵커를 클러스터 center에.
-- [ ] T202 `F/.../NvlGraph.vue` — 앵커 드래그: mousedown→`getCanvasNodesAt`→앵커면 그룹 델타이동(setNodePositions). 일반노드=NVL 기본. **(구) 헐-드래그(mousedown capture/hitTest/isNearNode) 제거.**
-- [ ] T203 검증 — 앵커 끌면 그룹+헐만 이동·타그룹 불변, 노드 개별드래그 OK. 스샷. 커밋.
+## Phase 2: 그룹 앵커 + 앵커 드래그 (US2) ✅
+- [x] T201 앵커 = **합성 노드 `__anchor__:<key>` 균일 사용**(실 PACKAGE/SCHEMA 대신 — 모듈 가상그래프엔 실노드가 없고 FR-002 가 합성 허용). clusterLabelOf 로 라벨. anchorMembers 맵 = anchor→멤버.
+- [x] T202 `NvlGraph.vue` — 앵커 드래그: capture mousedown→**`getHits(evt,['node']).nvlTargets.nodes` 의 insideNode**(★`getCanvasNodesAt` 는 이 NVL 버전에 없음 — 실측 정정) → 앵커면 그룹 델타이동, 일반노드=NVL 기본. **구 헐-area 드래그(hitTest/isNearNode/pointInGroup 등) 전면 제거.**
+- [x] T203 검증 — 테이블 앵커 드래그 → 멤버 16 이동·타그룹 12 고정, 보기전환 앵커 잔재0. 커밋 234fc30.
 
-## Phase 3: 성능·누수 정리 (FR-007)
-- [ ] T301 `F/.../useGroupHulls.ts` — rAF **상호작용 중에만**(idle 정지): pan/zoom/drag 시작 시 loop, 종료 시 stop. 이벤트 기반 redraw 병행.
-- [ ] T302 캐싱 — convexHull/계층맵 위치·데이터 변할 때만 재계산(매 프레임 X).
-- [ ] T303 누수 감사 — rAF·window 리스너·heartbeat·NVL cleanup 전수(뷰전환·unmount 잔존 0). DevTools/코드 점검.
-- [ ] T304 검증 — idle CPU 확인, 회귀(드롭·1-hop·필터·스트림·색상0). 커밋.
+## Phase 3: 성능·누수 정리 (FR-007) ✅
+- [x] T301 `useGroupHulls.ts` — rAF **상호작용(mousedown~up·휠 kick) 중에만**, idle 자기정지. 검증: idle 헐 redraw 0회(과거 ~120). 커밋 ca07633.
+- [x] T302 캐싱 — idle 정지로 매 프레임 재계산 자체가 사라짐(convexHull/keyOf 호출 0/frame). 그룹 n≤16 라 별도 캐시 불필요(드로 비용이 지배적, idle-stop 으로 해소).
+- [x] T303 누수 감사 — **NVL 인터랙션 핸들러(Click/Drag/Pan/Zoom) destroy 누락 = 실누수 수정**(커밋 8813c5c). setTimeout(200ms 일회)·heartbeat(짝맞음)·rAF/리스너(detach/onGroupDragUp)·NVL destroy = 무해 확인.
+- [x] T304 검증 — 필터토글 다회 init/destroy 에러0, 회귀(드롭·1-hop·필터·색상) 통과.
 
-## Phase 4: 정리 (데드코드·스펙·todo)
-- [ ] T401 데드코드 제거 — 폐기 헐-드래그·relFilter 잔재·미사용 함수 전수 grep.
-- [ ] T402 021 spec에 "레이아웃/드래그 supersede by 022" 명시. memory todo 현실화.
-- [ ] T403 최종 vue-tsc 0 + 회귀 0 확인. 커밋·푸시.
+## Phase 4: 정리 (데드코드·스펙·todo) ✅
+- [x] T401 데드코드 제거 — 폐기 헐-area 드래그 전부(NvlGraph onHull* + useGroupHulls hitTest/isNearNode/pointInGroup/pointInPolygon/distToSegment/drawnGroups/nodeScreens). grep 잔재0.
+- [x] T402 021 spec supersede 배너(708dc53). memory todo/manual 갱신(getHits 정정).
+- [x] T403 vue-tsc 내 파일 0 + 회귀 0. 커밋·푸시.
+
+## 구현 노트 (plan 대비 결정/divergence)
+- **클러스터 배치 위치 = NvlGraph**(plan 의 graphCanvas.buildClusterPlan 아님): NVL world 좌표·setNodePositions 가 NvlGraph 에 있어 적소. graphCanvas 무변경.
+- **앵커 = 합성 균일**(`__anchor__:`): 모듈 가상그래프에 실 PACKAGE/SCHEMA 노드가 없어 일관되게 합성. FR-002 허용. 추후 실노드로 교체 가능.
+- **hit-test = `getHits(insideNode)`**: spec 가 적은 `getCanvasNodesAt` 는 이 NVL 버전에 없음(실측). getHits 가 MouseEvent 직접 받아 좌표변환 불필요.
+- **fitView rightInset**(범위 외 추가): 분리 후 우측 클러스터가 노드패널 뒤로 숨던 버그 → 패널 폭 빼고 프레임. NVL fit() 에 inset 옵션이 없어 수동 setZoomAndPan.
 
 ## 순서·원칙
 ```
