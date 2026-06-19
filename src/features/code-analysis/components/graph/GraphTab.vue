@@ -64,6 +64,24 @@ function toggleRelFilter(type: string): void {
 }
 
 /**
+ * 필터 ▾ (spec 020) — 관계 종류 끄고/켜기(blacklist). 보기모드와 직교(동시 적용).
+ * 빈 집합 = 전체 표시. 종류를 끄면 그 관계만 화면에서 사라진다(데이터는 유지).
+ */
+const hiddenRelTypes = ref<string[]>([])
+const showFilterMenu = ref(false)
+function toggleRelTypeHidden(type: string): void {
+  const set = new Set(hiddenRelTypes.value)
+  if (set.has(type)) set.delete(type)
+  else set.add(type)
+  hiddenRelTypes.value = [...set]
+}
+function isRelTypeShown(type: string): boolean {
+  return !hiddenRelTypes.value.includes(type)
+}
+/** 활성 필터 개수(숨긴 관계 수) — 필터 ▾ 버튼 배지. */
+const hiddenRelCount = computed(() => hiddenRelTypes.value.length)
+
+/**
  * 보기 ▾ 드롭다운 (spec 018) — 보기 모드(모듈간/영역/건강)를 상단 일렬 버튼 대신 한 곳에서 고른다.
  * 단일선택: 한 항목을 누르면 그 모드로, 이미 그 모드면 default 로 토글오프. 한 번에 하나만 켜짐.
  * 관계필터는 별개 축이라 보기모드와 무관하게 독립 토글.
@@ -294,6 +312,11 @@ const overallRelationshipStats = computed(() => {
   }
   return stats
 })
+
+/** 필터 ▾ 관계 토글 목록 — {type, count} 배열(Map v-for 타입추론 회피). */
+const relTypeList = computed(() =>
+  Array.from(overallRelationshipStats.value, ([type, stat]) => ({ type, count: stat.count })),
+)
 
 // 캔버스(NvlGraph)에 표시 중인 그래프가 있는지
 const hasGraph = computed(() => canvasGraphData.value.nodes.length > 0)
@@ -575,6 +598,7 @@ watch(hasGraph, (has, prev) => {
           :groupHullBy="groupHullBy"
           :colorMode="colorMode"
           :relFilter="relFilter"
+          :hiddenRelTypes="hiddenRelTypes"
           @node-select="handleNodeSelect"
           @relationship-select="handleRelationshipSelect"
           @node-delete="handleNodeRemoveFromCanvas"
@@ -662,8 +686,37 @@ watch(hasGraph, (has, prev) => {
               <span class="vm-check">{{ viewMode === 'health' ? '✓' : '' }}</span>
             </button>
 
+          </div>
+        </Transition>
+      </div>
+
+      <!-- 필터 ▾ (spec 020): 보기 ▾ 옆 — 관계 종류 끄고/켜기 + 읽기만/쓰기만. 보기모드와 직교. -->
+      <div class="view-menu-wrap">
+        <button
+          class="view-menu-btn"
+          :class="{ active: hiddenRelCount > 0 || relFilter.length > 0 }"
+          title="필터 — 관계 종류 끄고/켜기"
+          @click="showFilterMenu = !showFilterMenu"
+        >
+          <span class="vm-eye">⛛</span>
+          <span class="vm-btn-label">필터<strong v-if="hiddenRelCount > 0"> {{ hiddenRelCount }}</strong></span>
+          <span class="vm-caret">▾</span>
+        </button>
+        <Transition name="fade">
+          <div v-if="showFilterMenu" class="view-menu-pop">
+            <div class="vm-section-label">관계 끄고/켜기 <span class="vm-section-hint">체크 = 표시</span></div>
+            <button
+              v-for="rt in relTypeList"
+              :key="rt.type"
+              class="view-menu-item"
+              :class="{ active: !isRelTypeShown(rt.type) }"
+              @click="toggleRelTypeHidden(rt.type)"
+            >
+              <span class="vm-icon">{{ isRelTypeShown(rt.type) ? '☑' : '☐' }}</span>
+              <span class="vm-text"><b>{{ rt.type }}</b><small>{{ rt.count }}개</small></span>
+            </button>
             <div class="vm-divider"></div>
-            <div class="vm-section-label">관계 필터 <span class="vm-section-hint">보기모드와 별개 · 하나만</span></div>
+            <div class="vm-section-label">빠른 보기 <span class="vm-section-hint">하나만</span></div>
             <button class="view-menu-item" :class="{ active: relFilter.length === 1 && relFilter[0] === 'READS' }" @click="toggleRelFilter('READS')">
               <span class="vm-icon">👁</span>
               <span class="vm-text"><b>읽기만</b><small>테이블 조회(READS)</small></span>
@@ -678,8 +731,9 @@ watch(hasGraph, (has, prev) => {
         </Transition>
       </div>
     </div>
-    <!-- 보기 메뉴 바깥 클릭 시 닫힘 (다중토글이라 항목 클릭으론 안 닫음) -->
+    <!-- 메뉴 바깥 클릭 시 닫힘 -->
     <div v-if="showViewMenu" class="view-menu-backdrop" @click="showViewMenu = false" />
+    <div v-if="showFilterMenu" class="view-menu-backdrop" @click="showFilterMenu = false" />
     
     <!-- 플로팅: 노드 상세 패널 -->
     <Transition name="slide-right">

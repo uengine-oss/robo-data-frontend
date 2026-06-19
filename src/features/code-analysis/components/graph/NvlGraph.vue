@@ -51,6 +51,8 @@ interface Props {
   colorMode?: 'label' | 'health'
   /** 표시할 관계 타입 필터 (비어있으면 전체). 예: ['READS'] = 읽기만, ['WRITES'] = 쓰기만. */
   relFilter?: string[]
+  /** 숨길 관계 타입 (끄고/켜기 blacklist, spec 020). 여기 든 타입은 그리지 않는다. */
+  hiddenRelTypes?: string[]
 }
 
 interface NodeStat {
@@ -98,7 +100,8 @@ const props = withDefaults(defineProps<Props>(), {
   labelFilters: () => [],
   groupHullBy: null,
   colorMode: 'label',
-  relFilter: () => []
+  relFilter: () => [],
+  hiddenRelTypes: () => []
 })
 
 // 건강지표(risk)별 노드 색 — getNodeColor(공유 유틸)는 건드리지 않고 여기서만 override.
@@ -234,8 +237,9 @@ function matchesLabelFilter(node: GraphNode): boolean {
   return labels.some(label => targets.includes(label.toUpperCase()))
 }
 
-/** 관계 타입 필터 — 비어있으면 전체, 아니면 그 타입만(읽기만/쓰기만 보기). */
+/** 관계 타입 필터 — 숨김(blacklist) 우선, 그다음 표시 whitelist(읽기만/쓰기만). */
 function matchesRelFilter(link: GraphLink): boolean {
+  if (props.hiddenRelTypes && props.hiddenRelTypes.includes(link.type)) return false
   if (!props.relFilter || props.relFilter.length === 0) return true
   return props.relFilter.includes(link.type)
 }
@@ -637,8 +641,8 @@ watch(() => props.labelFilters, () => {
   syncGraph()
 }, { deep: true })
 
-// 관계 필터(읽기만/쓰기만)는 엣지 기준이라 노드중심 syncGraph 로 못 지움 → 재빌드.
-watch(() => props.relFilter, () => {
+// 관계 필터(읽기만/쓰기만 + 숨김)는 엣지 기준이라 노드중심 syncGraph 로 못 지움 → 재빌드.
+watch([() => props.relFilter, () => props.hiddenRelTypes], () => {
   if (nvlInstance.value) { destroyNvl(); initNvl() }
 }, { deep: true })
 
