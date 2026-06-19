@@ -120,8 +120,7 @@ const CLUSTER_GAP = 180
 // 그룹 앵커(대표 노드, spec 022). 합성 노드 id 접두사 + 강조색/크기(일반 노드와 구분).
 const ANCHOR_PREFIX = '__anchor__:'
 const ANCHOR_COLOR = '#f59f00'   // 주황 — 앵커 전용(라벨색과 충돌 없음)
-const ANCHOR_SIZE = 46           // 멤버보다 약간 크게(허브)
-const ANCHOR_CAPTION_SIZE = 17   // 앵커 이름은 크게(헐 라벨 대체)
+const ANCHOR_SIZE = 46           // 멤버보다 약간 크게(허브). 이름은 캡션으로 표시(헐 라벨 대체)
 // 앵커↔멤버 헬퍼 링크(허브 스포크) — 배경에 가깝게 옅게 칠해 거의 안 보이게.
 const ANCHOR_LINK_PREFIX = '__anchorlink__:'
 const ANCHOR_LINK_COLOR = '#32353c'
@@ -498,7 +497,7 @@ function rebuildAnchors(specs: Array<{ key: string; memberIds: string[]; label: 
     anchorMembers.set(id, s.memberIds)
     nodes.push({
       id, caption: s.label, color: ANCHOR_COLOR, size: ANCHOR_SIZE,
-      captionSize: ANCHOR_CAPTION_SIZE, selected: false, properties: { __anchor: true },
+      selected: false, properties: { __anchor: true },
     } as unknown as NvlNode)
     for (const m of s.memberIds) {
       const lid = ANCHOR_LINK_PREFIX + id + '->' + m

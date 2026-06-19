@@ -68,8 +68,7 @@ const hullLevels = computed<HullLevel[]>(() => {
         const v = n.properties?.component_id
         return v === undefined || v === null || v === '' ? null : String(v)
       },
-      labelOf: (key, nodes) =>
-        String(nodes.find(n => n.properties?.component_name)?.properties?.component_name ?? key),
+      labelOf: () => '',   // 이름은 앵커 캡션이 보여줌(헐 라벨 중복 제거)
       padding: 30,
     }]
   }
@@ -97,10 +96,7 @@ const hullLevels = computed<HullLevel[]>(() => {
         if ((n.labels || []).includes('TABLE')) return null   // 테이블은 헐에 안 넣음
         return hmap.get(n.id)?.packageKey ?? null
       },
-      labelOf: (_k, nodes) => {
-        const first = nodes.find(n => !(n.labels || []).includes('TABLE')) ?? nodes[0]
-        return hmap.get(first.id)?.packageLabel || _k
-      },
+      labelOf: () => '',   // 이름은 앵커 캡션이 보여줌(헐 라벨 중복 제거)
       padding: 22,
     }]
   }

@@ -312,6 +312,9 @@ export function useGroupHulls(
     }
 
     c.restore()
+    // 라벨 빈 문자열이면 생략 — 앵커(대표 노드) 캡션이 그룹 이름을 보여주는 보기(모듈간/협력군집)는
+    // 헐 라벨이 중복이라 호출측이 ''로 끈다.
+    if (!label) return
     // 라벨 = 영역 맨 위 바깥·가로중앙. 밴드 위(R)에 두되, 극단 줌서 너무 멀어지지 않게 상한(노드 바로 위 수준)으로 캡.
     const labelGap = Math.min(R, nodeR * 1.3 + 26)
     drawLabel(c, labelX, topCenterY - labelGap - 6, label, color)
