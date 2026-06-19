@@ -49,11 +49,15 @@ const labelFilters = ref<string[]>([]) // 레전드 필터 (노드 라벨)
  * groupHullBy / colorMode / preset 은 viewMode 에서 파생(computed)되므로
  * 단일 진실원천은 viewMode 하나다. (NvlGraph/canvasStore 가 소비하는 prop 계약은 불변)
  */
-type ViewMode = 'default' | 'module' | 'area' | 'health'
+// 'area'=협력 군집(component_id=CALL 군집) / 'area-struct'=영역(구조, 파일 단위) / 'module'=모듈간 / 'health'=건강
+type ViewMode = 'default' | 'module' | 'area' | 'area-struct' | 'health'
 const viewMode = ref<ViewMode>('default')
 
-/** 영역(hull) 기준 — area 모드일 때만 'component_id', 그 외 null. NvlGraph :groupHullBy 소비. */
-const groupHullBy = computed<string | null>(() => (viewMode.value === 'area' ? 'component_id' : null))
+/** 영역(hull) 기준 — 협력군집='component_id', 영역(구조)='file_path', 그 외 null. NvlGraph :groupHullBy 소비. */
+const groupHullBy = computed<string | null>(() =>
+  viewMode.value === 'area' ? 'component_id'
+    : viewMode.value === 'area-struct' ? 'file_path'
+      : null)
 /** 노드 색 기준 — health 모드면 'health', 그 외 'label'. NvlGraph :colorMode 소비. */
 const colorMode = computed<'label' | 'health'>(() => (viewMode.value === 'health' ? 'health' : 'label'))
 
@@ -114,6 +118,9 @@ function applyViewMode(mode: ViewMode): void {
 
   if (mode === 'area') {
     ensureNodesForView('component_id')
+  } else if (mode === 'area-struct') {
+    // 파일 단위 구조 영역 — 루틴(호출가능)만 파일별로 묶어 깔끔하게(구문 전부는 너무 빽빽).
+    ensureNodesForView('file_path', 'routine')
   } else if (mode === 'health') {
     ensureNodesForView('risk_level', 'routine')
   } else {
@@ -169,6 +176,7 @@ const activeViewLabel = computed(() => {
   switch (viewMode.value) {
     case 'module': return '모듈간'
     case 'area': return '협력 군집'
+    case 'area-struct': return '영역(구조)'
     case 'health': return '건강'
     default: return '기본'
   }
@@ -682,6 +690,11 @@ watch(hasGraph, (has, prev) => {
               <span class="vm-icon">🔗</span>
               <span class="vm-text"><b>모듈간 상호작용</b><small>모듈·함수·테이블만</small></span>
               <span class="vm-check">{{ viewMode === 'module' ? '✓' : '' }}</span>
+            </button>
+            <button class="view-menu-item" :class="{ active: viewMode === 'area-struct' }" @click="selectViewMode('area-struct')">
+              <span class="vm-icon">🗺️</span>
+              <span class="vm-text"><b>영역(구조)</b><small>파일 단위 묶음 · 파일명 표시</small></span>
+              <span class="vm-check">{{ viewMode === 'area-struct' ? '✓' : '' }}</span>
             </button>
             <button class="view-menu-item" :class="{ active: viewMode === 'area' }" @click="selectViewMode('area')">
               <span class="vm-icon">🧩</span>

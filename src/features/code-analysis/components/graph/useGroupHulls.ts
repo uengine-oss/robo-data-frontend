@@ -136,11 +136,14 @@ export function useGroupHulls(
     return String(v)
   }
 
-  /** 그룹 라벨 텍스트 — component_id 그룹이면 component_name 우선. */
+  /** 그룹 라벨 텍스트 — component_id면 component_name, file_path면 파일명(basename). */
   function groupLabelOf(groupBy: string, key: string, nodes: GraphNode[]): string {
     if (groupBy === 'component_id') {
       const named = nodes.find(n => n.properties?.component_name)?.properties?.component_name
       if (named) return String(named)
+    }
+    if (groupBy === 'file_path') {
+      return key.replace(/\\/g, '/').split('/').filter(Boolean).pop() || key
     }
     return key
   }
