@@ -30,16 +30,22 @@ import type { GraphNode } from '@/shared/types'
 // 타입
 // ============================================================================
 
+/**
+ * 한 겹의 영역(헐) 레벨. 여러 겹을 바깥→안 순서로 쌓아 **중첩 헐(원 안의 원)** 을 만든다(spec 021).
+ * 예: [패키지 레벨(padding 큼), 파일 레벨(padding 작음)] → 패키지 원 안에 파일 원들.
+ */
+export interface HullLevel {
+  /** 노드 → 이 레벨의 그룹 키. null 이면 이 레벨에서 제외. */
+  keyOf: (node: GraphNode) => string | null
+  /** 그룹 키 → 표시 라벨. */
+  labelOf: (key: string, nodes: GraphNode[]) => string
+  /** 영역 바깥 여백(px, 스크린 기준). 바깥 레벨일수록 크게. */
+  padding: number
+}
+
 export interface GroupHullConfig {
-  /**
-   * 그룹 기준.
-   *  - 'label'        → 노드의 대표 라벨(labels 마지막 의미 라벨)로 묶음
-   *  - 그 외 문자열   → properties[key] 값으로 묶음 (기본 'component_id')
-   *  - null           → 영역 표시 끔
-   */
-  groupBy: string | null
-  /** 영역 바깥 여백(px, 스크린 기준). 기본 30 */
-  padding?: number
+  /** 바깥→안 순서의 헐 레벨들. 빈 배열이면 영역 표시 끔. */
+  levels: HullLevel[]
 }
 
 interface Pt { x: number; y: number }
@@ -107,6 +113,26 @@ function expandFromCentroid(hull: Pt[], padding: number): Pt[] {
   })
 }
 
+/** 점이 폴리곤 내부인가 (ray-casting). 헐 드래그 hit-test 용. */
+function pointInPolygon(x: number, y: number, poly: Pt[]): boolean {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y
+    const intersect = (yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi
+    if (intersect) inside = !inside
+  }
+  return inside
+}
+
+/** 점에서 선분(a-b)까지 최단거리. 2노드 캡슐 hit-test 용. */
+function distToSegment(p: Pt, a: Pt, b: Pt): number {
+  const dx = b.x - a.x, dy = b.y - a.y
+  const len2 = dx * dx + dy * dy
+  let t = len2 === 0 ? 0 : ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2
+  t = Math.max(0, Math.min(1, t))
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
+}
+
 // ============================================================================
 // 컴포저블
 // ============================================================================
@@ -124,29 +150,9 @@ export function useGroupHulls(
   let resizeObserver: ResizeObserver | null = null
   let rafId = 0
 
-  // 노드 → 그룹 키
-  function groupKeyOf(node: GraphNode, groupBy: string): string | null {
-    if (groupBy === 'label') {
-      const labels = node.labels || []
-      const named = [...labels].reverse().find(l => l && l !== '_Placeholder')
-      return named ?? null
-    }
-    const v = node.properties?.[groupBy]
-    if (v === undefined || v === null || v === '') return null
-    return String(v)
-  }
-
-  /** 그룹 라벨 텍스트 — component_id면 component_name, file_path면 파일명(basename). */
-  function groupLabelOf(groupBy: string, key: string, nodes: GraphNode[]): string {
-    if (groupBy === 'component_id') {
-      const named = nodes.find(n => n.properties?.component_name)?.properties?.component_name
-      if (named) return String(named)
-    }
-    if (groupBy === 'file_path') {
-      return key.replace(/\\/g, '/').split('/').filter(Boolean).pop() || key
-    }
-    return key
-  }
+  // 헐 드래그 hit-test 용 — redraw 시 그린 그룹 지오메트리/노드 스크린좌표 기록.
+  let drawnGroups: { pts: Pt[]; padding: number; nodeIds: string[] }[] = []
+  let nodeScreens: { id: string; x: number; y: number }[] = []
 
   // ── 오버레이 캔버스 부착/해제 ─────────────────────────────────────────
   function attach(): void {
@@ -215,12 +221,13 @@ export function useGroupHulls(
     const w = containerRef.value.clientWidth
     const h = containerRef.value.clientHeight
     ctx.clearRect(0, 0, w, h)
+    drawnGroups = []
+    nodeScreens = []
 
     const nvl = nvlInstance.value
     const cfg = getConfig()
-    if (!nvl || !cfg.groupBy) return
+    if (!nvl || !cfg.levels || cfg.levels.length === 0) return
 
-    const padding = cfg.padding ?? 30
     const scale = nvl.getScale()
     const pan = nvl.getPan()
     const dpr = window.devicePixelRatio || 1
@@ -233,34 +240,69 @@ export function useGroupHulls(
       y: (wy - pan.y) * scale / dpr + cy,
     })
 
-    // id → world 좌표
+    // id → world 좌표 (레벨 공통)
     const posById = new Map<string, Pt>()
     for (const p of nvl.getNodePositions()) {
       if (typeof p.x === 'number' && typeof p.y === 'number' && !Number.isNaN(p.x)) {
         posById.set(p.id, { x: p.x, y: p.y })
       }
     }
+    const nodes = getNodes()
 
-    // 그룹 키 → { 스크린 점들, 원본 노드들 }
-    const groups = new Map<string, { pts: Pt[]; nodes: GraphNode[] }>()
-    for (const node of getNodes()) {
-      const key = groupKeyOf(node, cfg.groupBy)
-      if (key === null) continue
+    // 노드 스크린 좌표 기록(헐 드래그 시 "노드 위 클릭이면 노드드래그 양보" 판정용).
+    for (const node of nodes) {
       const world = posById.get(node.id)
-      if (!world) continue
-      const screen = toScreen(world.x, world.y)
-      const g = groups.get(key)
-      if (g) { g.pts.push(screen); g.nodes.push(node) }
-      else groups.set(key, { pts: [screen], nodes: [node] })
+      if (world) { const s = toScreen(world.x, world.y); nodeScreens.push({ id: node.id, x: s.x, y: s.y }) }
     }
 
-    // 큰 그룹 먼저 → 작은 그룹이 위에 보이도록
-    const ordered = [...groups.entries()].sort((a, b) => b[1].pts.length - a[1].pts.length)
-    for (const [key, g] of ordered) {
-      const color = hashColor(key)
-      const label = groupLabelOf(cfg.groupBy, key, g.nodes)
-      drawGroup(ctx, g.pts, color, label, padding)
+    // 바깥 레벨(패키지)부터 안 레벨(파일)까지 순서대로 그린다 → 중첩 헐(원 안의 원).
+    // 안 레벨은 바깥 레벨의 부분집합 그룹이라 같은 좌표 기준상 자연히 안쪽에 들어간다.
+    for (const level of cfg.levels) {
+      const groups = new Map<string, { pts: Pt[]; nodes: GraphNode[] }>()
+      for (const node of nodes) {
+        const key = level.keyOf(node)
+        if (key === null) continue
+        const world = posById.get(node.id)
+        if (!world) continue
+        const screen = toScreen(world.x, world.y)
+        const g = groups.get(key)
+        if (g) { g.pts.push(screen); g.nodes.push(node) }
+        else groups.set(key, { pts: [screen], nodes: [node] })
+      }
+      // 큰 그룹 먼저 → 작은 그룹이 위에 보이도록
+      const ordered = [...groups.entries()].sort((a, b) => b[1].pts.length - a[1].pts.length)
+      for (const [key, g] of ordered) {
+        drawGroup(ctx, g.pts, hashColor(key), level.labelOf(key, g.nodes), level.padding)
+        // hit-test 기록(드래그 대상 = 폴리곤 내부 가장 안쪽 그룹). 안 레벨일수록 배열 뒤 → 역순탐색.
+        drawnGroups.push({ pts: g.pts.slice(), padding: level.padding, nodeIds: g.nodes.map(n => n.id) })
+      }
     }
+  }
+
+  /** 점이 한 그룹의 그려진 영역 안인가 — drawGroup 의 1/2/≥3노드 기하 그대로 재현. */
+  function pointInGroup(x: number, y: number, g: { pts: Pt[]; padding: number }): boolean {
+    const { pts, padding } = g
+    if (pts.length === 0) return false
+    if (pts.length === 1) {
+      const r = padding + 18
+      return (pts[0].x - x) ** 2 + (pts[0].y - y) ** 2 <= r * r
+    }
+    if (pts.length === 2) return distToSegment({ x, y }, pts[0], pts[1]) <= padding + 14
+    return pointInPolygon(x, y, expandFromCentroid(convexHull(pts), padding))
+  }
+
+  /** 커서가 어떤 헐 내부면 그 그룹 멤버 node ids(가장 안쪽 우선), 아니면 null. */
+  function hitTest(x: number, y: number): string[] | null {
+    for (let i = drawnGroups.length - 1; i >= 0; i--) {
+      if (pointInGroup(x, y, drawnGroups[i])) return drawnGroups[i].nodeIds
+    }
+    return null
+  }
+
+  /** 커서가 노드 위(근처)인가 — 노드 드래그에 양보하기 위한 판정. */
+  function isNearNode(x: number, y: number): boolean {
+    const R = 28
+    return nodeScreens.some(n => (n.x - x) ** 2 + (n.y - y) ** 2 < R * R)
   }
 
   function drawGroup(c: CanvasRenderingContext2D, pts: Pt[], color: string, label: string, padding: number): void {
@@ -351,5 +393,5 @@ export function useGroupHulls(
     c.closePath()
   }
 
-  return { attach, detach, redraw, sizeCanvas }
+  return { attach, detach, redraw, sizeCanvas, hitTest, isNearNode }
 }

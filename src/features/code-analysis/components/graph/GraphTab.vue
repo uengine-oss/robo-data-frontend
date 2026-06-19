@@ -10,6 +10,7 @@ import { useCanvasStore } from '@/features/code-analysis/graphCanvas'
 import { useNavigatorStore } from '@/shared/stores/navigator'
 import { storeToRefs } from 'pinia'
 import NvlGraph from './NvlGraph.vue'
+import type { HullLevel } from './useGroupHulls'
 import NodeDetailPanel from './NodeDetailPanel.vue'
 import GraphStylePanel from './GraphStylePanel.vue'
 import type { GraphNode, GraphLink } from '@/shared/types'
@@ -49,15 +50,61 @@ const labelFilters = ref<string[]>([]) // 레전드 필터 (노드 라벨)
  * groupHullBy / colorMode / preset 은 viewMode 에서 파생(computed)되므로
  * 단일 진실원천은 viewMode 하나다. (NvlGraph/canvasStore 가 소비하는 prop 계약은 불변)
  */
-// 'area'=협력 군집 / 'area-struct'=영역(구조,파일) / 'module'=모듈간 / 'health'=건강 / 'table-flow'=테이블 흐름
-type ViewMode = 'default' | 'module' | 'area' | 'area-struct' | 'health' | 'table-flow'
+// 'area'=협력 군집 / 'area-struct'=영역(구조,파일) / 'module'=모듈간 / 'health'=건강
+// (spec 021: 'table-flow' 제거 — 노드 폭발 위험. 테이블은 모듈간 보기에서 표시.)
+type ViewMode = 'default' | 'module' | 'area' | 'area-struct' | 'health'
 const viewMode = ref<ViewMode>('default')
 
-/** 영역(hull) 기준 — 협력군집='component_id', 영역(구조)='file_path', 그 외 null. NvlGraph :groupHullBy 소비. */
-const groupHullBy = computed<string | null>(() =>
-  viewMode.value === 'area' ? 'component_id'
-    : viewMode.value === 'area-struct' ? 'file_path'
-      : null)
+/**
+ * 중첩 영역(헐) 레벨 — NvlGraph :hullLevels 소비(spec 021).
+ *  - 협력 군집(area)   = [component_id 단일 레벨]
+ *  - 영역(구조)        = [패키지, 파일] 2겹 중첩(계층 조상맵 기반)
+ *  - 그 외             = [] (표시 안 함). 모듈간은 별도(Phase4)에서 패키지 1겹.
+ */
+const hullLevels = computed<HullLevel[]>(() => {
+  if (viewMode.value === 'area') {
+    return [{
+      keyOf: (n) => {
+        const v = n.properties?.component_id
+        return v === undefined || v === null || v === '' ? null : String(v)
+      },
+      labelOf: (key, nodes) =>
+        String(nodes.find(n => n.properties?.component_name)?.properties?.component_name ?? key),
+      padding: 30,
+    }]
+  }
+  if (viewMode.value === 'area-struct') {
+    const hmap = canvasStore.buildHierarchyMap()
+    return [
+      { // 바깥 = 패키지(스키마/폴더)
+        keyOf: (n) => hmap.get(n.id)?.packageKey ?? null,
+        labelOf: (_k, nodes) => hmap.get(nodes[0].id)?.packageLabel || _k,
+        padding: 52,
+      },
+      { // 안 = 파일(모듈)
+        keyOf: (n) => hmap.get(n.id)?.fileKey ?? null,
+        labelOf: (_k, nodes) => hmap.get(nodes[0].id)?.fileLabel || _k,
+        padding: 22,
+      },
+    ]
+  }
+  if (viewMode.value === 'module') {
+    // 모듈간: 패키지 1겹으로 모듈을 감싼다(테이블은 헐 제외). external 모듈은 '__external__' 그룹.
+    const hmap = canvasStore.buildHierarchyMap()
+    return [{
+      keyOf: (n) => {
+        if ((n.labels || []).includes('TABLE')) return null   // 테이블은 헐에 안 넣음
+        return hmap.get(n.id)?.packageKey ?? null
+      },
+      labelOf: (_k, nodes) => {
+        const first = nodes.find(n => !(n.labels || []).includes('TABLE')) ?? nodes[0]
+        return hmap.get(first.id)?.packageLabel || _k
+      },
+      padding: 46,
+    }]
+  }
+  return []
+})
 /** 노드 색 기준 — health 모드면 'health', 그 외 'label'. NvlGraph :colorMode 소비. */
 const colorMode = computed<'label' | 'health'>(() => (viewMode.value === 'health' ? 'health' : 'label'))
 
@@ -112,23 +159,28 @@ function applyViewMode(mode: ViewMode): void {
   if (mode === 'module') {
     // 모듈간: 가상 그래프 프리셋(모듈↔모듈 CALL + 모듈↔테이블 R/W).
     labelFilters.value = []
-    autoPopulateHint.value = ''
     canvasStore.setPreset('module-interaction')
+    // FR-010: 합성 결과가 비면 빈 화면 침묵 대신 사유 안내(전략·DDL 무관, 데이터 유무로만).
+    hintIfEmpty('모듈 간 상호작용을 그릴 데이터가 없습니다 — 모듈·호출(CALLS)·테이블 R/W 정보가 있어야 합니다')
   } else if (mode === 'health') {
-    // 건강: 가상 그래프 프리셋(위험도 루틴 ↔ 테이블 R/W). 외딴섬 방지 + 위험색.
-    autoPopulateHint.value = ''
-    canvasStore.setPreset('health-rw')
+    // 건강: 위험도 루틴만(테이블·R/W 제거, spec 021). 위험색은 colorMode='health'.
+    ensureNodesForView('risk_level')
   } else if (mode === 'area') {
     ensureNodesForView('component_id')
   } else if (mode === 'area-struct') {
     // 파일 단위 구조 영역 — 루틴(호출가능)만 파일별로 묶어 깔끔하게(구문 전부는 너무 빽빽).
     ensureNodesForView('file_path', 'routine')
-  } else if (mode === 'table-flow') {
-    autoPopulateHint.value = ''
-    canvasStore.loadTableFlow()   // 테이블 + R/W 하는 DML 구문만
   } else {
     autoPopulateHint.value = ''
   }
+}
+
+/**
+ * FR-010 — 프리셋/로드 적용 직후 캔버스가 비었으면 사유 안내, 아니면 안내 해제.
+ * 판정은 전략명이 아니라 **canvasGraphData(동기 computed) 노드 수** 단일 규칙 → 전략·DDL 무관.
+ */
+function hintIfEmpty(reason: string): void {
+  autoPopulateHint.value = canvasGraphData.value.nodes.length === 0 ? reason : ''
 }
 
 /**
@@ -141,9 +193,9 @@ function applyViewMode(mode: ViewMode): void {
  */
 function ensureNodesForView(propKey: string, needLabel?: string): void {
   autoPopulateHint.value = ''
-  // 이미 캔버스에 노드가 있으면 그대로 재스타일 적용(기존 동작 보존).
-  if (canvasStore.canvasNodeIds.size > 0) return
-
+  // spec 021: 보기모드 독립 — 진입할 때마다 자기 콘텐츠로 리셋(이전 보기 노드 잔상 0).
+  // (과거엔 캔버스 비었을 때만 채우는 early-return 이라 테이블흐름→영역 전환 시 이전 노드
+  //  위에 영역 헐이 덧칠되던 비독립 버그가 있었다.)
   const matched: string[] = []
   for (const node of projectStore.nodeMap.values()) {
     const v = node.properties?.[propKey]
@@ -162,10 +214,15 @@ function ensureNodesForView(propKey: string, needLabel?: string): void {
   }
 
   if (matched.length === 0) {
+    canvasStore.setCanvasNodes([])   // 독립: 매치 0이면 이전 보기 잔상 비우고 사유 안내만
     autoPopulateHint.value =
-      propKey === 'risk_level'
-        ? '건강(위험도) 정보를 가진 함수가 없습니다 — 분석을 먼저 실행하세요'
-        : '영역(컴포넌트) 정보를 가진 노드가 없습니다 — 분석을 먼저 실행하세요'
+      propKey === 'file_path'
+        ? '파일 경로 정보를 가진 노드가 없습니다 — 분석을 끝까지 실행해 주세요'
+        : propKey === 'component_id'
+          ? '협력 군집(컴포넌트) 정보를 가진 노드가 없습니다 — 분석을 끝까지 실행해 주세요'
+          : propKey === 'risk_level'
+            ? '건강(위험도) 정보를 가진 함수가 없습니다 — 분석을 끝까지 실행해 주세요'
+            : '표시할 노드가 없습니다 — 분석을 끝까지 실행해 주세요'
     return
   }
   canvasStore.setCanvasNodes(matched)
@@ -181,7 +238,6 @@ const activeViewLabel = computed(() => {
     case 'area': return '협력 군집'
     case 'area-struct': return '영역(구조)'
     case 'health': return '건강'
-    case 'table-flow': return '테이블 흐름'
     default: return '기본'
   }
 })
@@ -616,7 +672,7 @@ watch(hasGraph, (has, prev) => {
           :selectedNodeId="selectedNode?.id"
           :selectedRelationshipId="selectedRelationship?.id"
           :labelFilters="labelFilters"
-          :groupHullBy="groupHullBy"
+          :hullLevels="hullLevels"
           :colorMode="colorMode"
           :relFilter="relFilter"
           :hiddenRelTypes="hiddenRelTypes"
@@ -708,15 +764,9 @@ watch(hasGraph, (has, prev) => {
             </button>
             <button class="view-menu-item" :class="{ active: viewMode === 'health' }" @click="selectViewMode('health')">
               <span class="vm-icon">🩺</span>
-              <span class="vm-text"><b>건강 보기</b><small>위험 함수 색 강조</small></span>
+              <span class="vm-text"><b>건강 보기</b><small>위험 함수 색 강조(빨강/노랑/파랑)</small></span>
               <span class="vm-check">{{ viewMode === 'health' ? '✓' : '' }}</span>
             </button>
-            <button class="view-menu-item" :class="{ active: viewMode === 'table-flow' }" @click="selectViewMode('table-flow')">
-              <span class="vm-icon">🗄️</span>
-              <span class="vm-text"><b>테이블 흐름</b><small>테이블·DML·읽기/쓰기</small></span>
-              <span class="vm-check">{{ viewMode === 'table-flow' ? '✓' : '' }}</span>
-            </button>
-
           </div>
         </Transition>
       </div>
@@ -735,7 +785,11 @@ watch(hasGraph, (has, prev) => {
         </button>
         <Transition name="fade">
           <div v-if="showFilterMenu" class="view-menu-pop">
-            <div class="vm-section-label">관계 끄고/켜기 <span class="vm-section-hint">체크 = 표시</span></div>
+            <div class="vm-section-label">관계 끄고/켜기 <span class="vm-section-hint">현재 캔버스 기준</span></div>
+            <!-- 빈 캔버스면 토글할 관계가 없다 — 침묵 대신 사유 안내(조용한 빈 화면 금지). -->
+            <div v-if="relTypeList.length === 0" class="vm-empty-hint">
+              지금 캔버스에 그려진 관계가 없어요.<br>위 <b>보기</b>를 고르거나 노드를 올리면 관계 종류가 여기 나타납니다.
+            </div>
             <button
               v-for="rt in relTypeList"
               :key="rt.type"
@@ -1030,8 +1084,8 @@ watch(hasGraph, (has, prev) => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
-  padding: 0 14px;
+  height: 28px;          // 살짝 축소(32→28) — 글자 크기(12px)는 유지
+  padding: 0 11px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -1110,6 +1164,13 @@ watch(hasGraph, (has, prev) => {
   .vm-section-hint { font-weight: 500; text-transform: none; letter-spacing: 0; opacity: 0.65; margin-left: 6px; }
 }
 .vm-divider { height: 1px; margin: 6px 4px; background: var(--color-border); }
+.vm-empty-hint {
+  padding: 6px 12px 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  b { color: var(--color-text-light); font-weight: 600; }
+}
 
 .view-menu-backdrop {
   position: fixed;
@@ -1125,9 +1186,9 @@ watch(hasGraph, (has, prev) => {
 .name-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 32px;
-  padding: 0 12px;
+  gap: 7px;
+  height: 28px;          // view-menu-btn 과 동일하게 살짝 축소(글자 12px 유지)
+  padding: 0 10px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);

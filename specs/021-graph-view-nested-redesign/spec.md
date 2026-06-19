@@ -1,0 +1,111 @@
+# Feature Specification: 그래프 보기모드 재설계 — 계층 중첩 영역·모듈간·건강색·헐 드래그·관계 패널
+
+**Feature Branch**: `main` (전용 브랜치 미생성)
+
+**Created**: 2026-06-20
+
+**Status**: Draft
+
+**Input**: 사용자 라이브 리뷰 피드백(보기모드 전반 이슈) — "영역은 패키지⊃파일⊃함수 중첩으로, 모듈간은 패키지로 모듈 감싸기+테이블 필수, 건강/협력군집은 테이블 빼고, 건강색은 빨강/노랑/파랑, 헐은 절대 안 깨지고 드래그로 그룹째 이동, 테이블흐름 뷰 제거, 관계 클릭하면 패널에 연결 표시."
+
+## 배경 — 영향도 분석 결과(코드/데이터 검증, 추론 0)
+
+- **계층이 이미 그래프에 존재**: `FILE -BELONGS_TO-> PACKAGE`(9건), `TABLE -BELONGS_TO-> SCHEMA`(16건), `FILE -HAS_MEMBER-> 루틴`(HAS_MEMBER), `MODULE:EXTERNAL -BELONGS_TO-> PACKAGE` + `-HAS_MEMBER-> FUNCTION:EXTERNAL`. 프론트 graph API가 BELONGS_TO(28)·HAS_MEMBER(76)를 그대로 받아 `linkMap`에 적재함(HIDDEN 아님).
+- ⇒ **중첩 헐·external 그룹·모든 보기 재설계는 백엔드 무변경·재분석 0으로 프론트에서만 가능.** catalog·architect·step7 등 cross-service 영향 0.
+- **NVL `setNodePositions(data, updateLayout?)` 존재** → 헐 드래그(그룹 멤버 통째 이동) 구현 가능 검증됨.
+- 영향 범위: `code-analysis/components/graph/` 폴더 + `graphCanvas.ts` + `GraphTab.vue` + `useGroupHulls.ts` + `NvlGraph.vue` + `NodeDetailPanel`+`node-detail/*`. NavigatorTreeNode·타 피처(schema/domain/ontology) 무영향(확인).
+
+## User Scenarios & Testing *(mandatory)*
+
+### User Story 1 - 영역(구조) = 계층 중첩 헐 (Priority: P1) 🎯
+분석가가 "영역(구조)" 보기를 켜면 **패키지(스키마/폴더) ⊃ 모듈(파일/클래스) ⊃ 함수/프로시저** 가 **원 안의 원**으로 묶여 보인다. 가장 바깥 = 패키지, 그 안 = 파일, 그 안 = 루틴.
+
+**깊이**: DBMS = 프로시저·함수·트리거 레벨까지 / 프레임워크 = 함수·메서드 레벨까지. (그 아래 구문 SELECT/IF 등은 표시 안 함 → 노드 폭발/터짐 방지). **테이블 제외**(순수 구조).
+
+**Independent Test**: 영역(구조) 켜기 → RWIS 패키지 한 개의 큰 원 안에 9개 파일 원, 각 파일 원 안에 루틴. 줌인/드래그해도 헐이 안 깨진다.
+
+**Acceptance Scenarios**:
+1. **Given** 분석된 그래프, **When** 영역(구조)를 켜면, **Then** 패키지⊃파일⊃루틴이 **중첩 원**으로, 각 원에 **이름(패키지명/파일명/루틴명)** 표시.
+2. **Given** DBMS, **When** 영역(구조), **Then** 프로시저·함수·트리거까지 보이고 구문(SELECT 등)은 안 보인다.
+3. **Given** 모든 노드, **When** 영역(구조), **Then** 모든 루틴이 자기 파일·패키지 원에 **소속**(미소속/끊김 0). 테이블은 표시 안 함.
+
+### User Story 2 - 모듈간 상호작용 = 패키지 중첩 + 모듈↔모듈 + 모듈↔테이블 (Priority: P2)
+"모듈간"을 켜면 **패키지가 모듈들을 감싸는 중첩 헐** + **모듈↔모듈 호출(CALLS)** + **모듈↔테이블 R/W(건너건너 가상관계)** 가 함께 보인다. **테이블 포함은 필수**("누가 어느 테이블을 R/W 하는가"). **external 콜리는 별도 "external" 그룹**으로 묶인다.
+
+**Independent Test**: 모듈간 → 패키지 원 안 모듈들 + 모듈끼리 호출선 + 모듈↔테이블 R/W선. external 노드는 따로 묶인 그룹.
+
+**Acceptance Scenarios**:
+1. **Given** 모듈간, **Then** 모듈↔모듈 호출선 + 모듈↔테이블 R/W선 둘 다 표시, 모듈은 패키지 원으로 그룹.
+2. **Given** external 콜리 존재, **When** 모듈간, **Then** external 노드들이 **"external" 그룹**(EXTERNAL 라벨 기준)으로 따로 묶인다.
+
+### User Story 3 - 건강·협력군집 테이블 제거 + 건강색 의미화 (Priority: P3)
+**건강 보기** = 위험도 색 루틴만(테이블·R/W 제거). 색은 **high=🔴위험 / medium=🟡주의 / low=🔵양호**. **협력 군집** = component_id 군집만(테이블 제거).
+
+**Acceptance Scenarios**:
+1. **Given** 건강, **Then** 루틴만 위험도 색(빨강/노랑/파랑), 테이블 노드·R/W선 없음.
+2. **Given** 협력 군집, **Then** component_id 군집만, 테이블 없음.
+
+### User Story 4 - 헐 안 깨짐 + 드래그 이동 (Priority: P4)
+헐은 **줌·드래그·중첩 어떤 상황에서도 안 깨진다**. 헐(영역 원)을 마우스로 드래그하면 **그 안 노드들이 상대위치 유지한 채 통째로 같이 이동**하고 헐이 따라온다(다른 그룹·전체는 그대로).
+
+**Acceptance Scenarios**:
+1. **Given** 어떤 보기든, **When** 줌인/드래그, **Then** 헐 경계가 안 깨지고 노드를 정확히 감싼다(중첩 포함).
+2. **Given** 영역 헐, **When** 헐 위를 드래그, **Then** 그 그룹 멤버 노드 전체가 함께 이동(setNodePositions), 헐도 따라옴, 다른 그룹 불변.
+
+### User Story 5 - 보기 독립 + 테이블 흐름 뷰 제거 (Priority: P5)
+각 보기모드는 **독립 장면** — 진입 시 캔버스를 자기 콘텐츠로 **리셋**(이전 보기 노드/헐 잔상 0). **테이블 흐름 보기는 제거**(노드 폭발 위험). 단 다른 보기(모듈간)의 테이블 표시는 유지.
+
+**Acceptance Scenarios**:
+1. **Given** 테이블흐름→영역 전환(구버그: 영역 헐이 이전 노드 위에 덧칠), **When** 영역 진입, **Then** 캔버스가 영역 콘텐츠로 리셋되어 겹침 없음.
+2. **Given** 보기 메뉴, **Then** "테이블 흐름" 항목이 없다.
+
+### User Story 6 - 관계 클릭 → 패널에 연결 표시 (Priority: P6)
+캔버스/패널에서 **관계를 클릭하면** 노드 패널에 그 관계의 **양끝 노드 + 같은 타입 관계 목록**이 노드 클릭과 동일 포맷으로 쭉 표시된다.
+
+**Acceptance Scenarios**:
+1. **Given** 관계 클릭, **Then** 패널에 출발/도착 노드(논리명 포함) + 그 관계 맥락이 표시된다.
+
+### Edge Cases
+- 파일에 루틴 1개뿐(RWIS 다수) → 1노드 파일 원도 깔끔히(degenerate 안 깨짐).
+- 패키지 1개(RWIS) → 큰 원 하나가 전체를 감싸도 정상.
+- external이 내부 패키지(RWIS)에 BELONGS_TO 돼 있어도 → 프론트가 EXTERNAL 라벨로 "external" 그룹 분리.
+- 보기 전환 연타 → 잔상/겹침 0(리셋 보장).
+
+## Requirements *(mandatory)*
+
+- **FR-001**: 영역(구조)는 **패키지⊃파일⊃루틴 중첩 헐**(원 안 원), 각 레벨 이름 표시, 테이블 제외.
+- **FR-002**: 영역(구조) 깊이 = DBMS(프로시저/함수/트리거)·프레임워크(함수/메서드)까지. 구문 레벨 미표시.
+- **FR-003**: 중첩 헐의 그룹핑은 **기존 BELONGS_TO(파일→패키지)+HAS_MEMBER(파일→루틴)+file_path**로 프론트가 도출(백엔드 무변경).
+- **FR-004**: 모듈간 = 패키지 중첩 헐 + 모듈↔모듈 CALLS + **모듈↔테이블 R/W(필수)**.
+- **FR-005**: external 콜리는 **EXTERNAL 라벨 기준 "external" 그룹**으로 분리 표시(프론트, 재분석 0).
+- **FR-006**: 건강 = 위험도 색 루틴만(**테이블·R/W 제거**), 색 = high🔴/medium🟡/low🔵.
+- **FR-007**: 협력 군집 = component_id 군집만(테이블 제거).
+- **FR-008**: 헐은 줌·드래그·중첩에서 **안 깨짐**(정확히 감쌈).
+- **FR-009**: 헐 드래그 → 멤버 노드 통째 이동(`setNodePositions`, updateLayout=false), 헐 추종, 타 그룹 불변.
+- **FR-010**: 각 보기 진입 = 캔버스 자기 콘텐츠 **리셋**(독립). 잔상/겹침 0.
+- **FR-011**: 테이블 흐름 보기 **제거**(메뉴·분기·`loadTableFlow`). 타 보기 테이블 유지.
+- **FR-012**: 관계 클릭 → 패널에 양끝 노드 + 맥락 표시.
+- **FR-013**: 회귀 0 — 드래그-드롭, 1-hop 확장, 노드 상세, 필터▾, isolate, 라이브 스트림, 색상 크래시 0, 논리명 토글 유지.
+
+## Success Criteria *(mandatory)*
+
+- **SC-001**: 영역(구조)에서 모든 루틴이 패키지·파일 원에 소속(미소속 0), 테이블 0.
+- **SC-002**: 줌인 5배·헐 드래그·중첩에서 헐 깨짐 0(육안+스샷).
+- **SC-003**: 헐 드래그 시 그룹 멤버만 이동, 타 그룹 좌표 불변.
+- **SC-004**: 모듈간에 모듈↔모듈선·모듈↔테이블선 둘 다, external 그룹 분리.
+- **SC-005**: 건강에 테이블 0·R/W 0, 색 빨강/노랑/파랑. 협력군집 테이블 0.
+- **SC-006**: 보기 전환 시 잔상·겹침 0(테이블흐름→영역 구버그 재현 안 됨).
+- **SC-007**: 보기 메뉴에 "테이블 흐름" 없음.
+- **SC-008**: 관계 클릭 시 패널에 연결 표시.
+- **SC-009**: 회귀 0(FR-013 항목 라이브 유지).
+- **SC-010**: 백엔드 변경 0·재분석 0(cross-service 영향 0).
+
+## Assumptions
+- 계층(BELONGS_TO/HAS_MEMBER/file_path/component_id/risk_level)은 분석 완주 시 **이미 존재**(검증됨). 노드/관계/속성 모델·백엔드 무변경.
+- 프레임워크 전략 계층(CLASS⊃METHOD)은 DBMS와 동형으로 가정하되 **구현 시 framework 데이터로 확인**(현재 RWIS=dbms만 라이브 검증).
+- spec 020(보기·필터·isolate·콘솔)·022(스트림·색상 hex) 전제. 본 스펙은 020의 **보기모드 부분을 대체(supersede)**.
+
+## 범위 밖 (Out of Scope)
+- 백엔드 노드/관계/속성 모델 변경, 재분석, 새 분석 단계.
+- external을 백엔드 `:PACKAGE:EXTERNAL`로 만드는 안(검토했으나, 백엔드 무변경·재분석0 원칙상 프론트 그룹 분리로 대체).
+- 구문 레벨(SELECT/IF)까지의 영역 표시(노드 폭발).

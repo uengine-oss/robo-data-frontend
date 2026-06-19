@@ -11,6 +11,7 @@
 import { computed, ref } from 'vue'
 import type { GraphNode, GraphLink } from '@/shared/types'
 import { getNodeColor } from '@/shared/config/graphStyles'  // 통계용 — sortedNodeStats/Rel 색
+import { technicalNodeName, logicalNodeName } from '@/shared/utils/graphDisplay'
 import NodeDetailContent from './node-detail/NodeDetailContent.vue'
 
 // 검색 결과 최대 개수
@@ -121,6 +122,27 @@ const relationshipProperties = computed<PropertyItem[]>(() => {
 
 /** 관계 선택 시 표시할 raw 속성 목록(노드는 NodeDetailContent 카드로 렌더하므로 여기서 안 씀). */
 const properties = computed(() => relationshipProperties.value)
+
+/** 관계 클릭 시 양끝 노드 해소(spec 021) — allNodes 에서 source/target id 로 찾는다. */
+const relEndpoints = computed(() => {
+  const rel = props.relationship
+  if (!rel) return null
+  const nodes = props.allNodes ?? []
+  return {
+    from: nodes.find(n => n.id === rel.source),
+    to: nodes.find(n => n.id === rel.target),
+    fromId: rel.source,
+    toId: rel.target,
+  }
+})
+
+/** 끝점 노드 표시명 — `기술명 — 논리명`(논리명 있으면). 캔버스 밖이면 id 꼬리. */
+function endpointLabel(n: GraphNode | undefined, fallbackId: string): string {
+  if (!n) return fallbackId.includes(':') ? (fallbackId.split(':').pop() || fallbackId) : fallbackId
+  const tech = technicalNodeName(n)
+  const log = logicalNodeName(n)
+  return log && log !== tech ? `${tech} — ${log}` : tech
+}
 
 
 // ============================================================================
@@ -339,7 +361,20 @@ function getNodeSubInfo(node: GraphNode): string {
       <div class="type-header">
         <span class="type-badge relationship-badge">{{ relationship.type }}</span>
       </div>
-      
+
+      <!-- 연결(양끝 노드) — spec 021: 관계 클릭 시 어느 노드끼리인지 한눈에 -->
+      <div v-if="relEndpoints" class="rel-conn">
+        <div class="rel-conn-row">
+          <span class="rel-conn-tag from">출발</span>
+          <span class="rel-conn-name">{{ endpointLabel(relEndpoints.from, relEndpoints.fromId) }}</span>
+        </div>
+        <div class="rel-conn-arrow">↓ <b>{{ relationship.type }}</b></div>
+        <div class="rel-conn-row">
+          <span class="rel-conn-tag to">도착</span>
+          <span class="rel-conn-name">{{ endpointLabel(relEndpoints.to, relEndpoints.toId) }}</span>
+        </div>
+      </div>
+
       <!-- Properties 테이블 -->
       <div class="props-table-wrapper">
         <table class="props-table">
@@ -548,6 +583,43 @@ function getNodeSubInfo(node: GraphNode): string {
     background: var(--color-text-muted);
     color: white;
   }
+}
+
+// ============================================================================
+// 관계 연결(양끝 노드) — spec 021
+// ============================================================================
+.rel-conn {
+  margin: 10px 12px 4px;
+  padding: 10px 12px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+.rel-conn-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rel-conn-tag {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 6px;
+  color: #fff;
+  &.from { background: #4dabf7; }
+  &.to { background: #69db7c; }
+}
+.rel-conn-name {
+  font-size: 12.5px;
+  color: var(--color-text-bright);
+  word-break: break-all;
+}
+.rel-conn-arrow {
+  margin: 3px 0 3px 4px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  b { color: var(--color-text-light); }
 }
 
 // ============================================================================

@@ -23,10 +23,18 @@ import type { GraphData, GraphLink, GraphNode } from '@/shared/types'
 /**
  * 캔버스 프리셋 — 일반 그래프와 다른 표시 규칙을 적용하는 모드.
  *   - 'module-interaction' : MODULE/TABLE 만 노출, 둘 사이 가상 링크 합성(루틴 R/W를 모듈로 압축).
- *   - 'health-rw' : 위험도 루틴 + 테이블만, 둘 사이 가상 R/W 링크(구문 R/W를 소유 루틴으로 압축).
- *     건강 보기가 CALL만 그려 외딴섬이던 문제 해결 — 위험 루틴이 어느 테이블 건드리는지 보인다(spec 020 US3).
+ * (spec 021: 건강 보기는 테이블 제거 → 프리셋 폐기, risk_level 루틴만 속성로드로 표시.)
  */
-export type CanvasPreset = 'module-interaction' | 'health-rw' | null
+export type CanvasPreset = 'module-interaction' | null
+
+/** 노드별 계층 조상(파일/패키지) — 중첩 헐(spec 021) 그룹핑용. */
+export interface HierarchyInfo {
+  fileKey: string | null
+  fileLabel: string
+  packageKey: string | null
+  packageLabel: string
+  isExternal: boolean
+}
 
 // HAS_MEMBER 는 그릇→루틴/데이터 공통이지만, 다음 단계(FUNCTION_TO_TABLE_REL)에서 테이블을
 // READS/WRITES 하는 루틴만 가상 링크로 이어지므로 데이터 멤버는 자연 제외된다.
@@ -230,83 +238,46 @@ export const useCanvasStore = defineStore('canvas', () => {
   }
 
   /**
-   * 건강 보기 가상 그래프 — 위험도 루틴 + 테이블, 둘 사이 가상 R/W 링크.
-   * R/W source(구문)를 PARENT_OF로 거슬러 소유 루틴에 해소 → 루틴→테이블 한 줄(모듈간의 루틴 버전).
-   * risk_level 보유 루틴은 R/W가 없어도 표시(위험도 색). 위험 루틴이 어느 테이블을 건드리는지 한눈에.
+   * 계층 조상 맵 (spec 021) — 노드별 {파일, 패키지} 그룹 키/라벨. 중첩 헐의 단일 도출처(DRY).
+   * 기존 그래프 엣지로 도출 → 백엔드 무변경·재분석 0:
+   *   파일→패키지 = `FILE -BELONGS_TO-> PACKAGE`
+   *   파일→루틴   = `FILE -HAS_MEMBER-> 루틴` (역인덱스로 루틴→파일)
+   *   폴백        = 루틴.file_path (HAS_MEMBER 없을 때 파일 키)
+   * external 라벨이면 패키지를 가상 `"__external__"` 로 묶어 분리(프론트 분리 그룹).
    */
-  function buildHealthGraph(): GraphData {
-    const routineIds = new Set<string>()
-    for (const node of projectStore.nodeMap.values()) {
-      if ((node.labels || []).some(l => CALLABLE_LABELS.has(l))) routineIds.add(node.id)
-    }
-    const childToParent = new Map<string, string>()
+  function buildHierarchyMap(): Map<string, HierarchyInfo> {
+    const fileToPackage = new Map<string, string>()   // fileNodeId -> packageNodeId (BELONGS_TO)
+    const memberToFile = new Map<string, string>()    // memberId -> containerId (HAS_MEMBER)
     for (const link of projectStore.linkMap.values()) {
-      if (link.type === 'PARENT_OF') childToParent.set(link.target, link.source)
+      if (link.type === 'BELONGS_TO') fileToPackage.set(link.source, link.target)
+      else if (link.type === 'HAS_MEMBER') memberToFile.set(link.target, link.source)
     }
-    const cache = new Map<string, string | null>()
-    function resolveRoutine(id: string): string | null {
-      const cached = cache.get(id)
-      if (cached !== undefined) return cached
-      const path: string[] = []
-      const seen = new Set<string>()
-      let cur: string | undefined = id
-      let result: string | null = null
-      while (cur !== undefined && !seen.has(cur)) {
-        const memo = cache.get(cur)
-        if (memo !== undefined) { result = memo; break }
-        if (routineIds.has(cur)) { result = cur; break }
-        seen.add(cur); path.push(cur); cur = childToParent.get(cur)
-      }
-      for (const p of path) cache.set(p, result)
-      return result
-    }
-
-    const routineSet = new Set<string>()
-    const tableSet = new Set<string>()
-    // 위험도 보유 루틴은 R/W 없어도 표시
-    for (const node of projectStore.nodeMap.values()) {
-      const rl = node.properties?.risk_level
-      if (rl !== undefined && rl !== null && rl !== '') routineSet.add(node.id)
-    }
-    const virtuals = new Map<string, { routineId: string; tableId: string; relation: string }>()
-    for (const link of projectStore.linkMap.values()) {
-      if (link.type !== 'READS' && link.type !== 'WRITES') continue
-      const routineId = resolveRoutine(link.source)
-      if (!routineId) continue
-      const tableNode = projectStore.nodeMap.get(link.target)
-      if (!tableNode || !hasLabel(tableNode, 'TABLE')) continue
-      const key = `${routineId} ${tableNode.id} ${link.type}`
-      if (!virtuals.has(key)) virtuals.set(key, { routineId, tableId: tableNode.id, relation: link.type })
-      routineSet.add(routineId)
-      tableSet.add(tableNode.id)
-    }
-
-    const nodes: GraphNode[] = []
-    const present = new Set<string>()
-    for (const id of [...routineSet, ...tableSet]) {
-      if (present.has(id)) continue
+    const nameOf = (id: string | null): string => {
+      if (!id) return ''
       const n = projectStore.nodeMap.get(id)
-      if (n) { nodes.push(n); present.add(id) }
+      return (n?.properties?.name as string) || id
     }
-    const links: GraphLink[] = []
-    for (const v of virtuals.values()) {
-      if (!present.has(v.routineId) || !present.has(v.tableId)) continue
-      links.push({
-        id: `vhealth:${v.relation}:${v.routineId}->${v.tableId}`,
-        source: v.routineId,
-        target: v.tableId,
-        type: v.relation,
-        properties: { virtual: true },
-      })
+    const baseName = (path: string): string =>
+      path.replace(/\\/g, '/').split('/').filter(Boolean).pop() || path
+
+    const map = new Map<string, HierarchyInfo>()
+    for (const node of projectStore.nodeMap.values()) {
+      const isExternal = (node.labels || []).includes('EXTERNAL')
+      const containerId = memberToFile.get(node.id) ?? null
+      const filePath = node.properties?.file_path as string | undefined
+      const fileKey = containerId ?? (filePath ?? null)
+      const fileLabel = containerId ? nameOf(containerId) : (filePath ? baseName(filePath) : '')
+      let packageKey: string | null = containerId ? (fileToPackage.get(containerId) ?? null) : null
+      if (!packageKey) packageKey = fileToPackage.get(node.id) ?? null
+      let packageLabel = nameOf(packageKey)
+      if (isExternal) { packageKey = '__external__'; packageLabel = 'external (외부 호출)' }
+      map.set(node.id, { fileKey, fileLabel, packageKey, packageLabel, isExternal })
     }
-    return { nodes, links }
+    return map
   }
 
   /** NvlGraph 에 전달할 부분집합. 프리셋이 활성화되면 가상 그래프를 반환. */
   const canvasGraphData = computed<GraphData>(() => {
-    if (presetMode.value === 'health-rw') {
-      return buildHealthGraph()
-    }
     if (presetMode.value === 'module-interaction') {
       return buildModuleInteractionGraph()
     }
@@ -438,23 +409,6 @@ export const useCanvasStore = defineStore('canvas', () => {
     canvasNodeIds.value = next
   }
 
-  /**
-   * 테이블 흐름 보기(spec 020 US5) — R/W에 참여하는 노드만(테이블 + 그걸 읽고/쓰는 DML 구문).
-   * READS/WRITES 엣지의 양 끝(구문 source + 테이블 target)만 캔버스에 올린다 → 엣지가 자연히 그려짐.
-   * 전체 SELECT 수백 개가 아니라 실제 테이블 접근만 → 데이터 흐름에 집중.
-   */
-  function loadTableFlow(): void {
-    presetMode.value = null
-    const ids = new Set<string>()
-    for (const link of projectStore.linkMap.values()) {
-      if (link.type === 'READS' || link.type === 'WRITES') {
-        ids.add(link.source)
-        ids.add(link.target)
-      }
-    }
-    canvasNodeIds.value = ids
-  }
-
   return {
     canvasNodeIds,
     canvasGraphData,
@@ -465,9 +419,9 @@ export const useCanvasStore = defineStore('canvas', () => {
     removeFromCanvas,
     clearCanvas,
     loadNodesByLabels,
-    loadTableFlow,
     setCanvasNodes,
     setPreset,
     isolateLabel,
+    buildHierarchyMap,
   }
 })

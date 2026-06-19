@@ -24,7 +24,7 @@ import type { PartialNode, PartialRelationship } from '@neo4j-nvl/base'
 import { getNodeColor, getRelationshipColor, getRelationshipWidth, getNodeSize } from '@/shared/config/graphStyles'
 import { useNavigatorStore } from '@/shared/stores/navigator'
 import { storeToRefs } from 'pinia'
-import { useGroupHulls } from './useGroupHulls'
+import { useGroupHulls, type HullLevel } from './useGroupHulls'
 
 // ============================================================================
 // 타입 정의
@@ -37,12 +37,10 @@ interface Props {
   /** 노드 라벨 필터 (비어있으면 전체 표시) */
   labelFilters?: string[]
   /**
-   * 같은 그룹 노드끼리 감싸는 영역(바운디드 컨텍스트) 표시 기준.
-   *  - 'component_id' (또는 다른 속성 키) → properties[key] 로 묶음
-   *  - 'label'                          → 노드 대표 라벨로 묶음
-   *  - null/미지정                       → 표시 안 함
+   * 중첩 영역(헐) 레벨들 — 바깥→안 순서(예: [패키지, 파일]). 빈 배열/미지정이면 표시 안 함.
+   * 그룹 키/라벨은 호출측(GraphTab)이 계층 조상맵 기반 closure 로 주입(spec 021).
    */
-  groupHullBy?: string | null
+  hullLevels?: HullLevel[]
   /**
    * 노드 색 기준.
    *  - 'label'(기본) → 라벨별 색(getNodeColor)
@@ -98,19 +96,20 @@ const NVL_OPTIONS = {
 
 const props = withDefaults(defineProps<Props>(), {
   labelFilters: () => [],
-  groupHullBy: null,
+  hullLevels: () => [],
   colorMode: 'label',
   relFilter: () => [],
   hiddenRelTypes: () => []
 })
 
 // 건강지표(risk)별 노드 색 — getNodeColor(공유 유틸)는 건드리지 않고 여기서만 override.
+// 색 의미(사용자 확정): 위험=빨강 / 주의=노랑 / 양호=파랑 (green 대신 blue).
 const HEALTH_COLORS: Record<string, string> = {
   high: '#fa5252',   // 위험 — 빨강
-  medium: '#ffa94d', // 주의 — 주황
-  low: '#51cf66',    // 양호 — 초록
+  medium: '#ffd43b', // 주의 — 노랑
+  low: '#4dabf7',    // 양호 — 파랑
 }
-const HEALTH_NEUTRAL = '#868e96' // 건강지표 없는 노드(테이블·모듈 등)
+const HEALTH_NEUTRAL = '#868e96' // 위험도 미산정 노드(드물게 risk_level 없는 루틴)
 
 /** colorMode 에 따른 노드 색 — 'health' 면 risk 기반, 아니면 라벨 기반. */
 function resolveNodeColor(labels: string[], properties?: Record<string, unknown>): string {
@@ -154,7 +153,7 @@ const groupHulls = useGroupHulls(
   containerRef,
   nvlInstance,
   () => props.graphData.nodes,
-  () => ({ groupBy: props.groupHullBy ?? null })
+  () => ({ levels: props.hullLevels ?? [] })
 )
 
 const nodeStats = ref<Map<string, NodeStat>>(new Map())
@@ -422,6 +421,49 @@ function syncGraph(): void {
 
 let contextMenuHandler: ((e: MouseEvent) => void) | null = null
 let documentClickHandler: ((e: MouseEvent) => void) | null = null
+let hullMouseDownHandler: ((e: MouseEvent) => void) | null = null
+
+// ── 헐(영역) 드래그 (spec 021) ──────────────────────────────────────────
+// 헐 영역(노드 위 아님)을 끌면 그 그룹 멤버 노드가 통째로 같이 이동(setNodePositions).
+// NVL 은 mousedown/move/up 으로 팬·노드드래그를 처리하므로, capture 단계 mousedown 에서
+// 헐 hit 이면 stopPropagation 으로 NVL 을 차단하고 직접 그룹 이동을 수행한다.
+let hullDrag: { ids: Set<string>; lastX: number; lastY: number } | null = null
+
+function onHullMouseDown(e: MouseEvent): void {
+  if (e.button !== 0 || !nvlInstance.value || !containerRef.value) return
+  const rect = containerRef.value.getBoundingClientRect()
+  const x = e.clientX - rect.left, y = e.clientY - rect.top
+  if (groupHulls.isNearNode(x, y)) return        // 노드 위 → NVL 노드 드래그에 양보
+  const ids = groupHulls.hitTest(x, y)
+  if (!ids || ids.length === 0) return            // 빈 영역 → NVL 팬에 양보
+  hullDrag = { ids: new Set(ids), lastX: e.clientX, lastY: e.clientY }
+  e.stopPropagation()
+  e.preventDefault()
+  window.addEventListener('mousemove', onHullMouseMove, true)
+  window.addEventListener('mouseup', onHullMouseUp, true)
+}
+
+function onHullMouseMove(e: MouseEvent): void {
+  const nvl = nvlInstance.value
+  if (!hullDrag || !nvl) return
+  const scale = nvl.getScale() || 1
+  const dpr = window.devicePixelRatio || 1
+  const dxW = (e.clientX - hullDrag.lastX) * dpr / scale
+  const dyW = (e.clientY - hullDrag.lastY) * dpr / scale
+  const updates = nvl.getNodePositions()
+    .filter(p => hullDrag!.ids.has(p.id))
+    .map(p => ({ id: p.id, x: p.x + dxW, y: p.y + dyW }))
+  if (updates.length) nvl.setNodePositions(updates as unknown as NvlNode[], false)
+  hullDrag.lastX = e.clientX
+  hullDrag.lastY = e.clientY
+  groupHulls.redraw()
+}
+
+function onHullMouseUp(): void {
+  hullDrag = null
+  window.removeEventListener('mousemove', onHullMouseMove, true)
+  window.removeEventListener('mouseup', onHullMouseUp, true)
+}
 
 function setupInteractions(): void {
   if (!nvlInstance.value || !containerRef.value) return
@@ -483,6 +525,10 @@ function setupInteractions(): void {
 
   containerRef.value.addEventListener('contextmenu', contextMenuHandler)
   document.addEventListener('click', documentClickHandler as EventListener)
+
+  // 헐 드래그 — capture 단계로 NVL(canvas) 보다 먼저 mousedown 가로채기.
+  hullMouseDownHandler = onHullMouseDown
+  containerRef.value.addEventListener('mousedown', hullMouseDownHandler, true)
 
   new DragNodeInteraction(nvl)
 
@@ -626,6 +672,10 @@ onUnmounted(() => {
   if (documentClickHandler) {
     document.removeEventListener('click', documentClickHandler)
   }
+  if (containerRef.value && hullMouseDownHandler) {
+    containerRef.value.removeEventListener('mousedown', hullMouseDownHandler, true)
+  }
+  onHullMouseUp()   // 혹시 드래그 중 unmount 시 window 리스너 정리
   destroyNvl()
 })
 
@@ -662,7 +712,7 @@ watch([() => props.selectedNodeId, () => props.selectedRelationshipId], ([newNod
   }
 })
 
-watch(() => props.groupHullBy, () => {
+watch(() => props.hullLevels, () => {
   groupHulls.redraw()
 })
 
