@@ -57,6 +57,11 @@ interface Props {
   relFilter?: string[]
   /** 숨길 관계 타입 (끄고/켜기 blacklist, spec 020). 여기 든 타입은 그리지 않는다. */
   hiddenRelTypes?: string[]
+  /**
+   * 캔버스 오른쪽이 패널(노드 상세/통계)에 가려지는 폭(px). fitView 가 이 영역을 빼고 프레임해
+   * 우측에 놓인 클러스터가 패널 뒤로 숨지 않게 한다(spec 022). 0이면 풀폭.
+   */
+  rightInset?: number
 }
 
 interface NodeStat {
@@ -96,6 +101,10 @@ const NVL_OPTIONS = {
   } as any
 } as const
 
+// 클러스터 분리 배치(spec 022) — world 단위. SPACING=그룹 내 인접 노드 간격, GAP=그룹 셀 사이 여백.
+const CLUSTER_NODE_SPACING = 78
+const CLUSTER_GAP = 200
+
 // ============================================================================
 // Props & Emits
 // ============================================================================
@@ -106,7 +115,8 @@ const props = withDefaults(defineProps<Props>(), {
   clusterKeyOf: null,
   colorMode: 'label',
   relFilter: () => [],
-  hiddenRelTypes: () => []
+  hiddenRelTypes: () => [],
+  rightInset: 0
 })
 
 // 건강지표(risk)별 노드 색 — getNodeColor(공유 유틸)는 건드리지 않고 여기서만 override.
@@ -315,12 +325,7 @@ async function initNvl(): Promise<void> {
     {
       // 레이아웃이 움직이는 매 프레임/완료 시 영역 오버레이도 같이 갱신
       onLayoutStep: () => groupHulls.redraw(),
-      onLayoutDone: () => {
-        isInitializing.value = false
-        separateClusters()   // 그룹별로 떨어뜨려 겹침 제거(spec 022) — fit 전에 위치 확정
-        fitView()
-        groupHulls.redraw()
-      }
+      onLayoutDone: () => groupHulls.redraw()
     }
   )
 
@@ -328,76 +333,105 @@ async function initNvl(): Promise<void> {
   groupHulls.attach()
   updateStats()
   visibleNodeCount.value = nodeMap.size
+
+  // 정적 레이아웃(physics off)에선 onLayoutDone 이 스스로 발화하지 않으므로 다음 프레임에 직접 마감.
+  // 클러스터 분리는 결정적 배치라 force 정착을 기다릴 필요가 없다(타이밍 무관).
+  requestAnimationFrame(() => {
+    isInitializing.value = false
+    layoutClusters()
+    fitView()
+    groupHulls.redraw()
+  })
 }
 
 /**
- * 카메라를 현재 캔버스 노드 전체에 맞춘다(zoom/pan 조정).
- * NVL 비물리 배치는 노드를 원점이 아닌 곳(grid)에 둘 수 있어, fit 없으면 화면 밖이라
- * "빈 화면"처럼 보인다 — 보기모드(대량 주입)·드래그-드롭 후 호출해 노드가 보이게 한다.
+ * 카메라를 현재 캔버스 노드 전체에 맞춘다(zoom/pan). NVL `fit()` 은 패딩·가림영역 옵션이 없어
+ * 우측 패널 뒤로 클러스터가 숨는 문제가 있다 → 노드 bbox 를 **가시영역(전체폭 − rightInset)**
+ * 안에 여백 두고 직접 프레임한다. setZoomAndPan 만 쓰므로 재레이아웃은 일어나지 않는다.
  */
 function fitView(): void {
   const nvl = nvlInstance.value
-  if (!nvl) return
-  const ids = [...nodeMap.keys()]
-  if (ids.length === 0) return
-  try { nvl.fit(ids) } catch { /* 레이아웃 준비 전 호출은 무해 */ }
+  const host = containerRef.value
+  if (!nvl || !host) return
+  const pts = nvl.getNodePositions().filter(p => nodeMap.has(p.id) && typeof p.x === 'number' && !Number.isNaN(p.x))
+  if (pts.length === 0) return
+
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y)
+  const minX = Math.min(...xs), maxX = Math.max(...xs)
+  const minY = Math.min(...ys), maxY = Math.max(...ys)
+  const bw = Math.max(maxX - minX, 1), bh = Math.max(maxY - minY, 1)
+  const bx = (minX + maxX) / 2, by = (minY + maxY) / 2
+
+  const dpr = window.devicePixelRatio || 1
+  const cssW = host.clientWidth, cssH = host.clientHeight
+  const PAD = 96   // 노드 반지름 + 헐 여백 + 라벨 여유(CSS px)
+  const visW = Math.max(cssW - (props.rightInset || 0), 120)
+  // scale = world→canvas px 배율. bbox 를 가시영역에 PAD 두고 맞추는 최대 배율.
+  const scale = Math.min(
+    Math.max(2, (visW - 2 * PAD)) * dpr / bw,
+    Math.max(2, (cssH - 2 * PAD)) * dpr / bh,
+    2,   // 과도 확대 방지
+  )
+  // bbox 중심을 가시영역(좌측, 패널 제외) 중앙에 오게 pan. screenX=(wx-panX)·scale/dpr+cssW/2.
+  const panX = bx + ((props.rightInset || 0) / 2) * dpr / scale
+  try { nvl.setZoomAndPan(scale, panX, by) } catch { /* 무해 */ }
 }
 
 /**
- * 클러스터 분리(spec 022) — clusterKeyOf 로 노드를 그룹지어, **각 그룹을 통째로 떨어진
- * 위치(큰 원 둘레)로 평행이동**한다. force 레이아웃이 만든 그룹 내부 구조는 보존하고
- * 그룹간 거리만 벌려 영역(헐) 겹침을 없앤다. 2그룹 미만이면 분리할 게 없어 무동작.
+ * 클러스터 분리 배치(spec 022) — clusterKeyOf 로 노드를 그룹지어 **각 그룹을 화면의 떨어진
+ * 구역에 배치**한다. 그룹 내부는 컴팩트한 원반(phyllotaxis)으로 모으고, 그룹들은 정사각 격자
+ * 셀에 하나씩 놓아 영역(헐)이 겹치지 않게 한다.
+ *
+ * force 정착·onLayoutDone 에 의존하지 않는 **결정적 배치**라 타이밍에 안 흔들리고 1회 적용으로
+ * 끝난다(과거 사후 평행이동은 트리거 부재로 미실행 + 이중적용 드리프트가 있었다).
+ * 그룹 1개 이하면 분리할 게 없어 무동작(일반 force 결과 유지).
  */
-function separateClusters(): void {
+function layoutClusters(): void {
   const keyOf = props.clusterKeyOf
   const nvl = nvlInstance.value
   if (!keyOf || !nvl) return
-  const positions = nvl.getNodePositions()
-  if (positions.length === 0) return
 
-  const nodeById = new Map(props.graphData.nodes.map(n => [n.id, n]))
-  const posById = new Map(positions.map(p => [p.id, { x: p.x, y: p.y }]))
-
-  // 그룹별 멤버 + 무게중심
-  const groups = new Map<string, { ids: string[]; cx: number; cy: number }>()
-  for (const p of positions) {
-    const node = nodeById.get(p.id)
-    if (!node || typeof p.x !== 'number' || Number.isNaN(p.x)) continue
-    const k = keyOf(node) ?? '__ungrouped__'
-    let g = groups.get(k)
-    if (!g) { g = { ids: [], cx: 0, cy: 0 }; groups.set(k, g) }
-    g.ids.push(p.id); g.cx += p.x; g.cy += p.y
+  // 1) 보기 그룹키로 멤버 분류 — 실제 캔버스에 그려진 노드만(nodeMap).
+  const groups = new Map<string, string[]>()
+  for (const node of props.graphData.nodes) {
+    if (!nodeMap.has(node.id)) continue
+    const key = keyOf(node) ?? '__ungrouped__'
+    const ids = groups.get(key)
+    if (ids) ids.push(node.id)
+    else groups.set(key, [node.id])
   }
-  if (groups.size <= 1) return   // 분리 불필요
+  if (groups.size <= 1) return
 
-  // 각 그룹 반경 → 둘레 간격 확보한 ring 반지름
-  const arr = [...groups.values()].map(g => {
-    g.cx /= g.ids.length; g.cy /= g.ids.length
-    let r = 60
-    for (const id of g.ids) {
-      const p = posById.get(id)!
-      const d = Math.hypot(p.x - g.cx, p.y - g.cy)
-      if (d > r) r = d
-    }
-    return { ids: g.ids, cx: g.cx, cy: g.cy, r }
+  // 2) 각 그룹을 컴팩트 원반(phyllotaxis) 로컬좌표로 — index 0 은 중심(추후 앵커 자리).
+  const clusters = [...groups.entries()].map(([key, ids]) => {
+    const local = phyllotaxisDisc(ids.length, CLUSTER_NODE_SPACING)
+    const radius = local.reduce((m, p) => Math.max(m, Math.hypot(p.x, p.y)), CLUSTER_NODE_SPACING)
+    return { key, ids, local, radius }
   })
-  const GAP = 160
-  const circumference = arr.reduce((s, g) => s + 2 * g.r + GAP, 0)
-  const ringR = Math.max(circumference / (2 * Math.PI), 320)
 
-  // 각 그룹을 ring 위 목표 지점으로 평행이동(내부 구조 보존)
+  // 3) 그룹 중심을 정사각 격자 셀에 하나씩(셀 = 최대 그룹 지름 + 간격) → 셀 분리로 겹침 0.
+  const cell = clusters.reduce((m, c) => Math.max(m, 2 * c.radius), 0) + CLUSTER_GAP
+  const cols = Math.ceil(Math.sqrt(clusters.length))
   const updates: { id: string; x: number; y: number }[] = []
-  arr.forEach((g, i) => {
-    const angle = (i / arr.length) * Math.PI * 2 - Math.PI / 2
-    const tx = Math.cos(angle) * ringR
-    const ty = Math.sin(angle) * ringR
-    const dx = tx - g.cx, dy = ty - g.cy
-    for (const id of g.ids) {
-      const p = posById.get(id)!
-      updates.push({ id, x: p.x + dx, y: p.y + dy })
-    }
+  clusters.forEach((c, ci) => {
+    const cx = (ci % cols) * cell
+    const cy = Math.floor(ci / cols) * cell
+    c.ids.forEach((id, i) => updates.push({ id, x: cx + c.local[i].x, y: cy + c.local[i].y }))
   })
+
   try { nvl.setNodePositions(updates as unknown as NvlNode[], false) } catch { /* 무해 */ }
+}
+
+/** 해바라기(phyllotaxis) 원반 — n개 점을 (0,0) 주위에 균일·컴팩트하게. 결정적. index 0 = 정중앙. */
+function phyllotaxisDisc(n: number, spacing: number): { x: number; y: number }[] {
+  const GOLDEN = Math.PI * (3 - Math.sqrt(5))   // 황금각 ≈137.5°
+  const pts: { x: number; y: number }[] = []
+  for (let i = 0; i < n; i++) {
+    const r = spacing * Math.sqrt(i)
+    const a = i * GOLDEN
+    pts.push({ x: r * Math.cos(a), y: r * Math.sin(a) })
+  }
+  return pts
 }
 
 function destroyNvl(): void {
@@ -471,10 +505,10 @@ function syncGraph(): void {
     nvlInstance.value.addAndUpdateElementsInGraph(newNvlNodes, newNvlRels)
   }
 
-  // 대량 주입(보기모드 전환 등)이면 클러스터 분리 후 카메라 맞춤. 드래그-드롭 단건(1~2개)은
+  // 대량 주입(보기모드 전환 등)이면 클러스터 배치 후 카메라 맞춤. 드래그-드롭 단건(1~2개)은
   // 기존 화면을 유지하려고 재배치/재맞춤하지 않는다(수동 배치 보존).
   if (newNvlNodes.length >= 3) {
-    separateClusters()
+    layoutClusters()
     fitView()
   }
 
@@ -784,9 +818,14 @@ watch(() => props.hullLevels, () => {
   groupHulls.redraw()
 })
 
-// 클러스터 키가 바뀌면(보기 전환) 기존 위치를 새 그룹 기준으로 다시 분리.
+// 클러스터 키가 바뀌면(보기 전환) 새 그룹 기준으로 다시 배치.
 watch(() => props.clusterKeyOf, () => {
-  if (nvlInstance.value) { separateClusters(); fitView(); groupHulls.redraw() }
+  if (nvlInstance.value) { layoutClusters(); fitView(); groupHulls.redraw() }
+})
+
+// 우측 패널 열림/닫힘으로 가시영역이 바뀌면 다시 프레임(리사이즈 중 매 px 재맞춤은 피하고 토글만).
+watch(() => props.rightInset, (n, o) => {
+  if ((n > 0) !== (o > 0) && nvlInstance.value) fitView()
 })
 
 // 색 기준(라벨↔건강) 전환 시 이미 그려진 노드 색을 즉시 갱신

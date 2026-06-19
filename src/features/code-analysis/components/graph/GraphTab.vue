@@ -698,6 +698,7 @@ watch(hasGraph, (has, prev) => {
           :colorMode="colorMode"
           :relFilter="relFilter"
           :hiddenRelTypes="hiddenRelTypes"
+          :rightInset="showNodePanel ? panelWidth : 0"
           @node-select="handleNodeSelect"
           @relationship-select="handleRelationshipSelect"
           @node-delete="handleNodeRemoveFromCanvas"
