@@ -101,10 +101,12 @@ export function structureLogicalName(node: GraphNode): string {
 
 /**
  * 논리명 모드 표시값 — 단일 결정처(canvas·tree 공유, DRY).
- *   1) LLM 논리명 있으면 그것
+ *   1) LLM 논리명 있으면 그것(한글 업무명)
  *   2) 구조 노드면 한글 라벨('변수 선언부' 등)
- *   3) 둘 다 없으면 `논리명 없음 · <물리식별자>` — 물리명을 논리명인 척 노출하지 않고
- *      "비었음"을 명시하되, 위치 식별용으로 물리명 병기.
+ *   3) 둘 다 없으면 **물리명 그대로**(예 PRC_XXX / SELECT[12]).
+ *      논리명(한글 산문) vs 물리명(영문 식별자)은 한눈에 자연 구분되므로 "논리명 없음"
+ *      꼬리표를 붙이지 않는다 — 외부 stub·테이블 등에 "없음"이 도배돼 분석 실패처럼
+ *      보이던 혼란 제거(사용자 피드백). 물리명을 논리명인 척 강조하는 것도 아니다(그냥 이름).
  * @param physical 호출측이 계산한 물리 식별자(이름 또는 `타입[라인]`).
  */
 export function logicalModeName(node: GraphNode, physical: string): string {
@@ -112,5 +114,5 @@ export function logicalModeName(node: GraphNode, physical: string): string {
   if (typeof ln === 'string' && ln.trim()) return ln.trim()
   const struct = structureLogicalName(node)
   if (struct) return struct
-  return physical ? `논리명 없음 · ${physical}` : '논리명 없음'
+  return physical || '이름 없음'
 }

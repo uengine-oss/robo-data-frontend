@@ -15,7 +15,7 @@
  */
 
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { logger } from '@/shared/utils/logger'
 import { STORAGE_KEYS } from '@/shared/config/storageKeys'
 import type {
@@ -291,12 +291,57 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   // ----- 콘솔 메시지 -----
   const consoleMessages = ref<StreamMessage[]>([])
 
+  // 마지막 콘솔 메시지 시각(ms) — 무음구간 안심 메시지(heartbeat) 판단용.
+  let lastMessageMs = 0
+
   function addMessage(type: MessageType, content: string): void {
     consoleMessages.value.push({ type, content, timestamp: createTimestamp() })
+    lastMessageMs = Date.now()
   }
 
   function clearMessages(): void {
     consoleMessages.value = []
+  }
+
+  // ----- 진행감 집계 (US4 FR-011a) -----
+  // step6(LLM 분석)은 처리 단위(processing_event)가 전부 sub_action 을 달고 와서
+  // 과거엔 콘솔에 한 줄도 안 흘렀다(무음). 여기서 entity_id 단위로 dedup(한 코드노드의
+  // 여러 split 을 1회로) + 종류별 throttle(K건마다 1줄) 해서 "쏟아짐 없이" 진행감만 전한다.
+  /** 종류별로 이미 진행 집계에 센 entity_id (중복 방지). */
+  const processedIds = new Map<string, Set<string>>()
+  /** 진행감 메시지 throttle 간격(종류별 N건마다 1줄). 코드노드가 대다수라 촘촘히. */
+  const PROGRESS_THROTTLE: Record<string, number> = { CodeNode: 5, Module: 1, Table: 1, Question: 5 }
+
+  function resetProgressTracking(): void {
+    processedIds.clear()
+    lastMessageMs = Date.now()
+  }
+
+  // ----- 무음구간 안심 메시지(heartbeat) -----
+  // 처리 중인데 일정 시간 콘솔이 조용하면(이벤트 사이 빈틈) "아직 잘 진행 중"이라고 안심시킨다.
+  // step6 시작 직후·단계 전환 등 이벤트가 잠시 끊기는 구간에도 멈춘 듯 보이지 않게.
+  let heartbeatTimer: ReturnType<typeof setInterval> | undefined
+  let reassureIdx = 0
+  const REASSURE_LINES = [
+    '⏳ 아직 열심히 분석하고 있어요 — 조금만 기다려 주세요 🙂',
+    '⏳ 코드를 차근차근 살펴보는 중이에요. 멈춘 게 아니니 안심하세요.',
+    '⏳ 복잡한 코드일수록 시간이 조금 더 걸려요 — 정상적으로 진행 중입니다.',
+  ]
+  const HEARTBEAT_SILENCE_MS = 12000   // 이 시간 이상 콘솔이 조용하면 안심 1줄
+  const HEARTBEAT_TICK_MS = 4000
+
+  function startHeartbeat(): void {
+    stopHeartbeat()
+    heartbeatTimer = setInterval(() => {
+      if (!isProcessing.value) return
+      if (Date.now() - lastMessageMs < HEARTBEAT_SILENCE_MS) return
+      addMessage('message', REASSURE_LINES[reassureIdx % REASSURE_LINES.length])
+      reassureIdx++
+    }, HEARTBEAT_TICK_MS)
+  }
+
+  function stopHeartbeat(): void {
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = undefined }
   }
 
   // ----- 그래프 이벤트 (피드) -----
@@ -378,6 +423,8 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   // ----- 프로세스 상태 -----
   const isProcessing = ref(false)
+  // 처리 시작/종료에 맞춰 무음구간 안심 heartbeat 가동(전략 무관 — isProcessing 단일 신호).
+  watch(isProcessing, (proc) => { if (proc) { reassureIdx = 0; startHeartbeat() } else stopHeartbeat() })
   const currentStep = ref('')
   const totalPhases = ref(6) // 첫 phase_event 의 totalPhases 로 동적 조정됨
   const currentPhase = ref(0)
@@ -426,7 +473,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   async function doUpload(files: File[], meta: BackendRequestMetadata) {
     currentStep.value = '[1단계] 파일 업로드 중...'
-    addMessage('message', `🚀 파일 업로드 시작 (${files.length}개 파일)`)
+    addMessage('message', `📤 파일 ${files.length}개를 안전하게 올리는 중이에요...`)
 
     const result = await antlrApi.uploadFiles(meta, files, sessionStore.getHeaders())
 
@@ -436,13 +483,13 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
     saveToStorage()
 
-    addMessage('message', `✅ 업로드 완료: 소스 ${result.files.length}개, DDL ${result.ddlFiles.length}개`)
+    addMessage('message', `✅ 업로드를 마쳤어요 — 소스 ${result.files.length}개, DDL ${result.ddlFiles.length}개를 받았습니다`)
     return result
   }
 
   async function doParse() {
     currentStep.value = '[2단계] 파싱 중...'
-    addMessage('message', '🔧 파싱 시작...')
+    addMessage('message', '🔧 코드 구조를 찬찬히 살펴보는 중이에요...')
 
     await antlrApi.parseStream(
       analyzeMeta.value,
@@ -458,7 +505,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
       }
     )
 
-    addMessage('message', '✅ 파싱 완료')
+    addMessage('message', '✅ 코드 구조 파악을 마쳤어요')
   }
 
   /**
@@ -526,23 +573,35 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     }
   }
 
-  /** entity_kind → 콘솔 한글 라벨. 미등록은 원문 그대로. */
+  /** entity_kind → 콘솔에 쓸 친절한 한글 명사. 미등록은 '항목'. */
   const PROCESSING_KIND_KO: Record<string, string> = {
-    Batch: '코드 분석', CodeNode: '코드노드', Module: '모듈', Table: '테이블', Question: '질문',
+    Batch: '코드', CodeNode: '코드', Module: '모듈', Table: '테이블', Question: '질문',
   }
 
   /**
-   * processing_event(step 안 처리 단위) → 콘솔 라이브감.
-   * step6(LLM 분석)은 한 단계가 수 분이라 step message 사이가 비어 콘솔이 얼어 보인다.
-   * 처리 단위 완료를 콘솔에 흘려 "쭉 진행" 보이게. 플러드 방지: **sub_action 없는
-   * 최상위 done만**(코드노드/모듈/테이블 1건 완료), start/failed·세부액션은 제외.
+   * processing_event(step 안 처리 단위) → 콘솔 진행감 (US4 FR-011a).
+   *
+   * ★근본수정: 과거엔 `sub_action` 있으면 전량 폐기해서 step6(LLM, 수 분)의 처리단위가
+   * 모두 sub_action 을 달고 오는 탓에 **콘솔이 step6 내내 무음**이었다(죽은 핸들러).
+   * 이제 **entity_id 단위 dedup**(한 코드노드의 warmup/3분할 = 1회로) + **종류별 throttle**
+   * (PROGRESS_THROTTLE 건마다 1줄)로 "쏟아짐 없이" 친절한 진행감만 전한다. 원시 ID 미노출.
    */
   function applyProcessingEvent(event: AnalyzeEvent): void {
-    if (event.status !== 'done' || event.sub_action) return
-    const kind = PROCESSING_KIND_KO[event.entity_kind ?? ''] ?? (event.entity_kind ?? '항목')
+    if (event.status !== 'done') return
     const id = event.entity_id ?? ''
-    const short = id.includes(':') ? id.split(':').pop() : id
-    addMessage('message', `  ↳ ${kind} 분석 완료: ${short || id}`)
+    if (!id) return
+    const rawKind = event.entity_kind ?? ''
+    // 같은 처리 대상(코드노드 1개)이 여러 sub_action(done) 으로 와도 1회만 센다.
+    let seen = processedIds.get(rawKind)
+    if (!seen) { seen = new Set(); processedIds.set(rawKind, seen) }
+    if (seen.has(id)) return
+    seen.add(id)
+    const count = seen.size
+    const throttle = PROGRESS_THROTTLE[rawKind] ?? 5
+    // 첫 건은 바로(시작 신호), 이후엔 throttle 건마다 한 줄(플러드 방지).
+    if (count !== 1 && count % throttle !== 0) return
+    const kind = PROCESSING_KIND_KO[rawKind] ?? '항목'
+    addMessage('message', `🧠 ${kind} ${count}개를 이해했어요 — 계속 진행 중이에요`)
   }
 
   /** node_event/relationship_event(라이브 그래프) → 그래프 병합. */
@@ -562,10 +621,11 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   async function doAnalyze(): Promise<void> {
     currentStep.value = '🧠 AI 분석 진행 중...'
     clearGraphEvents()
+    resetProgressTracking()
     dynamicSteps.value = []
     // % 추정용 예상 단계수(node_done 개수). 타임라인은 정확, 바는 추정(완료 시 100% 보정).
     totalPhases.value = analyzeMeta.value.strategy === 'dbms' ? 13 : 14
-    addMessage('message', '🔍 분석 시작...')
+    addMessage('message', '🔍 코드 분석을 시작했어요 — 차근차근 진행할게요. 잠시만 기다려 주세요 🙂')
 
     await roboApi.analyze(
       analyzeMeta.value,
@@ -584,7 +644,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
       }
     )
 
-    addMessage('message', '✅ 분석 완료')
+    addMessage('message', '✅ 코드 분석을 마쳤어요 — 결과를 정리하는 중이에요')
     currentPhaseProgress.value = 100
 
     // 스트리밍으로 누적된 그래프를 그대로 유지 — clearGraphData 하면 분석 중 보여주던 노드가
@@ -612,7 +672,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   async function loadExistingGraphData(): Promise<boolean> {
     try {
-      addMessage('message', '📥 기존 그래프 데이터 로드 중...')
+      addMessage('message', '📥 저장된 그래프를 불러오는 중이에요...')
 
       const result = await roboApi.getGraphData(sessionStore.getHeaders())
 
@@ -641,21 +701,21 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
         logger.debug('[loadExistingGraphData] 노드 라벨별 개수:', labelCounts)
 
         updateGraphData(result.Nodes, result.Relationships || [])
-        addMessage('message', `✅ 그래프 데이터 로드 완료: ${result.Nodes.length}개 노드, ${result.Relationships?.length || 0}개 관계`)
+        addMessage('message', `✅ 그래프를 불러왔어요 — 노드 ${result.Nodes.length}개, 관계 ${result.Relationships?.length || 0}개`)
         return true
       } else {
-        addMessage('message', 'ℹ️ 기존 그래프 데이터가 없습니다.')
+        addMessage('message', 'ℹ️ 아직 저장된 그래프가 없어요. 분석을 먼저 실행해 주세요.')
         return false
       }
     } catch (error) {
       logger.warn('기존 그래프 데이터 로드 실패:', error)
-      addMessage('error', `❌ 그래프 데이터 로드 실패: ${error}`)
+      addMessage('error', `❌ 그래프를 불러오지 못했어요: ${error}`)
       return false
     }
   }
 
   async function uploadFiles(files: File[], meta: BackendRequestMetadata) {
-    addMessage('message', '🔍 기존 데이터 확인 중...')
+    addMessage('message', '🔍 이전에 분석한 데이터가 있는지 확인하는 중이에요...')
     const { hasData, nodeCount } = await checkExistingData()
 
     if (hasData) {
@@ -736,9 +796,9 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
       await doAnalyze()
 
       currentStep.value = '전체 처리 완료'
-      addMessage('message', '🎉 전체 처리가 완료되었습니다!')
+      addMessage('message', '🎉 모든 처리가 끝났어요! 이제 그래프를 살펴보세요 😊')
     } catch (error) {
-      addMessage('error', `❌ 처리 실패: ${error}`)
+      addMessage('error', `❌ 처리 중 문제가 생겼어요: ${error}`)
       currentStep.value = '처리 실패'
       throw error
     } finally {
@@ -760,7 +820,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
       return
     }
 
-    addMessage('message', '🔍 기존 데이터 확인 중...')
+    addMessage('message', '🔍 이전에 분석한 데이터가 있는지 확인하는 중이에요...')
     const { hasData, nodeCount } = await checkExistingData()
 
     if (hasData) {
@@ -780,15 +840,15 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     clearMessages()
 
     try {
-      addMessage('message', '🔄 인제스천 시작...')
+      addMessage('message', '🔄 다시 분석을 시작했어요...')
       await doParse()
       await doAnalyze()
 
       currentStep.value = '전체 처리 완료'
-      addMessage('message', '🎉 인제스천이 완료되었습니다!')
+      addMessage('message', '🎉 분석이 모두 끝났어요! 이제 그래프를 살펴보세요 😊')
     } catch (error) {
       logger.error('[restartPipeline] 실패:', error)
-      addMessage('error', `❌ 인제스천 실패: ${error}`)
+      addMessage('error', `❌ 분석 중 문제가 생겼어요: ${error}`)
       currentStep.value = '처리 실패'
       throw error
     } finally {
