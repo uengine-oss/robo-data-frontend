@@ -106,23 +106,23 @@ function selectViewMode(mode: Exclude<ViewMode, 'default'>): void {
 /** 보기 모드 적용 — 프리셋/캔버스 populate 까지 일괄 처리(단일 결정처). */
 function applyViewMode(mode: ViewMode): void {
   viewMode.value = mode
-  if (mode === 'module') {
-    // 모듈간: 가상 그래프 프리셋이 캔버스를 새로 채운다.
-    labelFilters.value = []
-    canvasStore.setPreset('module-interaction')
-    autoPopulateHint.value = ''
-    return
-  }
-  // module 외 모드로 가면 프리셋 해제(가상 그래프 끔).
-  if (isInteractionPresetActive.value) canvasStore.setPreset(null)
+  // 이전 프리셋(모듈간/건강 가상그래프) 해제 — 다른 모드로 갈 때 항상 클리어.
+  if (canvasPresetMode.value) canvasStore.setPreset(null)
 
-  if (mode === 'area') {
+  if (mode === 'module') {
+    // 모듈간: 가상 그래프 프리셋(모듈↔모듈 CALL + 모듈↔테이블 R/W).
+    labelFilters.value = []
+    autoPopulateHint.value = ''
+    canvasStore.setPreset('module-interaction')
+  } else if (mode === 'health') {
+    // 건강: 가상 그래프 프리셋(위험도 루틴 ↔ 테이블 R/W). 외딴섬 방지 + 위험색.
+    autoPopulateHint.value = ''
+    canvasStore.setPreset('health-rw')
+  } else if (mode === 'area') {
     ensureNodesForView('component_id')
   } else if (mode === 'area-struct') {
     // 파일 단위 구조 영역 — 루틴(호출가능)만 파일별로 묶어 깔끔하게(구문 전부는 너무 빽빽).
     ensureNodesForView('file_path', 'routine')
-  } else if (mode === 'health') {
-    ensureNodesForView('risk_level', 'routine')
   } else if (mode === 'table-flow') {
     autoPopulateHint.value = ''
     canvasStore.loadTableFlow()   // 테이블 + R/W 하는 DML 구문만
@@ -428,11 +428,12 @@ function handleLabelFilter(label: string): void {
  */
 const { presetMode: canvasPresetMode } = storeToRefs(canvasStore)
 
-const isInteractionPresetActive = computed(() => canvasPresetMode.value === 'module-interaction')
-
-// 프리셋이 외부 동작(캔버스 비우기·라벨 격리 등)으로 해제되면 module 보기도 default 로 환원 — 상태 일관성.
-watch(isInteractionPresetActive, (active) => {
-  if (!active && viewMode.value === 'module') viewMode.value = 'default'
+// 프리셋(모듈간/건강 가상그래프)이 외부 동작(캔버스 비우기·라벨 격리 등)으로 해제되면
+// 해당 보기도 default 로 환원 — 상태 일관성.
+watch(canvasPresetMode, (mode) => {
+  if (mode === null && (viewMode.value === 'module' || viewMode.value === 'health')) {
+    viewMode.value = 'default'
+  }
 })
 
 /** isolate 해제 (오버뷰 `*` 클릭) — 강조 해제 + 캔버스 비움(빈 상태로 환원). */
