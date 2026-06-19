@@ -10,6 +10,7 @@
  */
 
 import { logger } from '@/shared/utils/logger'
+import { logicalModeName } from '@/shared/utils/nodeClassify'
 import { ref, computed, onMounted, onUnmounted, watch, shallowRef, nextTick } from 'vue'
 import { NVL } from '@neo4j-nvl/base'
 import {
@@ -83,7 +84,7 @@ const NVL_OPTIONS = {
     nodeRepulsion: 800,
     linkDistance: 80,
     gravity: 0.05,
-    physics: { enabled: false },
+    physics: { enabled: false },   // 비물리 배치(레이아웃 1회) — 렌더 후 fit()으로 카메라 맞춤
     updateOnDrag: false,
     updateOnClick: false
   } as any
@@ -111,7 +112,7 @@ const HEALTH_NEUTRAL = '#868e96' // 건강지표 없는 노드(테이블·모듈
 /** colorMode 에 따른 노드 색 — 'health' 면 risk 기반, 아니면 라벨 기반. */
 function resolveNodeColor(labels: string[], properties?: Record<string, unknown>): string {
   if (props.colorMode === 'health') {
-    const risk = String(properties?.risk ?? '')
+    const risk = String(properties?.risk_level ?? '')
     return HEALTH_COLORS[risk] ?? HEALTH_NEUTRAL
   }
   return getNodeColor(labels)
@@ -187,11 +188,9 @@ const contextMenuRef = ref<HTMLElement | null>(null)
 // ============================================================================
 
 function resolveCaption(node: GraphNode): string {
-  if (showLogicalNames.value) {
-    const ln = node.properties?.logical_name as string
-    if (ln) return ln
-  }
-  return (node.properties?.name as string) || node.labels?.[node.labels.length - 1] || node.id
+  const physical = (node.properties?.name as string) || node.labels?.[node.labels.length - 1] || node.id
+  // 논리명 모드는 단일 결정처에 위임(논리명→구조한글→'논리명 없음·물리').
+  return showLogicalNames.value ? logicalModeName(node, physical) : physical
 }
 
 function toNvlNode(node: GraphNode, isSelected = false): NvlNode {
@@ -308,6 +307,7 @@ async function initNvl(): Promise<void> {
       onLayoutStep: () => groupHulls.redraw(),
       onLayoutDone: () => {
         isInitializing.value = false
+        fitView()
         groupHulls.redraw()
       }
     }
@@ -317,6 +317,19 @@ async function initNvl(): Promise<void> {
   groupHulls.attach()
   updateStats()
   visibleNodeCount.value = nodeMap.size
+}
+
+/**
+ * 카메라를 현재 캔버스 노드 전체에 맞춘다(zoom/pan 조정).
+ * NVL 비물리 배치는 노드를 원점이 아닌 곳(grid)에 둘 수 있어, fit 없으면 화면 밖이라
+ * "빈 화면"처럼 보인다 — 보기모드(대량 주입)·드래그-드롭 후 호출해 노드가 보이게 한다.
+ */
+function fitView(): void {
+  const nvl = nvlInstance.value
+  if (!nvl) return
+  const ids = [...nodeMap.keys()]
+  if (ids.length === 0) return
+  try { nvl.fit(ids) } catch { /* 레이아웃 준비 전 호출은 무해 */ }
 }
 
 function destroyNvl(): void {
@@ -389,6 +402,10 @@ function syncGraph(): void {
   if (newNvlNodes.length > 0 || newNvlRels.length > 0) {
     nvlInstance.value.addAndUpdateElementsInGraph(newNvlNodes, newNvlRels)
   }
+
+  // 대량 주입(보기모드 전환 등)이면 카메라를 노드에 맞춤. 드래그-드롭 단건(1~2개)은
+  // 기존 화면을 유지하려고 재맞춤하지 않는다.
+  if (newNvlNodes.length >= 3) fitView()
 
   updateStats()
   visibleNodeCount.value = nodeMap.size

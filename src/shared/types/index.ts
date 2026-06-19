@@ -212,7 +212,8 @@ export type AnalyzeEventType =
   | 'phase_event'         // analyzer 진행 단계 (구조화 progress)
   | 'node_event'          // 그래프 노드 (op:merge)
   | 'relationship_event'  // 그래프 엣지 (op:merge)
-// 백엔드가 더 보내지만(tool_event·todo_update·processing_event) 프론트 미렌더 → 2단계 진행강화.
+  | 'processing_event'    // step 안 처리 단위 진행 (코드노드/모듈/테이블) — 콘솔 라이브감
+// 백엔드가 더 보내지만(tool_event·todo_update) 프론트 미렌더.
 // stream_end 는 스트림 종료로 대체되어 불필요.
 
 /** relationship_event 의 끝점. Table 끝점은 id 대신 name 으로 온다. */
@@ -240,6 +241,12 @@ export interface AnalyzeEvent {
   rel_type?: string
   from?: AnalyzeGraphRef
   to?: AnalyzeGraphRef
+  // processing_event — step 안 처리 단위(코드노드/모듈/테이블) 진행. status=start|done|failed.
+  step?: string
+  entity_kind?: string
+  entity_id?: string
+  sub_action?: string
+  status?: 'start' | 'done' | 'failed'
 }
 
 // ============================================================================

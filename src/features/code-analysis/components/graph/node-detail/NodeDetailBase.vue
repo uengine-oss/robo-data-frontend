@@ -11,6 +11,7 @@ import { getRelationshipGroups } from '@/shared/utils/nodeRelationships'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import TextViewer from '@/shared/components/TextViewer.vue'
 import { relationshipRowParts, technicalNodeName } from '@/shared/utils/graphDisplay'
+import { getNodeColor } from '@/shared/config/graphStyles'
 
 interface Props {
   node: GraphNode
@@ -36,18 +37,16 @@ const hasIdentityExtra = computed(() => Boolean(slots['identity-extra']?.()))
 
 const nodeName = computed(() => technicalNodeName(props.node))
 
-// 건강지표 — risk 등 있으면 헤더에 표시.
+// 식별 배지 색 = 그래프 캔버스와 동일한 노드 색(단일 소스 getNodeColor 재사용=DRY).
+// 같은 라벨 → 같은 색(재현). 어떤 색 포맷(hex/hsl)이든 CSS color-mix 로 틴트 처리.
+const badgeColor = computed(() => getNodeColor(props.node.labels ?? []))
+
+// 건강지표 — 최종 판정만 저장(spec 020): risk_level(+in_call_cycle). 중간지표(fan/loc/god/table)는 미저장.
 const health = computed(() => {
   const p = props.node.properties || {}
-  const risk = typeof p.risk === 'string' ? p.risk : ''
-  if (!risk && p.fan_in == null && p.loc == null) return null
-  const num = (v: unknown) => (typeof v === 'number' ? v : undefined)
-  return {
-    risk,
-    fanIn: num(p.fan_in), fanOut: num(p.fan_out), loc: num(p.loc),
-    tableCoupling: num(p.table_coupling),
-    god: p.god_flag === true, inCycle: p.in_cycle === true,
-  }
+  const risk = typeof p.risk_level === 'string' ? p.risk_level : ''
+  if (!risk && p.in_call_cycle !== true) return null
+  return { risk, inCycle: p.in_call_cycle === true }
 })
 const RISK_LABEL: Record<string, string> = { high: '높음', medium: '보통', low: '낮음' }
 
@@ -220,7 +219,7 @@ const relStripToneClass = computed(() => {
                 <span class="identity-paren">)</span>
               </template>
             </span>
-            <span v-if="labelBadge" class="identity-badge">{{ labelBadge }}</span>
+            <span v-if="labelBadge" class="identity-badge" :style="{ '--badge-color': badgeColor }">{{ labelBadge }}</span>
           </div>
           <div v-if="subInfo" class="detail-locate">
             <span class="detail-locate__k">소속</span>
@@ -230,11 +229,6 @@ const relStripToneClass = computed(() => {
             <span v-if="health.risk" class="health-risk" :class="'health-risk--' + health.risk" title="건강지표(위험도)">
               위험 {{ RISK_LABEL[health.risk] ?? health.risk }}
             </span>
-            <span v-if="health.fanIn != null" class="health-metric" title="이 노드를 부르는 곳 수 (피호출)">피호출 {{ health.fanIn }}</span>
-            <span v-if="health.fanOut != null" class="health-metric" title="이 노드가 부르는 수 (호출)">호출 {{ health.fanOut }}</span>
-            <span v-if="health.loc != null" class="health-metric" title="코드 줄 수">LOC {{ health.loc }}</span>
-            <span v-if="health.tableCoupling" class="health-metric" title="접근하는 테이블 수">테이블 {{ health.tableCoupling }}</span>
-            <span v-if="health.god" class="health-flag" title="크고 복잡(God 함수)">God</span>
             <span v-if="health.inCycle" class="health-flag" title="호출 순환에 포함">순환</span>
           </div>
           <div v-if="hasIdentityExtra" class="detail-identity-extra">
@@ -376,10 +370,12 @@ const relStripToneClass = computed(() => {
   font-weight: 700;
   padding: 3px 8px;
   border-radius: 999px;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-muted);
   letter-spacing: 0.04em;
+  // 색 = 그 노드의 그래프 색(--badge-color, getNodeColor). 어두운 패널 위 가독 위해
+  // 색을 텍스트로 + 같은 색의 옅은 틴트 배경/테두리(color-mix). 라벨 없으면 중립 폴백.
+  color: var(--badge-color, var(--color-text-muted));
+  border: 1px solid color-mix(in srgb, var(--badge-color, var(--color-border)) 45%, transparent);
+  background: color-mix(in srgb, var(--badge-color, var(--color-border)) 15%, transparent);
 }
 
 .detail-health {

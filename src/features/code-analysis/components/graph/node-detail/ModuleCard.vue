@@ -7,7 +7,7 @@
 import { computed } from 'vue'
 import type { GraphNode } from '@/shared/types'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
-import { getRelationshipGroups, getAttachedByType } from '@/shared/utils/nodeRelationships'
+import { getRelationshipGroups, getMembersByLabels, ROUTINE_LABELS } from '@/shared/utils/nodeRelationships'
 import { technicalNodeName, logicalNodeName } from '@/shared/utils/graphDisplay'
 import NodeDetailBase from './NodeDetailBase.vue'
 
@@ -22,8 +22,7 @@ const subLabel = computed(() => (props.node.properties?.type as string) || 'MODU
 
 const displayName = computed(() => (props.node.properties?.logical_name as string) || '')
 const intent = computed(() => (props.node.properties?.intent as string) || '')
-const comment = computed(() => (props.node.properties?.comment as string) || '')
-const annotations = computed(() => (props.node.properties?.annotations as string) || '')
+const notes = computed(() => (props.node.properties?.notes as string) || '')
 
 const subInfo = computed(() => {
   const p = props.node.properties || {}
@@ -56,7 +55,7 @@ function resolveNode(id: string): { name: string; logical: string } {
 }
 
 const methods = computed<MemberLink[]>(() =>
-  getAttachedByType(groups.value, 'HAS_FUNCTION').map(l => {
+  getMembersByLabels(groups.value, projectStore.nodeMap, ROUTINE_LABELS).map(l => {
     const r = resolveNode(l.target)
     return { id: l.target, name: r.name, logical: r.logical }
   }),
@@ -90,16 +89,11 @@ const umlEdges = computed(() =>
         </div>
       </section>
 
-      <section v-if="annotations || comment" class="detail-card">
-        <span class="detail-card__label">메타</span>
+      <section v-if="notes" class="detail-card">
+        <span class="detail-card__label">메모</span>
         <div class="detail-card__body detail-card__body--tight module-meta">
-          <div v-if="annotations" class="meta-row">
-            <span class="meta-key">annotations</span>
-            <span class="meta-val">{{ annotations }}</span>
-          </div>
-          <div v-if="comment" class="meta-row">
-            <span class="meta-key">comment</span>
-            <span class="meta-val">{{ comment }}</span>
+          <div class="meta-row">
+            <span class="meta-val">{{ notes }}</span>
           </div>
         </div>
       </section>

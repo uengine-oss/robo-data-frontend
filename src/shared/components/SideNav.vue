@@ -7,9 +7,8 @@
  */
 import { ref, computed, inject } from 'vue'
 import { useSessionStore } from '@/shared/stores/session'
-import { useNavigatorStore } from '@/shared/stores/navigator'
 import { storeToRefs } from 'pinia'
-import { IconChevronDown, IconFolder } from '@/shared/icons'
+import { IconChevronDown } from '@/shared/icons'
 import {
   FEATURE_GROUPS,
   FEATURES,
@@ -19,9 +18,7 @@ import {
 } from '@/shared/config/features'
 
 const sessionStore = useSessionStore()
-const navigatorStore = useNavigatorStore()
 const { activeTab } = storeToRefs(sessionStore)
-const { isPanelOpen: isNavigatorPanelOpen } = storeToRefs(navigatorStore)
 
 const isEmbedded = inject<boolean>('isEmbedded', false)
 
@@ -46,7 +43,6 @@ const toggleGroup = (id: FeatureGroupId) => { expanded.value[id] = !expanded.val
 const isGroupActive = (children: FeatureDef[]) => children.some(c => c.id === activeTab.value)
 
 const setActiveTab = (id: string) => sessionStore.setActiveTab(id)
-const toggleNavigator = () => navigatorStore.setPanelOpen(!isNavigatorPanelOpen.value)
 </script>
 
 <template>
@@ -92,24 +88,13 @@ const toggleNavigator = () => navigatorStore.setPanelOpen(!isNavigatorPanelOpen.
         </button>
       </template>
 
-      <!-- Navigator 패널 토글 (「코드 그래프」 탭일 때만) -->
-      <template v-if="activeTab === 'graph'">
-        <div class="nav-divider"></div>
-        <button class="nav-item" :class="{ active: isNavigatorPanelOpen }"
-          @click="toggleNavigator" title="Project Navigator">
-          <span class="nav-icon">
-            <IconFolder :size="20" />
-          </span>
-          <span class="nav-label">Navigator</span>
-        </button>
-      </template>
     </div>
   </nav>
 </template>
 
 <style lang="scss" scoped>
 .side-nav {
-  width: 72px;
+  width: 52px;
   height: 100%;
   background: var(--color-bg-secondary);
   border-right: 1px solid var(--color-border);
@@ -119,16 +104,24 @@ const toggleNavigator = () => navigatorStore.setPanelOpen(!isNavigatorPanelOpen.
   transition: width 0.2s ease;
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-width: none;                 // 스크롤바 숨김 → 아이콘이 폭 기준 정확히 중앙(스크롤바가 우측 먹어 좌측 치우치던 것 해결)
+  &::-webkit-scrollbar { width: 0; height: 0; }
 
   &:hover {
     width: 180px;
 
+    // 확장 시에만 좌측 정렬 + 자식 들여쓰기 (접힘 땐 중앙 정렬로 균형)
+    .nav-item { justify-content: flex-start; gap: 12px; }
+    .nav-child { padding-left: 20px; }
+
     .nav-label {
+      display: block;
       opacity: 1;
       max-width: 100px;
     }
 
     .nav-chevron {
+      display: flex;
       opacity: 1;
     }
   }
@@ -137,15 +130,16 @@ const toggleNavigator = () => navigatorStore.setPanelOpen(!isNavigatorPanelOpen.
 .nav-items {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 0 8px;
+  gap: 6px;
+  padding: 0 5px;
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px;
+  justify-content: center;   // 접힘=아이콘 폭 중앙(근본). 펼침(hover) 때만 flex-start.
+  gap: 0;                    // 접힘 땐 0 → 0폭 라벨과의 gap이 아이콘을 좌측으로 밀던 것 제거. 펼침 때만 12px.
+  padding: 9px;
   background: transparent;
   border: none;
   border-radius: var(--radius-lg);
@@ -157,35 +151,17 @@ const toggleNavigator = () => navigatorStore.setPanelOpen(!isNavigatorPanelOpen.
   width: 100%;
   text-align: left;
 
-  &::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 3px;
-    height: 0;
-    background: linear-gradient(180deg, var(--color-accent) 0%, var(--color-accent-hover) 100%);
-    border-radius: 0 2px 2px 0;
-    transition: height 0.2s ease;
-  }
-
   &:hover {
     background: var(--color-bg-tertiary);
     color: var(--color-text);
   }
 
+  // 선택 표시 = 둥근 배경 pill + accent 아이콘 (좌측 작대기 폐기 — 중앙정렬과 일관)
   &.active {
-    background: linear-gradient(135deg, rgba(34, 139, 230, 0.15) 0%, rgba(34, 139, 230, 0.08) 100%);
+    background: rgba(34, 139, 230, 0.16);
     color: var(--color-accent);
 
-    &::before {
-      height: 24px;
-    }
-
-    .nav-icon {
-      transform: scale(1.1);
-    }
+    .nav-icon { color: var(--color-accent); }
 
     .nav-label {
       color: var(--color-accent);
@@ -210,14 +186,15 @@ const toggleNavigator = () => navigatorStore.setPanelOpen(!isNavigatorPanelOpen.
   opacity: 0;
   max-width: 0;
   overflow: hidden;
-  transition: all 0.2s ease;
+  display: none;          // 접힘 땐 flex 흐름에서 완전 제거 → 아이콘만 남아 justify-center 로 정중앙(근본). 펼침 때만 표시.
+  transition: max-width 0.2s ease, opacity 0.2s ease;
 }
 
 .nav-chevron {
   margin-left: auto;
   opacity: 0;
-  transition: all 0.2s ease;
-  display: flex;
+  transition: opacity 0.2s ease;
+  display: none;          // 접힘 땐 숨김(공간 0) → 헤더 아이콘도 중앙정렬. 펼침(hover) 때만 표시.
   align-items: center;
 
   &.rotated {
@@ -259,8 +236,7 @@ const toggleNavigator = () => navigatorStore.setPanelOpen(!isNavigatorPanelOpen.
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 4px;
-  padding-top: 0;
+  padding: 0;   // 접힘 때 자식 아이콘이 헤더와 같은 세로축에 오도록(좌우 균형). 들여쓰기는 hover 시 .nav-child 가 담당.
 }
 
 .nav-divider {
@@ -272,12 +248,7 @@ const toggleNavigator = () => navigatorStore.setPanelOpen(!isNavigatorPanelOpen.
 
 .nav-child {
   padding: 10px 12px;
-  padding-left: 20px;
   border-radius: var(--radius-md);
-
-  &::before {
-    left: 8px;
-  }
 
   .nav-icon {
     color: var(--color-text-muted);

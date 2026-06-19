@@ -45,12 +45,18 @@ export function technicalNodeName(node: GraphNode | undefined): string {
   if (name) return String(name)
   // 표시명 없는 DB 노드(TABLE/COLUMN)는 id("db.schema.name")의 마지막 세그먼트.
   const idVal = p.id as string | undefined
-  if (idVal) return idVal.split('.').pop() || idVal
-  // 이름 없는 DBMS 구문은 `타입[라인]`. raw id(elementId)는 표시하지 않는다.
-  const kind = nodeTypeLabel(node)
+  // TABLE/COLUMN 만: 점 구분 경로("db.schema.name") → 마지막 세그먼트.
+  if (idVal && idVal.includes('.')) return idVal.split('.').pop() || idVal
+  // 이름 없는 DBMS 구문(콜론 id)은 `타입[라인]` — 긴 raw 식별자 노출 금지.
   const line = p.start_line
-  if (kind) return line != null && line !== 0 ? `${kind} [${line}]` : kind
-  return labels[0] || node.id
+  const lineSuffix = (k: string) => (line != null && line !== 0 ? `${k} [${line}]` : k)
+  const kind = nodeTypeLabel(node)
+  if (kind) return lineSuffix(kind)
+  // 구체 타입 라벨이 없어도(예: :FUNCTION 단독) raw 콜론-id 는 절대 노출하지 않는다 —
+  // 첫 라벨 + 라인으로 깨끗하게(`FUNCTION [6]`). 점 구분 fqn 만 그대로 허용(이미 위에서 처리).
+  if (labels[0]) return lineSuffix(labels[0])
+  if (idVal && !idVal.includes(':')) return idVal
+  return node.id
 }
 
 /** 노드에 저장된 논리명 (비어 있으면 빈 문자열) */
@@ -74,9 +80,21 @@ export function linkEdgeOp(link: GraphLink): string {
   return typeof op === 'string' ? op.trim() : ''
 }
 
-/** 관계 타입명 그대로 + 선택적 op (예: WRITES / WRITES(UPDATE)). */
+/** 그래프 엣지 타입(기계어) → 비개발자용 한글 이름. 없으면 원본 유지. 단일 진실(DRY). */
+const EDGE_LABELS_KO: Record<string, string> = {
+  HAS_MEMBER: '멤버', HAS_COLUMN: '컬럼',
+  BELONGS_TO: '소속', PARENT_OF: '하위', CALLS: '호출',
+  READS: '읽기', WRITES: '쓰기', REFERENCES: '참조', INIT_BY: '초기화', FK: '외래키',
+  NEXT: '다음', BRANCH: '분기', AFFECTS_TABLE: '영향', HAS_RULE: '규칙',
+  HAS_EXAMPLE: '예시', HAS_QUESTION: '질문',
+}
+export function friendlyEdgeLabel(type: string): string {
+  return EDGE_LABELS_KO[type] || type
+}
+
+/** 관계 타입명(한글) + 선택적 op (예: 쓰기 / 쓰기(UPDATE)). */
 export function formatRelWithOp(link: GraphLink): string {
-  const base = link.type
+  const base = friendlyEdgeLabel(link.type)
   const op = linkEdgeOp(link)
   if (op) return `${base}(${op})`
   return base
@@ -85,7 +103,7 @@ export function formatRelWithOp(link: GraphLink): string {
 function peerFallbackCaption(node: GraphNode | undefined, tech: string): string {
   if (!node?.properties) return ''
   const p = node.properties
-  const candidates = [p.analyzed_description, p.description, p.summary, p.intent, p.comment]
+  const candidates = [p.analyzed_description, p.description, p.summary, p.intent, p.notes, p.comment]
   for (const c of candidates) {
     if (typeof c === 'string' && c.trim()) {
       const line = c.trim().split(/\n/)[0].trim()

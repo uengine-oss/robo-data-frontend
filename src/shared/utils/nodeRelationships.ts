@@ -6,12 +6,11 @@
  *   - 데이터 입력 (테이블 읽기)  : FROM / READS / REFER_TO / REFERS_TO
  *   - 데이터 출력 (테이블 쓰기)  : WRITES
  *   - 호출                       : CALLS / USES / CALLS_SQL
- *   - 부착                       : HAS_FUNCTION / HAS_VARIABLE / HAS_COLUMN /
- *                                  HAS_RULE / HAS_EXAMPLE / HAS_QUESTION /
- *                                  HAS_PROCEDURE
+ *   - 부착                       : HAS_MEMBER (그릇→루틴·데이터, 종류=노드 라벨) /
+ *                                  HAS_COLUMN / HAS_RULE / HAS_EXAMPLE / HAS_QUESTION
  *   - FK                         : FK_TO_TABLE / FK_TO_COLUMN
  *   - 변수 참조 (테이블 X, 변수)  : REFERENCES
- *   - 구조 (UI 표시 X)            : PARENT_OF / NEXT / BELONGS_TO_PACKAGE / BELONGS_TO
+ *   - 구조 (UI 표시 X)            : PARENT_OF / NEXT / BELONGS_TO
  *   - UML (Framework)             : EXTENDS / IMPLEMENTS / DEPENDENCY / COMPOSITION /
  *                                  AGGREGATION / ASSOCIATION
  *   - Actor                      : ROLE
@@ -38,10 +37,20 @@ export const CALL_RELS: ReadonlySet<string> = new Set([
   'CALLS', 'USES', 'CALLS_SQL', 'USES_CONFIG',
 ])
 
-/** 부착 (HAS_*) — 이 노드가 자식으로 가진 노드들. */
+/** 부착 (HAS_*) — 이 노드가 자식으로 가진 노드들.
+ *  HAS_MEMBER = 그릇→멤버(루틴/데이터) 단일 관계, 멤버 종류는 노드 라벨로 구분. */
 export const HAS_RELS: ReadonlySet<string> = new Set([
-  'HAS_FUNCTION', 'HAS_VARIABLE', 'HAS_COLUMN',
-  'HAS_RULE', 'HAS_EXAMPLE', 'HAS_QUESTION', 'HAS_PROCEDURE',
+  'HAS_MEMBER', 'HAS_COLUMN',
+  'HAS_RULE', 'HAS_EXAMPLE', 'HAS_QUESTION',
+])
+
+/** 멤버 노드 라벨 — HAS_MEMBER 자식 중 종류 구분용 (관계는 범용, 종류=라벨). */
+export const ROUTINE_LABELS: ReadonlySet<string> = new Set([
+  'PROCEDURE', 'FUNCTION', 'METHOD', 'TRIGGER',
+])
+export const DATA_MEMBER_LABELS: ReadonlySet<string> = new Set([
+  'VARIABLE', 'CONSTANT', 'FIELD', 'MEMBER', 'GLOBAL_VARIABLE',
+  'PARAMETER', 'PACKAGE_VARIABLE', 'CURSOR_VARIABLE', 'DEFINE', 'CONSTANT_FIELD',
 ])
 
 /** FK — 외래키 관계 (방향 무관). */
@@ -63,7 +72,7 @@ export const UML_RELS: ReadonlySet<string> = new Set([
  * - 의미가 모호하거나 양이 많아 시각화 노이즈인 보조 링크 (REFERENCES, AFFECTS_TABLE)
  */
 export const EXCLUDED_RELS: ReadonlySet<string> = new Set([
-  'PARENT_OF', 'BELONGS_TO', 'BELONGS_TO_PACKAGE',
+  'PARENT_OF', 'BELONGS_TO',
   'NEXT', 'BRANCH',
   'REFERENCES', 'AFFECTS_TABLE',
   'HAS_RULE', 'HAS_EXAMPLE', 'HAS_QUESTION',
@@ -168,13 +177,29 @@ export function getRelationshipGroups(
 
 /**
  * 부착 자식 (HAS_*) 중 특정 관계 타입만 필터.
- * 예: `getAttachedByType(groups, 'HAS_FUNCTION')` — 자식 함수들.
+ * 예: `getAttachedByType(groups, 'HAS_COLUMN')` — 테이블의 컬럼들.
  */
 export function getAttachedByType(
   groups: RelationshipGroups,
   relType: string,
 ): GraphLink[] {
   return groups.attached.filter(l => l.type === relType)
+}
+
+/**
+ * HAS_MEMBER 자식 중 **대상 노드 라벨**로 종류 필터 (관계는 범용, 종류=라벨).
+ * 예: `getMembersByLabels(groups, nodeMap, ROUTINE_LABELS)` — 그릇이 가진 루틴(함수/프로시저)들.
+ */
+export function getMembersByLabels(
+  groups: RelationshipGroups,
+  nodes: Map<string, GraphNode>,
+  labels: ReadonlySet<string>,
+): GraphLink[] {
+  return groups.attached.filter(l => {
+    if (l.type !== 'HAS_MEMBER') return false
+    const n = nodes.get(l.target)
+    return !!n && n.labels.some(label => labels.has(label))
+  })
 }
 
 // ─────────────────────────────────────────────────────────────────────────

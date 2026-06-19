@@ -49,9 +49,6 @@ interface PropertyItem {
 // 상수 정의
 // ============================================================================
 
-/** 숨길 속성 키 목록 */
-const HIDDEN_KEYS = ['labels']
-
 /** 긴 값 기준 (자수) */
 const LONG_VALUE_THRESHOLD = 50
 
@@ -97,19 +94,6 @@ const isSearchFocused = ref(false)
 // ============================================================================
 
 
-/** 속성 목록 (노드용) */
-const nodeProperties = computed<PropertyItem[]>(() => {
-  if (!props.node?.properties) return []
-  
-  return Object.entries(props.node.properties)
-    .filter(([key]) => !HIDDEN_KEYS.includes(key))
-    .map(([key, value]) => ({
-      key,
-      value: typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value),
-      isMultiLine: typeof value === 'object' || String(value).includes('\n')
-    }))
-})
-
 /** 속성 목록 (관계용) */
 const relationshipProperties = computed<PropertyItem[]>(() => {
   // 노드가 있으면 관계 속성은 절대 표시하지 않음
@@ -135,11 +119,8 @@ const relationshipProperties = computed<PropertyItem[]>(() => {
   return propsList
 })
 
-/** 표시할 속성 목록 (노드 우선, 없으면 관계) */
-const properties = computed(() => {
-  // 노드가 있으면 항상 노드 속성 표시
-  return props.node ? nodeProperties.value : relationshipProperties.value
-})
+/** 관계 선택 시 표시할 raw 속성 목록(노드는 NodeDetailContent 카드로 렌더하므로 여기서 안 씀). */
+const properties = computed(() => relationshipProperties.value)
 
 
 // ============================================================================

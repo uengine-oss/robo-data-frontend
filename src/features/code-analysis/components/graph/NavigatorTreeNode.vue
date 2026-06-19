@@ -73,7 +73,7 @@ const badgeClass = computed(() => cls.value.badgeClass)
     <div
       class="nav-tree-label"
       :class="{ 'on-canvas': isOnCanvas, 'selected': isSelected }"
-      :style="{ paddingLeft: `${8 + depth * 12}px` }"
+      :style="{ paddingLeft: `${6 + depth * 12}px` }"
       draggable="true"
       @click="onSelect"
       @dragstart="onDragStart"
@@ -127,8 +127,10 @@ const badgeClass = computed(() => cls.value.badgeClass)
     &::after {
       content: '●';
       color: var(--color-success, #40c057);
-      font-size: 8px;
-      margin-left: 4px;
+      font-size: 6px;
+      vertical-align: middle;
+      opacity: 0.9;
+      margin-left: 5px;
     }
   }
 
@@ -143,11 +145,11 @@ const badgeClass = computed(() => cls.value.badgeClass)
 }
 
 .chevron {
-  width: 20px;
-  height: 20px;
-  line-height: 20px;
+  width: 14px;
+  height: 18px;
+  line-height: 18px;
   color: var(--color-text-secondary, #868e96);
-  font-size: 13px;
+  font-size: 10px;
   text-align: center;
   flex-shrink: 0;
   cursor: pointer;

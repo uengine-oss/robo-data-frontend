@@ -123,7 +123,6 @@ export function useGroupHulls(
   let ctx: CanvasRenderingContext2D | null = null
   let resizeObserver: ResizeObserver | null = null
   let rafId = 0
-  let following = false
 
   // 노드 → 그룹 키
   function groupKeyOf(node: GraphNode, groupBy: string): string | null {
@@ -167,18 +166,13 @@ export function useGroupHulls(
     resizeObserver.observe(host)
     sizeCanvas()
 
-    host.addEventListener('mousedown', startFollow)
-    window.addEventListener('mouseup', stopFollow)
+    startLoop()
   }
 
   function detach(): void {
-    stopFollow()
+    stopLoop()
     const host = containerRef.value
-    if (host) {
-      host.removeEventListener('mousedown', startFollow)
-      if (overlay && overlay.parentElement === host) host.removeChild(overlay)
-    }
-    window.removeEventListener('mouseup', stopFollow)
+    if (host && overlay && overlay.parentElement === host) host.removeChild(overlay)
     resizeObserver?.disconnect()
     resizeObserver = null
     overlay = null
@@ -194,23 +188,22 @@ export function useGroupHulls(
     ctx?.setTransform(dpr, 0, 0, dpr, 0, 0) // 그리기는 CSS 픽셀 좌표로
   }
 
-  // ── 드래그/팬 중에는 매 프레임 따라그림 ───────────────────────────────
-  function startFollow(): void {
-    if (following) return
-    following = true
+  // ── 상시 rAF 추종 (reference.html 프로토타입 동일 기법) ───────────────
+  // NVL 변환을 매 프레임 미러링 → 팬·줌·드래그·forceDirected 정착 중 어떤 위치 변화든
+  // 항상 따라간다(이벤트 트리거 누락에 의한 desync 0). groupBy 없으면 redraw 가 즉시
+  // 클리어 후 반환이라 비용 미미.
+  function startLoop(): void {
+    if (rafId) return
     const tick = () => {
-      if (!following) return
       redraw()
       rafId = requestAnimationFrame(tick)
     }
     rafId = requestAnimationFrame(tick)
   }
 
-  function stopFollow(): void {
-    following = false
+  function stopLoop(): void {
     if (rafId) cancelAnimationFrame(rafId)
     rafId = 0
-    redraw() // 드래그 종료 후 최종 위치로 한 번 더
   }
 
   // ── 핵심: 그룹별 영역 그리기 ──────────────────────────────────────────

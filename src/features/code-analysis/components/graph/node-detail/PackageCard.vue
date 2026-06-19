@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * PackageCard.vue
- * Framework PACKAGE — 자식 모듈 목록 (BELONGS_TO_PACKAGE 역방향).
+ * Framework PACKAGE — 자식 모듈 목록 (BELONGS_TO 역방향).
  */
 
 import { computed } from 'vue'
@@ -20,7 +20,7 @@ const childModules = computed(() => {
   const result: { id: string; name: string; type: string }[] = []
   for (const link of projectStore.linkMap.values() as Iterable<GraphLink>) {
     if (link.target !== props.node.id) continue
-    if (link.type !== 'BELONGS_TO_PACKAGE') continue
+    if (link.type !== 'BELONGS_TO') continue
     const n = projectStore.nodeMap.get(link.source)
     const p = n?.properties || {}
     result.push({

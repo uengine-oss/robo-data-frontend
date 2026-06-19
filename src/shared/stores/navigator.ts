@@ -14,6 +14,8 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import type { GraphLink, GraphNode } from '@/shared/types'
+import { ROUTINE_LABELS } from '@/shared/utils/nodeRelationships'
+import { logicalModeName, isContainerNode } from '@/shared/utils/nodeClassify'
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 타입 정의
@@ -39,28 +41,28 @@ const showLogicalNames = ref(false)
 // 트리 빌드 헬퍼 (순수 함수)
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** 역할 라벨 — 이 라벨들을 제외한 첫 번째 라벨이 실제 kind. */
+/** 부가 역할 라벨(외부 stub + stereotype 다중라벨) — 이걸 제외한 첫 라벨이 실제 종류(antlr type).
+ *  코드 종류 라벨(METHOD/FILE/FIELD…)은 실타입이라 제외하지 않음(그대로 표시). */
 const ROLE_LABELS = new Set([
-  'MODULE', 'FUNCTION', 'VARIABLE', 'CONSTANT', 'PACKAGE', 'FILE',
   'INTERNAL', 'EXTERNAL',
   'Endpoint', 'Query', 'Command', 'Getter', 'Setter', 'Lifecycle',
   'Scheduled', 'EventHandler', 'Init', 'Transactional', 'Validation',
   'BusinessLogic',
 ])
 
-/** 트리에서 제외할 라벨 — 변수/상수는 트리에 안 보인다. */
+/** 트리에서 제외할 라벨 — 변수/상수(antlr type 전부)·EM 노드는 트리에 안 보인다. */
 const EXCLUDED_LABELS = new Set([
   'VARIABLE', 'CONSTANT', 'GLOBAL_VARIABLE', 'DEFINE',
+  'FIELD', 'MEMBER', 'PARAMETER', 'PACKAGE_VARIABLE', 'CURSOR_VARIABLE', 'CONSTANT_FIELD',
   'RULE', 'EXAMPLE', 'QUESTION',
 ])
 
-/** 자식으로 확장할 관계 타입.
- *  같은 의미 (컨테이너 → 자식) 의 다른 이름들 — backend 의 의미 enum 을 그대로 인지.
- *  HAS_FUNCTION 은 framework 의 module/class → function (프로그래밍 함수),
- *  HAS_PROCEDURE 는 dbms 의 file → stored procedure/function/trigger 로 의미가 다름. */
+/** 자식으로 확장할 관계 타입 (컨테이너 → 자식).
+ *  HAS_MEMBER = 그릇(FILE/CLASS) → 멤버. 트리엔 **루틴만** 넣는다(데이터 멤버 변수·상수는
+ *  노드패널 카드에서 표시 — 트리 노이즈 방지). 종류 구분 = 노드 라벨(buildChildIndexes). */
 const CHILD_REL_TYPES = new Set([
-  'HAS_METHOD', 'HAS_FUNCTION', 'HAS_CLASS', 'HAS_INTERFACE',
-  'HAS_PROCEDURE',        // FILE → PROCEDURE/FUNCTION/TRIGGER (dbms)
+  'HAS_MEMBER',           // 그릇 → 루틴 (PROCEDURE/FUNCTION/METHOD/TRIGGER)
+  'HAS_METHOD', 'HAS_CLASS', 'HAS_INTERFACE',
   'CONTAINS',
   'HAS_COLUMN',           // Table → Column
   'HAS_BUSINESS_LOGIC',   // Function → BusinessLogic
@@ -68,9 +70,8 @@ const CHILD_REL_TYPES = new Set([
 
 /**
  * 노드의 표시용 sublabel 을 결정한다.
- * 1) 역할 라벨 제외한 첫 번째 (가장 구체적인 서브라벨)
- * 2) 없으면 우선순위 기반으로 의미 있는 역할 라벨 선택
- *    (예: ['FILE','MODULE'] → 'MODULE' 반환, 'FILE' 아님)
+ * 1) 부가 역할 라벨 제외한 첫 번째 = 실제 종류(antlr type, 예 [:METHOD]→'METHOD').
+ * 2) 없으면(외부 stub 등) 우선순위 기반 폴백.
  */
 function pickDisplayLabel(labels: string[]): string {
   for (const label of labels) {
@@ -94,16 +95,15 @@ function pickDisplayName(node: GraphNode): string {
     const title = String(p['title'] ?? p['name'] ?? node.id)
     return seq != null ? `[${seq}] ${title}` : title
   }
-  if (showLogicalNames.value) {
-    const ln = p['logical_name']
-    if (ln) return String(ln)
-  }
+  // 물리 식별자 — 이름 우선, 없으면 `타입[라인]` (예: SELECT [30]).
   const name = p['name']
-  if (name) return String(name)
-  // 이름 없는 DBMS 구문은 `타입[라인]` (예: SELECT [30]).
   const type = pickDisplayLabel(node.labels)
   const line = p['start_line']
-  return line != null && line !== 0 ? `${type} [${line}]` : (type || String(p['id'] ?? node.id))
+  const physical = name
+    ? String(name)
+    : (line != null && line !== 0 ? `${type} [${line}]` : (type || String(p['id'] ?? node.id)))
+  // 논리명 모드는 단일 결정처에 위임(논리명→구조한글→'논리명 없음·물리').
+  return showLogicalNames.value ? logicalModeName(node, physical) : physical
 }
 
 /** BL 의 sequence 는 "1", "2", "2-1" 형식 — 튜플 비교로 정렬. */
@@ -182,11 +182,14 @@ function buildSubtree(
 
 /** source → [targetIds] / source → (target → relType) 인덱스 빌드.
  *  DBMS: 구문은 PARENT_OF 로 부모(프로시저/구문) 아래 **AST 그대로 중첩**.
- *  그 구문이 모듈의 평면 자식(HAS_FUNCTION 등)으로 **중복 등장하지 않도록** 억제(중첩 우선). */
-function buildChildIndexes(linkMap: Map<string, GraphLink>) {
+ *  그 구문이 모듈의 평면 자식(HAS_MEMBER 등)으로 **중복 등장하지 않도록** 억제(중첩 우선). */
+function buildChildIndexes(
+  linkMap: Map<string, GraphLink>,
+  nodeMap: Map<string, GraphNode>,
+) {
   const childIndex = new Map<string, string[]>()
   const relIndex = new Map<string, Map<string, string>>()
-  const FLAT_CONTAINER_RELS = new Set(['HAS_FUNCTION', 'HAS_PROCEDURE', 'HAS_METHOD'])
+  const FLAT_CONTAINER_RELS = new Set(['HAS_MEMBER', 'HAS_METHOD'])
 
   // 1) PARENT_OF 부모를 가진 노드(=DBMS 구문) 집합 — 평면 컨테이너 자식에서 제외 대상.
   const hasParent = new Set<string>()
@@ -206,6 +209,11 @@ function buildChildIndexes(linkMap: Map<string, GraphLink>) {
   for (const link of linkMap.values()) {
     if (link.type === 'PARENT_OF') { add(link.source, link.target, 'PARENT_OF'); continue }
     if (!CHILD_REL_TYPES.has(link.type)) continue
+    // HAS_MEMBER 는 루틴만 트리에 — 데이터 멤버(변수/상수)는 카드에서 표시(트리 노이즈 방지).
+    if (link.type === 'HAS_MEMBER') {
+      const tgt = nodeMap.get(link.target)
+      if (!tgt || !tgt.labels.some(l => ROUTINE_LABELS.has(l))) continue
+    }
     // 구문(PARENT_OF 부모 보유)은 모듈 평면 자식으로 넣지 않음 — 중첩 위치(부모 아래)에만.
     if (hasParent.has(link.target) && FLAT_CONTAINER_RELS.has(link.type)) continue
     add(link.source, link.target, link.type)
@@ -225,13 +233,16 @@ function buildModulesTree(
   nodeMap: Map<string, GraphNode>,
   linkMap: Map<string, GraphLink>,
 ): NavigatorTreeItem[] {
-  const { childIndex, relIndex } = buildChildIndexes(linkMap)
+  const { childIndex, relIndex } = buildChildIndexes(linkMap, nodeMap)
 
-  // BELONGS_TO_PACKAGE: source = 자식, target = 부모(PACKAGE)
+  // BELONGS_TO: source = 자식(그릇), target = 부모(PACKAGE). Table→Schema 도 같은 BELONGS_TO 라
+  // **대상이 PACKAGE 인 것만** 패키지 트리에 쓴다(스키마 소속이 모듈 트리를 오염시키지 않도록).
   const belongsTo = new Map<string, string[]>()   // parentPkgId → [childId]
   const parentOf = new Map<string, string>()       // childId → parentPkgId
   for (const link of linkMap.values()) {
-    if (link.type !== 'BELONGS_TO_PACKAGE') continue
+    if (link.type !== 'BELONGS_TO') continue
+    const parent = nodeMap.get(link.target)
+    if (!parent || !parent.labels.includes('PACKAGE')) continue
     parentOf.set(link.source, link.target)
     const list = belongsTo.get(link.target) ?? []
     list.push(link.source)
@@ -255,7 +266,7 @@ function buildModulesTree(
       if (child.labels.includes('PACKAGE')) {
         const pt = buildPkgTree(childId, depth + 1)
         if (pt) children.push(pt)
-      } else if (child.labels.includes('MODULE')) {
+      } else if (isContainerNode(child.labels)) {
         const mt = buildSubtree(childId, nodeMap, childIndex, relIndex, 0, new Set(visited))
         if (mt) {
           visited.add(childId)
@@ -293,7 +304,7 @@ function buildModulesTree(
 
   // [B] 위에서 흡수 안 된 MODULE 은 전부 평면 루트로 노출 (스트림 초기에도 카운트 > 0).
   for (const node of nodeMap.values()) {
-    if (!node.labels.includes('MODULE')) continue
+    if (!isContainerNode(node.labels)) continue
     if (visited.has(node.id)) continue           // 이미 PACKAGE 트리에 들어감
     const tree = buildSubtree(node.id, nodeMap, childIndex, relIndex, 0, new Set(visited))
     if (tree) {
@@ -311,7 +322,7 @@ function buildTablesTree(
   nodeMap: Map<string, GraphNode>,
   linkMap: Map<string, GraphLink>,
 ): NavigatorTreeItem[] {
-  const { childIndex, relIndex } = buildChildIndexes(linkMap)
+  const { childIndex, relIndex } = buildChildIndexes(linkMap, nodeMap)
   const roots: NavigatorTreeItem[] = []
   for (const node of nodeMap.values()) {
     if (!node.labels.includes('TABLE')) continue

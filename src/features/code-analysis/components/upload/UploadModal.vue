@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted } from 'vue'
-import type { ComputedRef } from 'vue'
 import UploadTree from './UploadTree.vue'
 import AddMenu from './AddMenu.vue'
 import type { SourceType } from '@/shared/types'
@@ -26,9 +25,8 @@ const emit = defineEmits<{
   'files-updated': [files: File[]]
 }>()
 const files = ref<File[]>([...(props.initialFiles || [])])
+// 소스 타입 placeholder — 분석기(antlr)가 파싱 시 자동 감지해 덮어씀(수동 선택 폐지).
 const sourceType = ref<SourceType>('java')
-// 사용자가 수동으로 소스 타입을 변경했는지 추적
-const userManuallySelectedType = ref(false)
 
 // 데이터 소스 스토어
 const datasourcesStore = useDatasourcesStore()
@@ -57,30 +55,8 @@ onMounted(async () => {
   await datasourcesStore.fetchDatasources()
 })
 
-// 자동 감지 결과 표시용
-const autoDetectedType = ref<SourceType | null>(null)
-const detectionConfidence = ref<string>('')
-
-// 자동 감지 결과가 오면 sourceType 자동 설정 (사용자 수동 선택 존중)
-watch(() => props.detectedTypes, (detected) => {
-  if (detected?.summary) {
-    const suggested = detected.summary.suggestedTarget as SourceType
-    // 사용자가 이미 수동으로 선택한 경우 자동 감지로 덮어쓰지 않음
-    if (!userManuallySelectedType.value) {
-      sourceType.value = suggested
-    }
-    autoDetectedType.value = suggested
-    
-    // 신뢰도 계산 (상위 타입 비율)
-    const total = detected.summary.total
-    const byType = detected.summary.byType
-    const topType = Object.entries(byType).sort((a, b) => b[1] - a[1])[0]
-    if (topType) {
-      const ratio = Math.round((topType[1] / total) * 100)
-      detectionConfidence.value = `${topType[0]} ${ratio}%`
-    }
-  }
-}, { immediate: true })
+// 소스 타입(언어)은 분석기(antlr)가 파싱 시 자동 감지 → 모달 수동 선택·in-modal 감지 폐지(spec 019 analysis-frontend-ux).
+// sourceType 기본값은 placeholder — 파싱 후 analyzer 의 detected 이벤트가 실제 언어로 덮어쓴다.
 
 // 데이터 소스 추가 모달 열기
 async function openAddDatasourceModal() {
@@ -203,58 +179,6 @@ const hasFiles = computed(() => files.value.length > 0)
 // 전체 파일 수
 const totalFileCount = computed(() => files.value.length)
 
-// 소스 타입 옵션 (antlr-code-parser에서 지원하는 타입만)
-const sourceTypeOptions: { value: SourceType; label: string }[] = [
-  { value: 'java', label: 'Java' },
-  { value: 'python', label: 'Python' },
-  { value: 'c', label: 'C' },
-  { value: 'postgresql', label: 'PostgreSQL' },
-  { value: 'oracle', label: 'Oracle' }
-]
-
-// 파일 확장자로 소스 타입 자동 감지
-const detectSourceType = (files: File[]): SourceType | null => {
-  if (files.length === 0) return null
-  
-  const extensions = files.map(f => {
-    const name = f.name.toLowerCase()
-    if (name.endsWith('.sql')) return 'sql'
-    if (name.endsWith('.java')) return 'java'
-    if (name.endsWith('.py')) return 'python'
-    if (name.endsWith('.c') || name.endsWith('.h')) return 'c'
-    return 'other'
-  })
-
-  const hasJava = extensions.includes('java')
-  const hasPython = extensions.includes('python')
-  const hasC = extensions.includes('c')
-  const hasSql = extensions.includes('sql')
-
-  // Java 파일이 있으면 Java
-  if (hasJava) return 'java'
-  // C 파일이 있으면 C
-  if (hasC) return 'c'
-  // Python 파일이 있으면 Python
-  if (hasPython) return 'python'
-  // SQL 파일만 있으면 null (사용자가 PostgreSQL/Oracle 선택해야 함)
-  if (hasSql && !hasJava && !hasPython) return null
-  
-  return null
-}
-
-// 파일이 변경되면 자동으로 소스 타입 감지 (초기 설정만, 사용자 수동 선택 존중)
-watch(files, (newFiles) => {
-  if (newFiles.length === 0) return
-  // 사용자가 이미 수동으로 소스 타입을 선택한 경우 자동 감지로 덮어쓰지 않음
-  if (userManuallySelectedType.value) return
-  
-  const detected = detectSourceType(newFiles)
-  // 자동 감지가 가능한 경우(Java/Python/C)에 자동 설정
-  // SQL인 경우는 사용자가 직접 PostgreSQL/Oracle 선택해야 함
-  if (detected && detected !== 'oracle' && detected !== 'postgresql') {
-    sourceType.value = detected
-  }
-}, { deep: true })
 
 // 유효성 검사: 파일만 있으면 업로드 가능하도록 변경
 const isValid = computed(() => hasFiles.value)
@@ -610,29 +534,6 @@ const moveFileRelPath = (sourceRelPath: string, targetFolderRelPath: string) => 
                 </div>
               </div>
             </div>
-          </div>
-          
-          <!-- 소스 타입 선택 -->
-          <div class="source-type-group">
-            <label class="form-label form-label--compact">
-              소스 타입 <span class="required">*</span>
-              <span v-if="isDetecting" class="detecting-badge">
-                <IconLoader :size="12" /> 감지중...
-              </span>
-              <span v-else-if="autoDetectedType" class="auto-detected-badge" :title="`자동 감지: ${detectionConfidence}`">
-                <IconCheck :size="12" /> 자동 감지됨
-              </span>
-            </label>
-            <select 
-              v-model="sourceType" 
-              class="select select--compact"
-              :class="{ 'auto-detected': autoDetectedType && sourceType === autoDetectedType }"
-              @change="userManuallySelectedType = true"
-            >
-              <option v-for="option in sourceTypeOptions" :key="option.value" :value="option.value">
-                {{ option.label }}
-              </option>
-            </select>
           </div>
         </div>
         

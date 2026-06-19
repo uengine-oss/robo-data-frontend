@@ -8,7 +8,7 @@
 import { computed } from 'vue'
 import type { GraphNode } from '@/shared/types'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
-import { getRelationshipGroups, getAttachedByType } from '@/shared/utils/nodeRelationships'
+import { getRelationshipGroups, getMembersByLabels, ROUTINE_LABELS } from '@/shared/utils/nodeRelationships'
 import { technicalNodeName, logicalNodeName } from '@/shared/utils/graphDisplay'
 import NodeDetailBase from './NodeDetailBase.vue'
 
@@ -49,11 +49,10 @@ function resolveChild(id: string): { id: string; name: string; logical: string }
   }
 }
 
-const functions = computed(() => {
-  const fn = getAttachedByType(groups.value, 'HAS_FUNCTION')
-  const proc = getAttachedByType(groups.value, 'HAS_PROCEDURE')
-  return [...fn, ...proc].map(l => resolveChild(l.target))
-})
+const functions = computed(() =>
+  getMembersByLabels(groups.value, projectStore.nodeMap, ROUTINE_LABELS)
+    .map(l => resolveChild(l.target)),
+)
 </script>
 
 <template>

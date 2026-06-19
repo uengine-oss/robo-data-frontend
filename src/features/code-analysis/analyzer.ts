@@ -39,8 +39,8 @@ import { antlrApi, roboApi } from '@/features/code-analysis/api'
 // 라벨 분류 — 멀티라벨에서 sub-label 우선 (역할 라벨은 후순위)
 // ============================================================================
 
+// 부가 역할 라벨(외부 stub + stereotype) — 이걸 제외한 첫 라벨이 실제 종류(antlr type).
 const PRIMARY_LABELS = new Set([
-  'MODULE', 'FUNCTION', 'VARIABLE', 'CONSTANT', 'PACKAGE', 'FIELD',
   'INTERNAL', 'EXTERNAL',
   'Endpoint', 'Query', 'Command', 'Getter', 'Setter', 'Lifecycle',
   'Scheduled', 'EventHandler', 'Init', 'Transactional', 'Validation', 'BusinessLogic',
@@ -526,6 +526,25 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     }
   }
 
+  /** entity_kind → 콘솔 한글 라벨. 미등록은 원문 그대로. */
+  const PROCESSING_KIND_KO: Record<string, string> = {
+    Batch: '코드 분석', CodeNode: '코드노드', Module: '모듈', Table: '테이블', Question: '질문',
+  }
+
+  /**
+   * processing_event(step 안 처리 단위) → 콘솔 라이브감.
+   * step6(LLM 분석)은 한 단계가 수 분이라 step message 사이가 비어 콘솔이 얼어 보인다.
+   * 처리 단위 완료를 콘솔에 흘려 "쭉 진행" 보이게. 플러드 방지: **sub_action 없는
+   * 최상위 done만**(코드노드/모듈/테이블 1건 완료), start/failed·세부액션은 제외.
+   */
+  function applyProcessingEvent(event: AnalyzeEvent): void {
+    if (event.status !== 'done' || event.sub_action) return
+    const kind = PROCESSING_KIND_KO[event.entity_kind ?? ''] ?? (event.entity_kind ?? '항목')
+    const id = event.entity_id ?? ''
+    const short = id.includes(':') ? id.split(':').pop() : id
+    addMessage('message', `  ↳ ${kind} 분석 완료: ${short || id}`)
+  }
+
   /** node_event/relationship_event(라이브 그래프) → 그래프 병합. */
   function applyGraphEvent(event: AnalyzeEvent): void {
     if (event.type === 'node_event' && event.id) {
@@ -556,10 +575,11 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
           case 'phase_event': applyPhaseEvent(event); break
           case 'node_event':
           case 'relationship_event': applyGraphEvent(event); break
+          case 'processing_event': applyProcessingEvent(event); break
           case 'message':
           case 'error':
           case 'warning': logToConsole(event); break
-          // system_log·tool_event·todo_update·processing_event 등 미렌더 타입은 무시
+          // system_log·tool_event·todo_update 등 미렌더 타입은 무시
         }
       }
     )

@@ -33,6 +33,10 @@ import {
   IconSettings,
   IconEye,
   IconTable,
+  IconLayers,
+  IconBrain,
+  IconCode,
+  IconGrid,
 } from '@/shared/icons'
 
 /** 메뉴 그룹 식별자. 'bottom' 은 그룹 헤더 없이 플랫 렌더(분석/도구). */
@@ -59,8 +63,8 @@ export interface FeatureDef {
 
 /** 그룹 헤더(렌더 순서대로). 'bottom' 은 헤더가 없어 여기 없음. */
 export const FEATURE_GROUPS: FeatureGroup[] = [
-  { id: 'physical', label: '피지컬 레이어', icon: IconDatabase, defaultExpanded: true },
-  { id: 'domain', label: '도메인 레이어', icon: IconOntology },
+  { id: 'physical', label: '피지컬 레이어', icon: IconLayers, defaultExpanded: true },
+  { id: 'domain', label: '도메인 레이어', icon: IconBrain },
   { id: 'dynamic', label: '다이나믹 레이어', icon: IconObservability },
   { id: 'standard', label: '기준관리', icon: IconSettings, dividerBefore: true },
 ]
@@ -69,7 +73,7 @@ const lazy = (loader: () => Promise<unknown>): Component => defineAsyncComponent
 
 export const FEATURES: FeatureDef[] = [
   // ── 피지컬 레이어 ── (임베드 노출 = 코드분석 핵심 3개)
-  { id: 'upload', label: '코드', icon: IconFolder, group: 'physical', embeddable: true,
+  { id: 'upload', label: '코드', icon: IconCode, group: 'physical', embeddable: true,
     component: lazy(() => import('@/features/code-analysis').then((m: any) => m.UploadTab)) },
   { id: 'datasources', label: '데이터 소스', icon: IconDatabase, group: 'physical', embeddable: true,
     component: lazy(() => import('@/features/datasources').then((m: any) => m.DataSourcesTab)) },
@@ -83,7 +87,7 @@ export const FEATURES: FeatureDef[] = [
     component: lazy(() => import('@/features/security').then((m: any) => m.SecurityGuardTab)) },
 
   // ── 도메인 레이어 ──
-  { id: 'schema-modeling', label: '도메인 스키마', icon: IconDatabase, group: 'domain',
+  { id: 'schema-modeling', label: '도메인 스키마', icon: IconGrid, group: 'domain',
     component: lazy(() => import('@/features/domain').then((m: any) => m.ObjectTypeModeler)) },
   { id: 'multi-layer-ontology', label: '온톨로지 관리', icon: IconLineage, group: 'domain',
     component: lazy(() => import('@/features/domain').then((m: any) => m.MultiLayerOntologyViewer)) },

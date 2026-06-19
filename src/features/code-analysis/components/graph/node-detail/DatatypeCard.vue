@@ -5,7 +5,7 @@
  *
  * 표시:
  *   - 헤더 (sub-label = STRUCT/UNION/ENUM)
- *   - 멤버 필드 목록 (HAS_VARIABLE)
+ *   - 멤버 필드 목록 (HAS_MEMBER + 데이터 라벨)
  *   - 사용 흐름 (자식 필드를 REFERENCES 하는 함수 — 미구현, 추후 활성화)
  *
  * data_type 자체엔 summary 없음 — 자식 필드만 의미 담음 (백엔드 결정).
@@ -14,7 +14,7 @@
 import { computed } from 'vue'
 import type { GraphNode } from '@/shared/types'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
-import { getRelationshipGroups, getAttachedByType } from '@/shared/utils/nodeRelationships'
+import { getRelationshipGroups, getMembersByLabels, DATA_MEMBER_LABELS } from '@/shared/utils/nodeRelationships'
 import NodeDetailBase from './NodeDetailBase.vue'
 
 interface Props {
@@ -24,7 +24,7 @@ const props = defineProps<Props>()
 
 const projectStore = useAnalyzerStore()
 
-const subLabel = computed(() => (props.node.properties?.type as string) || 'DATATYPE')
+const subLabel = computed(() => props.node.labels?.[0] || 'DATATYPE')
 
 const subInfo = computed(() => {
   const p = props.node.properties || {}
@@ -59,7 +59,8 @@ function resolveField(id: string): FieldEntry {
 }
 
 const fields = computed<FieldEntry[]>(() =>
-  getAttachedByType(groups.value, 'HAS_VARIABLE').map(l => resolveField(l.target)),
+  getMembersByLabels(groups.value, projectStore.nodeMap, DATA_MEMBER_LABELS)
+    .map(l => resolveField(l.target)),
 )
 </script>
 

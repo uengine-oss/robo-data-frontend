@@ -17,18 +17,26 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
+import { isContainerNode, CALLABLE_LABELS } from '@/shared/utils/nodeClassify'
 import type { GraphData, GraphLink, GraphNode } from '@/shared/types'
 
 /**
  * 캔버스 프리셋 — 일반 그래프와 다른 표시 규칙을 적용하는 모드.
  *   - 'module-interaction' : MODULE/TABLE 만 노출하고 둘 사이에 가상 링크(VIRTUAL_USES) 합성.
- *     실제 데이터는 MODULE -[HAS_FUNCTION]-> FUNCTION -[READS/WRITES/...]-> TABLE 이지만
+ *     실제 데이터는 MODULE -[HAS_MEMBER]-> FUNCTION -[READS/WRITES/...]-> TABLE 이지만
  *     화면에서만 FUNCTION 을 압축해 MODULE → TABLE 한 줄로 보여준다.
  */
 export type CanvasPreset = 'module-interaction' | null
 
-const MODULE_TO_FUNCTION_REL = new Set(['HAS_FUNCTION'])
+// HAS_MEMBER 는 그릇→루틴/데이터 공통이지만, 다음 단계(FUNCTION_TO_TABLE_REL)에서 테이블을
+// READS/WRITES 하는 루틴만 가상 링크로 이어지므로 데이터 멤버는 자연 제외된다.
+const MODULE_TO_FUNCTION_REL = new Set(['HAS_MEMBER'])
 const FUNCTION_TO_TABLE_REL = new Set(['FROM', 'READS', 'REFER_TO', 'REFERS_TO', 'WRITES'])
+// DBMS 의 READS/WRITES 는 루틴 루트가 아니라 그 안에 중첩된 구문 노드(SELECT/INSERT/MERGE…)에서
+// 나온다. 구문 → 소유 루틴은 PARENT_OF 엣지 체인으로만 거슬러 올라갈 수 있다
+// (parent_id/owner_id 는 모델 필드일 뿐 노드 속성으로 영속되지 않음 — Neo4j 실측 0건).
+// PARENT_OF 는 그릇/루틴 트리(parent)→child 방향이라, child id 로 부모를 찾으려면 target→source 로 인덱스.
+const STATEMENT_PARENT_REL = new Set(['PARENT_OF'])
 
 function hasLabel(node: GraphNode, label: string): boolean {
   const target = label.toUpperCase()
@@ -47,24 +55,63 @@ export const useCanvasStore = defineStore('canvas', () => {
   /**
    * 모듈간 상호작용 가상 그래프 — MODULE/TABLE 노드 + 그 사이를 잇는 가상 링크.
    *
+   * 올바른 데이터 체인(DBMS):
+   *   그릇 -[HAS_MEMBER]-> 루틴 -[PARENT_OF*]-> 구문(SELECT/INSERT/MERGE…) -[READS/WRITES]-> TABLE
+   * READS/WRITES 의 source 는 루틴 루트가 아니라 그 안에 중첩된 구문 노드라(실측 156/157),
+   * funcToModule 직접조회는 거의 다 실패해 2노드만 떴다 — 구문→소유그릇을 PARENT_OF 로 해소한다.
+   *
    * 알고리즘 (O(N)):
-   *   1) linkMap 을 한 번 훑어 HAS_FUNCTION 으로 funcId → moduleId 인덱스
-   *   2) linkMap 을 한 번 더 훑어 FUNCTION -[READS/WRITES/...]-> TABLE 만나면
-   *      위 인덱스로 module 을 찾아 가상 링크 후보로 수집
+   *   1) linkMap 을 한 번 훑어 HAS_MEMBER 로 funcId → moduleId, PARENT_OF 로 childId → parentId 인덱스
+   *   2) linkMap 을 한 번 더 훑어 (구문) -[READS/WRITES/...]-> TABLE 만나면
+   *      resolveModule(구문) 로 PARENT_OF 를 거슬러 소유 그릇을 찾아 가상 링크 후보로 수집
    *   3) (moduleId, tableId, type, op) 단위로 dedup —
    *      원본 관계 타입(READS/WRITES/FROM/...) 과 op 등 속성을 그대로 보존.
    *      → 색상/캡션이 일반 그래프와 동일하게 자동 적용됨.
    */
   function buildModuleInteractionGraph(): GraphData {
     const funcToModule = new Map<string, string>()
+    // 구문 노드 → 부모 노드(그릇 또는 상위 구문) id. PARENT_OF 는 parent→child 라
+    // child(=link.target) 로 부모(=link.source) 를 찾는다. 한 번 훑어 인덱스.
+    const childToParent = new Map<string, string>()
     for (const link of projectStore.linkMap.values()) {
+      if (STATEMENT_PARENT_REL.has(link.type)) {
+        childToParent.set(link.target, link.source)
+        continue
+      }
       if (!MODULE_TO_FUNCTION_REL.has(link.type)) continue
       const moduleNode = projectStore.nodeMap.get(link.source)
       const funcNode = projectStore.nodeMap.get(link.target)
       if (!moduleNode || !funcNode) continue
-      if (!hasLabel(moduleNode, 'MODULE')) continue
-      if (!hasLabel(funcNode, 'FUNCTION')) continue
+      // 그릇(타입집합)→호출가능(타입집합) 정합 — 역할 라벨 폐기(spec 019).
+      if (!isContainerNode(moduleNode.labels || [])) continue
+      if (!(funcNode.labels || []).some(l => CALLABLE_LABELS.has(l))) continue
       funcToModule.set(funcNode.id, moduleNode.id)
+    }
+
+    // 구문 노드(READS/WRITES 의 source) → 소유 그릇 id 해소.
+    // 자신이 루틴이면 funcToModule 에 바로 있고, 중첩 구문이면 PARENT_OF 를 거슬러
+    // 올라가 funcToModule 에 있는 조상(루틴)을 만나 그 그릇을 반환. 못 찾으면 null.
+    // memoize — 깊은 중첩(실측 최대 9단계)에서도 노드당 1회만 walk.
+    const resolveCache = new Map<string, string | null>()
+    function resolveModule(nodeId: string): string | null {
+      const cached = resolveCache.get(nodeId)
+      if (cached !== undefined) return cached
+      // 사이클/누락 방어를 위해 방문 경로를 추적, 해소되면 경로 전체를 memoize.
+      const path: string[] = []
+      const seen = new Set<string>()
+      let cur: string | undefined = nodeId
+      let result: string | null = null
+      while (cur !== undefined && !seen.has(cur)) {
+        const memo = resolveCache.get(cur)
+        if (memo !== undefined) { result = memo; break }
+        const direct = funcToModule.get(cur)
+        if (direct !== undefined) { result = direct; break }
+        seen.add(cur)
+        path.push(cur)
+        cur = childToParent.get(cur)
+      }
+      for (const id of path) resolveCache.set(id, result)
+      return result
     }
 
     interface VirtualInfo {
@@ -81,7 +128,9 @@ export const useCanvasStore = defineStore('canvas', () => {
 
     for (const link of projectStore.linkMap.values()) {
       if (!FUNCTION_TO_TABLE_REL.has(link.type)) continue
-      const moduleId = funcToModule.get(link.source)
+      // R/W source 는 루틴 루트가 아니라 중첩 구문(SELECT/INSERT/MERGE…)일 수 있어
+      // PARENT_OF 체인으로 소유 그릇을 해소(직접 funcToModule.get 은 156/157 누락 → 2노드 버그).
+      const moduleId = resolveModule(link.source)
       if (!moduleId) continue
       const tableNode = projectStore.nodeMap.get(link.target)
       if (!tableNode) continue
@@ -108,18 +157,25 @@ export const useCanvasStore = defineStore('canvas', () => {
       tableIds.add(tableId)
     }
 
+    // 노드 — dedupe(같은 id 중복 push 금지). 실제 push된 id 집합으로 링크 끝점을 가드한다.
     const nodes: GraphNode[] = []
+    const presentIds = new Set<string>()
     for (const id of moduleIds) {
+      if (presentIds.has(id)) continue
       const n = projectStore.nodeMap.get(id)
-      if (n) nodes.push(n)
+      if (n) { nodes.push(n); presentIds.add(id) }
     }
     for (const id of tableIds) {
+      if (presentIds.has(id)) continue
       const n = projectStore.nodeMap.get(id)
-      if (n) nodes.push(n)
+      if (n) { nodes.push(n); presentIds.add(id) }
     }
 
     const links: GraphLink[] = []
     for (const info of virtuals.values()) {
+      // 끝점 노드가 실제로 추가된 경우만 링크 생성 — 누락 끝점 링크는 NVL/d3-force가
+      // null 참조로 크래시(`Cannot read properties of null`). 양 끝 존재 보장.
+      if (!presentIds.has(info.moduleId) || !presentIds.has(info.tableId)) continue
       const viaNames: string[] = []
       for (const fid of info.viaFuncIds) {
         const fn = projectStore.nodeMap.get(fid)
@@ -238,6 +294,16 @@ export const useCanvasStore = defineStore('canvas', () => {
     canvasNodeIds.value = next
   }
 
+  /**
+   * 캔버스 노드 집합을 통째로 지정 ID 배열로 교체. 프리셋은 해제(일반 모드).
+   * 보기 모드(영역/건강)가 빈 캔버스를 해당 속성 노드로 채울 때 사용.
+   * 노드 간 관계는 canvasGraphData computed 가 linkMap 에서 자동 포함.
+   */
+  function setCanvasNodes(nodeIds: string[]): void {
+    presetMode.value = null
+    canvasNodeIds.value = new Set(nodeIds)
+  }
+
   /** 프리셋 활성화 — 일반 노드 집합은 비우고 가상 합성 결과만 노출. */
   function setPreset(mode: CanvasPreset): void {
     presetMode.value = mode
@@ -277,6 +343,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     removeFromCanvas,
     clearCanvas,
     loadNodesByLabels,
+    setCanvasNodes,
     setPreset,
     isolateLabel,
   }

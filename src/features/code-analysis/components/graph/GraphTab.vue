@@ -17,6 +17,7 @@ import { useResize } from '@/shared/composables/useResize'
 import { useDrag } from '@/shared/composables/useDrag'
 import { getNodeColor, getRelationshipColor } from '@/shared/config/graphStyles'
 import { storageVersion } from '@/shared/utils/graphStyleStorage'
+import { CALLABLE_LABELS } from '@/shared/utils/nodeClassify'
 
 const projectStore = useAnalyzerStore()
 const canvasStore = useCanvasStore()
@@ -26,7 +27,6 @@ const {
   isProcessing,
   currentStep,
   consoleMessages,
-  graphEvents,
 } = storeToRefs(projectStore)
 const { canvasGraphData } = storeToRefs(canvasStore)
 const { showLogicalNames } = storeToRefs(navigatorStore)
@@ -35,23 +35,128 @@ const showNodePanel = ref(false)
 const showConsole = ref(false)
 const progressPanelCollapsed = ref(false) // 진행 패널 축소 상태
 const labelFilters = ref<string[]>([]) // 레전드 필터 (노드 라벨)
-/** 그룹 영역(바운디드 컨텍스트) 오버레이 기준 — null=끔, 'component_id'=켬. */
-const groupHullBy = ref<string | null>(null)
-function toggleGroupHull(): void {
-  groupHullBy.value = groupHullBy.value ? null : 'component_id'
-}
 
-/** 노드 색 기준 — 'label'=라벨별, 'health'=건강지표(risk)별 강조. */
-const colorMode = ref<'label' | 'health'>('label')
-function toggleHealthView(): void {
-  colorMode.value = colorMode.value === 'health' ? 'label' : 'health'
-}
+/**
+ * 보기 모드 (spec 018 — 단일선택 enum).
+ * 모듈간/영역/건강은 서로 배타라 한 번에 하나만 켜진다. 기존엔 독립 토글이라
+ * 동시에 켜져 화면 의미가 모호해지고 silent no-op 가 섞였다 → 단일 enum 으로 일원화.
+ *
+ *  - 'default' : 프리셋 끔, hull 끔, 색=라벨별
+ *  - 'module'  : 모듈간 상호작용 프리셋(가상 그래프)
+ *  - 'area'    : 컴포넌트별 색 영역(hull, component_id 기준)
+ *  - 'health'  : 위험도(risk_level)별 노드 색 강조
+ *
+ * groupHullBy / colorMode / preset 은 viewMode 에서 파생(computed)되므로
+ * 단일 진실원천은 viewMode 하나다. (NvlGraph/canvasStore 가 소비하는 prop 계약은 불변)
+ */
+type ViewMode = 'default' | 'module' | 'area' | 'health'
+const viewMode = ref<ViewMode>('default')
 
-/** 관계 필터 — 읽기만(READS)/쓰기만(WRITES) 보기. 같은 걸 다시 누르면 해제. */
+/** 영역(hull) 기준 — area 모드일 때만 'component_id', 그 외 null. NvlGraph :groupHullBy 소비. */
+const groupHullBy = computed<string | null>(() => (viewMode.value === 'area' ? 'component_id' : null))
+/** 노드 색 기준 — health 모드면 'health', 그 외 'label'. NvlGraph :colorMode 소비. */
+const colorMode = computed<'label' | 'health'>(() => (viewMode.value === 'health' ? 'health' : 'label'))
+
+/** 관계 필터 — 읽기만(READS)/쓰기만(WRITES) 보기. 보기모드와 별개 축(동시 적용 가능). 같은 걸 다시 누르면 해제. */
 const relFilter = ref<string[]>([])
 function toggleRelFilter(type: string): void {
   relFilter.value = relFilter.value.length === 1 && relFilter.value[0] === type ? [] : [type]
 }
+
+/**
+ * 보기 ▾ 드롭다운 (spec 018) — 보기 모드(모듈간/영역/건강)를 상단 일렬 버튼 대신 한 곳에서 고른다.
+ * 단일선택: 한 항목을 누르면 그 모드로, 이미 그 모드면 default 로 토글오프. 한 번에 하나만 켜짐.
+ * 관계필터는 별개 축이라 보기모드와 무관하게 독립 토글.
+ */
+const showViewMenu = ref(false)
+
+/**
+ * 보기 모드 선택 — 단일선택. 이미 선택된 모드면 default 로 끔(토글오프).
+ * 모드 진입 시 그 모드가 무언가를 보이게 캔버스를 보장(영역/건강은 빈 캔버스면 해당 속성 노드 자동 로드).
+ */
+function selectViewMode(mode: Exclude<ViewMode, 'default'>): void {
+  const next: ViewMode = viewMode.value === mode ? 'default' : mode
+  applyViewMode(next)
+  // 단일선택이라 고르면 메뉴를 닫는다(관계필터는 아래에서 별도 — 닫지 않음).
+  showViewMenu.value = false
+}
+
+/** 보기 모드 적용 — 프리셋/캔버스 populate 까지 일괄 처리(단일 결정처). */
+function applyViewMode(mode: ViewMode): void {
+  viewMode.value = mode
+  if (mode === 'module') {
+    // 모듈간: 가상 그래프 프리셋이 캔버스를 새로 채운다.
+    labelFilters.value = []
+    canvasStore.setPreset('module-interaction')
+    autoPopulateHint.value = ''
+    return
+  }
+  // module 외 모드로 가면 프리셋 해제(가상 그래프 끔).
+  if (isInteractionPresetActive.value) canvasStore.setPreset(null)
+
+  if (mode === 'area') {
+    ensureNodesForView('component_id')
+  } else if (mode === 'health') {
+    ensureNodesForView('risk_level', 'routine')
+  } else {
+    autoPopulateHint.value = ''
+  }
+}
+
+/**
+ * 빈 캔버스에서 영역/건강 보기를 켜면 무반응(재스타일만 함)이던 문제 근본수정.
+ * 캔버스가 비어 있으면 해당 속성을 가진 노드만 골라 캔버스에 자동 추가(바운디드 — 전체덤프 X).
+ * 추가할 노드가 0개면 침묵 대신 안내 힌트를 띄운다.
+ *
+ * @param propKey   노드가 가져야 할 속성 키 (예: 'component_id', 'risk_level')
+ * @param needLabel (선택) 이 라벨/타입을 가진 노드로 한정 (예: 'routine' = 호출가능 노드)
+ */
+function ensureNodesForView(propKey: string, needLabel?: string): void {
+  autoPopulateHint.value = ''
+  // 이미 캔버스에 노드가 있으면 그대로 재스타일 적용(기존 동작 보존).
+  if (canvasStore.canvasNodeIds.size > 0) return
+
+  const matched: string[] = []
+  for (const node of projectStore.nodeMap.values()) {
+    const v = node.properties?.[propKey]
+    if (v === undefined || v === null || v === '') continue
+    if (needLabel) {
+      const want = needLabel.toUpperCase()
+      const labels = (node.labels || []).map(l => l.toUpperCase())
+      // 'routine' 은 호출가능(타입집합) 추상화 — CALLABLE 여부로 판정.
+      if (needLabel === 'routine') {
+        if (!labels.some(l => CALLABLE_LABELS.has(l))) continue
+      } else if (!labels.includes(want)) {
+        continue
+      }
+    }
+    matched.push(node.id)
+  }
+
+  if (matched.length === 0) {
+    autoPopulateHint.value =
+      propKey === 'risk_level'
+        ? '건강(위험도) 정보를 가진 함수가 없습니다 — 분석을 먼저 실행하세요'
+        : '영역(컴포넌트) 정보를 가진 노드가 없습니다 — 분석을 먼저 실행하세요'
+    return
+  }
+  canvasStore.setCanvasNodes(matched)
+}
+
+/** 자동 로드 결과 안내 (해당 속성 노드 0개일 때). 빈 문자열이면 표시 안 함. */
+const autoPopulateHint = ref('')
+
+/** 현재 보기 모드 라벨 (보기 ▾ 버튼 표시용). */
+const activeViewLabel = computed(() => {
+  switch (viewMode.value) {
+    case 'module': return '모듈간'
+    case 'area': return '영역'
+    case 'health': return '건강'
+    default: return '기본'
+  }
+})
+/** 보기 모드가 기본이 아닌지 (버튼 active 표시용). 관계필터는 별개 축이라 미포함. */
+const isViewModeActive = computed(() => viewMode.value !== 'default')
 
 // 분석 패널 모드: 'docked' (왼쪽 고정), 'floating' (플로팅), 'hidden' (완전 숨김)
 // 기본값은 hidden - 인제스천 시작 시에만 자동으로 표시됨
@@ -150,30 +255,12 @@ const statusType = computed(() => {
   return 'idle'
 })
 
-// 그래프 통계
-const graphStats = computed(() => {
-  const nodes = graphEvents.value?.filter(e => e.type === 'node') || []
-  const rels = graphEvents.value?.filter(e => e.type === 'relationship') || []
-  
-  const nodeTypes: Record<string, number> = {}
-  nodes.forEach(n => {
-    const type = n.nodeType || 'Unknown'
-    nodeTypes[type] = (nodeTypes[type] || 0) + 1
-  })
-  
-  const relTypes: Record<string, number> = {}
-  rels.forEach(r => {
-    const type = r.relType || 'Unknown'
-    relTypes[type] = (relTypes[type] || 0) + 1
-  })
-  
-  return {
-    totalNodes: nodes.length,
-    totalRels: rels.length,
-    nodeTypes,
-    relTypes
-  }
-})
+// 그래프 통계 — 실제 표시 중인 고유 노드/관계 수(graphData = nodeMap/linkMap 숨김 제외).
+// 이벤트 피드 개수가 아니라 → 중복·숨김 없이 화면과 100% 일치(spec 022 FR-006).
+const graphStats = computed(() => ({
+  totalNodes: graphData.value?.nodes.length ?? 0,
+  totalRels: graphData.value?.links.length ?? 0,
+}))
 
 /**
  * 오버뷰 패널용 전체 프로젝트 통계 — 라벨 / 관계 타입 별 분포.
@@ -287,28 +374,18 @@ function handleLabelFilter(label: string): void {
 }
 
 /**
- * "모듈간 상호작용 보기" 프리셋: 화면에서 MODULE 과 TABLE 만 보여주고
+ * "모듈간 상호작용 보기" 프리셋(viewMode='module'): 화면에서 MODULE 과 TABLE 만 보여주고
  * 둘 사이를 잇는 가상 링크(VIRTUAL_USES) 를 합성해 그려준다.
- *
- * 실제 데이터는 MODULE -[HAS_FUNCTION]-> FUNCTION -[READS/WRITES/...]-> TABLE 형태지만,
- * 가상 링크 합성은 canvasStore.canvasGraphData (computed) 에서 처리하므로
- * 여기서는 presetMode 만 토글한다. DB 에는 아무 영향 없음.
- *
- * 다시 누르면 프리셋 해제 + 캔버스 비움.
+ * 가상 링크 합성은 canvasStore.canvasGraphData(computed) 에서 처리하므로 여기선 프리셋만 토글.
  */
 const { presetMode: canvasPresetMode } = storeToRefs(canvasStore)
 
 const isInteractionPresetActive = computed(() => canvasPresetMode.value === 'module-interaction')
 
-function toggleInteractionPreset(): void {
-  if (isInteractionPresetActive.value) {
-    canvasStore.setPreset(null)
-    labelFilters.value = []
-    return
-  }
-  labelFilters.value = []
-  canvasStore.setPreset('module-interaction')
-}
+// 프리셋이 외부 동작(캔버스 비우기·라벨 격리 등)으로 해제되면 module 보기도 default 로 환원 — 상태 일관성.
+watch(isInteractionPresetActive, (active) => {
+  if (!active && viewMode.value === 'module') viewMode.value = 'default'
+})
 
 /** 모든 라벨 필터 해제 */
 function handleClearFilters(): void {
@@ -377,6 +454,8 @@ function handleNodeIsolateLabel(nodeId: string): void {
 
 watch(hasGraph, (has, prev) => {
   if (has && !prev) showNodePanel.value = true
+  // 캔버스에 노드가 생기면(드래그·자동로드) 이전 0건 안내는 더 이상 무의미.
+  if (has) autoPopulateHint.value = ''
 })
 
 
@@ -472,27 +551,8 @@ watch(hasGraph, (has, prev) => {
           </div>
         </div>
         
-        <!-- 오버뷰 — 전체 프로젝트 통계. 캔버스 상태와 무관하게 nodeMap/linkMap 기준. -->
-        <div class="tab-content overview-content">
-          <NodeDetailPanel
-            :node="null"
-            :relationship="null"
-            :nodeStats="overallNodeStats"
-            :relationshipStats="overallRelationshipStats"
-            :totalNodes="graphData?.nodes.length || 0"
-            :totalRelationships="graphData?.links.length || 0"
-            :hasGraph="hasGraph"
-            :isProcessing="isProcessing"
-            :activeFilters="labelFilters"
-            :allNodes="graphData?.nodes || []"
-            @node-type-select="handleNodeTypeSelect"
-            @relationship-type-select="handleRelTypeSelect"
-            @label-filter="handleLabelFilter"
-            @clear-filters="handleClearFilters"
-            @node-select="handleNodeSearchSelect"
-            @reset-graph="handleResetGraph"
-          />
-        </div>
+        <!-- 레전드(Node labels/Relationship types)는 우측 노드패널 한 곳으로 통일(spec 018 FR-008).
+             진행패널은 진행률·노드/관계 카운트만 — 레전드 중복 제거. -->
       </template>
     </div>
 
@@ -521,7 +581,13 @@ watch(hasGraph, (has, prev) => {
         />
         <!-- 빈 상태 오버레이 -->
         <div v-if="!hasGraph" class="empty-state empty-overlay">
-          <template v-if="!hasAnyData">
+          <template v-if="autoPopulateHint">
+            <!-- 영역/건강 보기를 켰지만 해당 속성 노드가 0개 — 침묵 대신 안내 -->
+            <div class="empty-icon">🔍</div>
+            <h3>{{ activeViewLabel }} 보기로 표시할 노드가 없습니다</h3>
+            <p>{{ autoPopulateHint }}</p>
+          </template>
+          <template v-else-if="!hasAnyData">
             <div class="empty-icon">📈</div>
             <h3>그래프 데이터가 없습니다</h3>
             <p>업로드 탭에서 파일을 업로드하고 분석을 실행하세요</p>
@@ -558,54 +624,56 @@ watch(hasGraph, (has, prev) => {
         <span class="toggle-text">{{ showLogicalNames ? '논리명' : '물리명' }}</span>
       </label>
 
-      <!-- 모듈간 상호작용 보기: 누르면 모듈+함수+테이블 라벨만 표시 (다시 누르면 해제) -->
-      <button
-        class="interaction-preset-btn"
-        :class="{ active: isInteractionPresetActive }"
-        title="모듈간 상호작용 보기 — 모듈/함수/테이블 만 표시 (다시 누르면 해제)"
-        @click="toggleInteractionPreset"
-      >
-        🔗 모듈간 상호작용
-      </button>
+      <!-- 보기 ▾ (spec 018): 보기 모드(모듈간/영역/건강 + 향후 추가)를 한 곳에서 단일선택.
+           모듈간/영역/건강은 서로 배타 — 한 번에 하나만. 관계필터는 별개 축(동시 가능). -->
+      <div class="view-menu-wrap">
+        <button
+          class="view-menu-btn"
+          :class="{ active: isViewModeActive }"
+          title="보기 — 그래프를 보는 방식 (하나만 선택)"
+          @click="showViewMenu = !showViewMenu"
+        >
+          <span class="vm-eye">👁</span>
+          <span class="vm-btn-label">보기: <strong>{{ activeViewLabel }}</strong></span>
+          <span class="vm-caret">▾</span>
+        </button>
+        <Transition name="fade">
+          <div v-if="showViewMenu" class="view-menu-pop">
+            <div class="vm-section-label">보기 모드 <span class="vm-section-hint">하나만 선택</span></div>
+            <button class="view-menu-item" :class="{ active: viewMode === 'module' }" @click="selectViewMode('module')">
+              <span class="vm-icon">🔗</span>
+              <span class="vm-text"><b>모듈간 상호작용</b><small>모듈·함수·테이블만</small></span>
+              <span class="vm-check">{{ viewMode === 'module' ? '✓' : '' }}</span>
+            </button>
+            <button class="view-menu-item" :class="{ active: viewMode === 'area' }" @click="selectViewMode('area')">
+              <span class="vm-icon">🗺️</span>
+              <span class="vm-text"><b>영역 보기</b><small>컴포넌트별 색 영역</small></span>
+              <span class="vm-check">{{ viewMode === 'area' ? '✓' : '' }}</span>
+            </button>
+            <button class="view-menu-item" :class="{ active: viewMode === 'health' }" @click="selectViewMode('health')">
+              <span class="vm-icon">🩺</span>
+              <span class="vm-text"><b>건강 보기</b><small>위험 함수 색 강조</small></span>
+              <span class="vm-check">{{ viewMode === 'health' ? '✓' : '' }}</span>
+            </button>
 
-      <!-- 영역 보기: 같은 컴포넌트(바운디드 컨텍스트) 노드를 색 영역으로 묶어 표시 -->
-      <button
-        class="interaction-preset-btn"
-        :class="{ active: groupHullBy !== null }"
-        title="영역 보기 — 같은 컴포넌트끼리 색 영역으로 묶기 (다시 누르면 해제)"
-        @click="toggleGroupHull"
-      >
-        🗺️ 영역 보기
-      </button>
-
-      <!-- 건강 보기: 함수 노드를 건강지표(risk)별 색으로 — 위험(빨강)/주의(주황)/양호(초록) -->
-      <button
-        class="interaction-preset-btn"
-        :class="{ active: colorMode === 'health' }"
-        title="건강 보기 — 위험한 함수를 색으로 강조 (빨강=위험/주황=주의/초록=양호, 다시 누르면 해제)"
-        @click="toggleHealthView"
-      >
-        🩺 건강 보기
-      </button>
-
-      <!-- 읽기만 / 쓰기만: 함수↔테이블 READS·WRITES 관계만 표시 (다시 누르면 해제) -->
-      <button
-        class="interaction-preset-btn"
-        :class="{ active: relFilter.length === 1 && relFilter[0] === 'READS' }"
-        title="읽기만 — 함수가 테이블을 조회(READS)하는 관계만"
-        @click="toggleRelFilter('READS')"
-      >
-        👁 읽기만
-      </button>
-      <button
-        class="interaction-preset-btn"
-        :class="{ active: relFilter.length === 1 && relFilter[0] === 'WRITES' }"
-        title="쓰기만 — 함수가 테이블을 변경(WRITES)하는 관계만"
-        @click="toggleRelFilter('WRITES')"
-      >
-        ✏️ 쓰기만
-      </button>
+            <div class="vm-divider"></div>
+            <div class="vm-section-label">관계 필터 <span class="vm-section-hint">보기모드와 별개 · 하나만</span></div>
+            <button class="view-menu-item" :class="{ active: relFilter.length === 1 && relFilter[0] === 'READS' }" @click="toggleRelFilter('READS')">
+              <span class="vm-icon">👁</span>
+              <span class="vm-text"><b>읽기만</b><small>테이블 조회(READS)</small></span>
+              <span class="vm-check">{{ relFilter.length === 1 && relFilter[0] === 'READS' ? '✓' : '' }}</span>
+            </button>
+            <button class="view-menu-item" :class="{ active: relFilter.length === 1 && relFilter[0] === 'WRITES' }" @click="toggleRelFilter('WRITES')">
+              <span class="vm-icon">✏️</span>
+              <span class="vm-text"><b>쓰기만</b><small>테이블 변경(WRITES)</small></span>
+              <span class="vm-check">{{ relFilter.length === 1 && relFilter[0] === 'WRITES' ? '✓' : '' }}</span>
+            </button>
+          </div>
+        </Transition>
+      </div>
     </div>
+    <!-- 보기 메뉴 바깥 클릭 시 닫힘 (다중토글이라 항목 클릭으론 안 닫음) -->
+    <div v-if="showViewMenu" class="view-menu-backdrop" @click="showViewMenu = false" />
     
     <!-- 플로팅: 노드 상세 패널 -->
     <Transition name="slide-right">
@@ -860,6 +928,103 @@ watch(hasGraph, (has, prev) => {
     border-color: var(--color-accent);
     color: #fff;
   }
+}
+
+// ============================================================================
+// 보기 ▾ 드롭다운 (spec 018) — 보기 모드 다중토글 + 노드패널 보기옵션
+// ============================================================================
+.view-menu-wrap { position: relative; }
+
+.view-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 600;
+  // line-height:1 로 텍스트 line-box 를 글리프 높이에 맞춰, name-toggle(18px) 과의
+  // line-height 불일치로 글자가 아래로 치우치던 문제 제거. align-items:center 가 중앙정렬.
+  line-height: 1;
+  color: var(--color-text);
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: var(--shadow-md);
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  // 이모지/라벨/캐럿을 각각 flex item 으로 만들어 중앙선에 정렬(익명 텍스트노드의
+  // 들쭉날쭉한 baseline 대신 명시적 inline-flex item 으로 통일).
+  .vm-eye { display: inline-flex; align-items: center; font-size: 13px; line-height: 1; }
+  .vm-btn-label { display: inline-flex; align-items: center; line-height: 1; }
+  strong { font-weight: 700; }
+  .vm-caret { display: inline-flex; align-items: center; font-size: 10px; line-height: 1; opacity: 0.7; }
+
+  &:hover { background: var(--color-bg-tertiary); border-color: var(--color-text-muted); }
+  &.active { border-color: var(--color-accent); color: var(--color-accent); }
+}
+
+.view-menu-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 0;
+  width: max-content;
+  max-width: 224px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg, var(--shadow-md));
+  z-index: 10;
+}
+
+.view-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 12px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md, 8px);
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: left;
+
+  .vm-icon { font-size: 16px; width: 20px; text-align: center; flex: none; }
+  .vm-text { display: flex; flex-direction: column; gap: 3px; line-height: 1.4; flex: 1; min-width: 0; }
+  .vm-text b { font-size: 13px; font-weight: 600; }
+  .vm-text small { font-size: 11.5px; color: var(--color-text-muted); }
+  .vm-check { width: 14px; text-align: center; color: var(--color-accent); font-weight: 700; flex: none; }
+
+  &:hover { background: var(--color-bg-tertiary); }
+  &.active { background: var(--color-bg-tertiary); }
+  &.active .vm-text b { color: var(--color-accent); }
+}
+
+.vm-section-label {
+  padding: 11px 12px 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+
+  .vm-section-hint { font-weight: 500; text-transform: none; letter-spacing: 0; opacity: 0.65; margin-left: 6px; }
+}
+.vm-divider { height: 1px; margin: 6px 4px; background: var(--color-border); }
+
+.view-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: transparent;
 }
 
 // ============================================================================

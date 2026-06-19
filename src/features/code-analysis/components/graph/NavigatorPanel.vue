@@ -68,9 +68,9 @@ const { value: panelWidth, isResizing, startResize } = useResize({
       </span>
       <div class="nav-actions">
         <span class="count">{{ totalNodeCount }}</span>
-        <button class="icon-btn" title="모두 펼치기" @click="navigatorStore.expandAll()">⊞</button>
-        <button class="icon-btn" title="모두 접기" @click="navigatorStore.collapseAll()">⊟</button>
-        <button class="icon-btn close" title="닫기" @click="navigatorStore.setPanelOpen(false)">✕</button>
+        <button class="icon-btn" title="모두 펼치기" aria-label="모두 펼치기" @click="navigatorStore.expandAll()">⊕</button>
+        <button class="icon-btn" title="모두 접기" aria-label="모두 접기" @click="navigatorStore.collapseAll()">⊖</button>
+        <button class="icon-btn close" title="네비게이터 접기" aria-label="네비게이터 접기" @click="navigatorStore.setPanelOpen(false)">‹</button>
       </div>
     </header>
 

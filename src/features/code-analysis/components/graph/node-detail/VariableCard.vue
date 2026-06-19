@@ -7,8 +7,10 @@ import TextViewer from '@/shared/components/TextViewer.vue'
 interface Props { node: GraphNode }
 const props = defineProps<Props>()
 
-const isConstant = computed(() => props.node.labels?.[0] === 'CONSTANT')
-const subLabel = computed(() => (props.node.properties?.type as string) || (isConstant.value ? 'CONSTANT' : 'VARIABLE'))
+// 상수 = antlr type 집합 (역할 라벨 폐기 — CONSTANT/DEFINE/CONSTANT_FIELD).
+const CONSTANT_LABELS = new Set(['CONSTANT', 'DEFINE', 'CONSTANT_FIELD'])
+const isConstant = computed(() => (props.node.labels || []).some(l => CONSTANT_LABELS.has(l)))
+const subLabel = computed(() => props.node.labels?.[0] || (isConstant.value ? 'CONSTANT' : 'VARIABLE'))
 const variableType = computed(() => (props.node.properties?.variable_type as string) || '')
 const initValue = computed(() => (props.node.properties?.init_value as string) || '')
 const modifiers = computed(() => (props.node.properties?.modifiers as string) || '')
