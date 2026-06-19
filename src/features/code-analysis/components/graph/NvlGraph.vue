@@ -637,10 +637,11 @@ function setupInteractions(): void {
   // 캔버스 줌/이동 시 영역 오버레이를 같은 변환으로 다시 그림 (NVL 과 desync 방지).
   // NVL 은 setPan/setZoom 을 콜백 호출 전에 실행하고 콜백 반환값은 무시하므로
   // (interaction-handlers base.js) 기본 동작에 영향 없다.
+  // 팬/줌은 버튼 없는 전이(휠)도 있어 idle 루프가 안 돈다 → kick 으로 잠깐 깨워 추종.
   const panInteraction = new PanInteraction(nvl)
-  panInteraction.updateCallback('onPan', () => groupHulls.redraw())
+  panInteraction.updateCallback('onPan', () => groupHulls.kick())
   const zoomInteraction = new ZoomInteraction(nvl)
-  zoomInteraction.updateCallback('onZoom', () => groupHulls.redraw())
+  zoomInteraction.updateCallback('onZoom', () => groupHulls.kick())
 }
 
 function closeContextMenu(): void {
@@ -825,7 +826,7 @@ watch(() => props.clusterKeyOf, () => {
 
 // 우측 패널 열림/닫힘으로 가시영역이 바뀌면 다시 프레임(리사이즈 중 매 px 재맞춤은 피하고 토글만).
 watch(() => props.rightInset, (n, o) => {
-  if ((n > 0) !== (o > 0) && nvlInstance.value) fitView()
+  if ((n > 0) !== (o > 0) && nvlInstance.value) { fitView(); groupHulls.redraw() }
 })
 
 // 색 기준(라벨↔건강) 전환 시 이미 그려진 노드 색을 즉시 갱신

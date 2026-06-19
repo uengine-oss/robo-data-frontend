@@ -139,6 +139,10 @@ export function useGroupHulls(
   let ctx: CanvasRenderingContext2D | null = null
   let resizeObserver: ResizeObserver | null = null
   let rafId = 0
+  let interacting = false   // 컨테이너에 마우스 버튼이 눌린 동안(노드드래그/팬) = true
+  let wakeUntil = 0         // 휠 줌 등 버튼 없는 전이를 잠깐 추종하는 마감 시각(ms)
+  let downHandler: ((e: MouseEvent) => void) | null = null
+  let upHandler: (() => void) | null = null
 
   // 헐 드래그 hit-test 용 — redraw 시 그린 그룹 지오메트리/노드 스크린좌표(반지름 포함) 기록.
   let drawnGroups: { pts: Pt[]; padding: number; nodeIds: string[] }[] = []
@@ -165,12 +169,22 @@ export function useGroupHulls(
     resizeObserver.observe(host)
     sizeCanvas()
 
-    startLoop()
+    // 상호작용 중에만 rAF 추종(아래 startLoop 주석). idle 엔 루프가 자기 정지 → CPU 0.
+    downHandler = () => { interacting = true; ensureLoop() }
+    upHandler = () => { interacting = false }   // 루프는 다음 프레임에 스스로 멈춤
+    host.addEventListener('mousedown', downHandler)
+    window.addEventListener('mouseup', upHandler)
+    redraw()   // 최초 1회 그리기(이후는 이벤트/상호작용 때만)
   }
 
   function detach(): void {
     stopLoop()
     const host = containerRef.value
+    if (downHandler && host) host.removeEventListener('mousedown', downHandler)
+    if (upHandler) window.removeEventListener('mouseup', upHandler)
+    downHandler = null
+    upHandler = null
+    interacting = false
     if (host && overlay && overlay.parentElement === host) host.removeChild(overlay)
     resizeObserver?.disconnect()
     resizeObserver = null
@@ -187,17 +201,28 @@ export function useGroupHulls(
     ctx?.setTransform(dpr, 0, 0, dpr, 0, 0) // 그리기는 CSS 픽셀 좌표로
   }
 
-  // ── 상시 rAF 추종 (reference.html 프로토타입 동일 기법) ───────────────
-  // NVL 변환을 매 프레임 미러링 → 팬·줌·드래그·forceDirected 정착 중 어떤 위치 변화든
-  // 항상 따라간다(이벤트 트리거 누락에 의한 desync 0). groupBy 없으면 redraw 가 즉시
-  // 클리어 후 반환이라 비용 미미.
-  function startLoop(): void {
+  // ── 상호작용 중에만 rAF 추종 (idle 정지로 반응성·CPU 확보, spec 022 FR-007) ──────
+  // 과거엔 상시 rAF 무한루프(60fps redraw)라 아무것도 안 움직여도 CPU 를 계속 먹었다.
+  // 이제 컨테이너 mousedown~mouseup(노드드래그·팬) 동안만, 그리고 휠 줌 직후 짧은 구간만
+  // 루프를 돌려 NVL 변환을 따라가고, idle 이 되면 루프가 스스로 멈춘다.
+  // 버튼 없는 전이(휠 줌)는 NvlGraph 의 onZoom/onPan 이 kick() 으로 잠깐 깨운다.
+  function ensureLoop(): void {
     if (rafId) return
     const tick = () => {
       redraw()
-      rafId = requestAnimationFrame(tick)
+      if (interacting || performance.now() < wakeUntil) {
+        rafId = requestAnimationFrame(tick)
+      } else {
+        rafId = 0   // idle → 정지
+      }
     }
     rafId = requestAnimationFrame(tick)
+  }
+
+  /** 휠 줌/팬 등 짧은 전이를 ms 동안 추종(그 뒤 자동 정지). */
+  function kick(ms = 240): void {
+    wakeUntil = performance.now() + ms
+    ensureLoop()
   }
 
   function stopLoop(): void {
@@ -389,5 +414,5 @@ export function useGroupHulls(
     c.closePath()
   }
 
-  return { attach, detach, redraw, sizeCanvas, hitTest, isNearNode }
+  return { attach, detach, redraw, kick, sizeCanvas, hitTest, isNearNode }
 }
