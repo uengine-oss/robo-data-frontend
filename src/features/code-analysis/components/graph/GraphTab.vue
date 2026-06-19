@@ -392,9 +392,10 @@ watch(isInteractionPresetActive, (active) => {
   if (!active && viewMode.value === 'module') viewMode.value = 'default'
 })
 
-/** 모든 라벨 필터 해제 */
+/** isolate 해제 (오버뷰 `*` 클릭) — 강조 해제 + 캔버스 비움(빈 상태로 환원). */
 function handleClearFilters(): void {
   labelFilters.value = []
+  canvasStore.clearCanvas()
 }
 
 /**

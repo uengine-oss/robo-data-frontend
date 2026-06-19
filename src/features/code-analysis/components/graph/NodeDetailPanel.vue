@@ -449,7 +449,7 @@ function getNodeSubInfo(node: GraphNode): string {
             </span>
             <span
               class="help-hint"
-              title="클릭: 필터 토글 (다중 선택 가능) · 우클릭: 색상 변경"
+              title="클릭: 이것만 보기 (그 종류만 캔버스에 로드) · 우클릭: 색상 변경"
             >?</span>
           </div>
           <div class="badge-container">
