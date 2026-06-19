@@ -73,20 +73,13 @@ const hullLevels = computed<HullLevel[]>(() => {
     }]
   }
   if (viewMode.value === 'area-struct') {
+    // 패키지 외곽 헐 1겹으로 파일 클러스터들을 감싼다(파일 이름은 파일 앵커 캡션이 표시).
     const hmap = canvasStore.buildHierarchyMap()
-    return [
-      { // 바깥 = 패키지(스키마/폴더). padding=고정여백만(노드반지름은 useGroupHulls가 줌비례로 더함)
-        keyOf: (n) => hmap.get(n.id)?.packageKey ?? null,
-        labelOf: (_k, nodes) => hmap.get(nodes[0].id)?.packageLabel || _k,
-        padding: 26,
-      },
-      { // 안 = 파일(모듈). 노드 2개 이상인 파일만 헐 표시(1개짜리는 링 생략 → 도배 방지)
-        keyOf: (n) => hmap.get(n.id)?.fileKey ?? null,
-        labelOf: (_k, nodes) => hmap.get(nodes[0].id)?.fileLabel || _k,
-        padding: 8,
-        minSize: 2,
-      },
-    ]
+    return [{
+      keyOf: (n) => hmap.get(n.id)?.packageKey ?? null,
+      labelOf: (_k, nodes) => hmap.get(nodes[0].id)?.packageLabel || _k,
+      padding: 26,
+    }]
   }
   if (viewMode.value === 'module' || viewMode.value === 'health') {
     // 모듈간·건강: 패키지 1겹으로 루틴을 감싼다(테이블은 헐 제외). external 은 '__external__' 그룹.
@@ -122,6 +115,10 @@ const clusterKeyOf = computed<((n: GraphNode) => string | null) | null>(() => {
       return (v === undefined || v === null || v === '') ? '__ungrouped__' : String(v)
     }
   }
+  if (viewMode.value === 'area-struct') {
+    const hmap = canvasStore.buildHierarchyMap()
+    return (n) => hmap.get(n.id)?.fileKey ?? null   // 파일 단위 클러스터(각 파일=허브)
+  }
   return null
 })
 
@@ -147,6 +144,12 @@ const clusterLabelOf = computed<((key: string) => string) | null>(() => {
       }
       return `군집 ${key}`
     }
+  }
+  if (viewMode.value === 'area-struct') {
+    const hmap = canvasStore.buildHierarchyMap()
+    const labelByFile = new Map<string, string>()
+    for (const info of hmap.values()) if (info.fileKey) labelByFile.set(info.fileKey, info.fileLabel)
+    return (key) => labelByFile.get(key) || key
   }
   return null
 })
