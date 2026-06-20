@@ -493,6 +493,7 @@ function destroyNvl(): void {
   }
   if (fitTimer) { clearTimeout(fitTimer); fitTimer = undefined }
   needsFit = false
+  onGroupDragUp()   // 드래그 중 파괴 시 window 리스너 정리
   nodeMap.clear()
   relationshipMap.clear()
   anchorMembers.clear()
@@ -581,16 +582,55 @@ function syncGraph(): void {
 let contextMenuHandler: ((e: MouseEvent) => void) | null = null
 let documentClickHandler: ((e: MouseEvent) => void) | null = null
 let userGrabHandler: (() => void) | null = null
+let anchorMouseDownHandler: ((e: MouseEvent) => void) | null = null
 // NVL 인터랙션 핸들러(Click/Drag/Pan/Zoom) — 각자 컨테이너에 리스너를 단다. destroyNvl 에서
 // destroy() 해야 init/destroy 반복(필터 토글) 시 리스너가 누적되지 않는다.
 let interactions: Array<{ destroy(): void }> = []
 
 // ── 그룹 앵커 (spec 022) ──────────────────────────────────────────────────
-// 앵커는 NVL 노드로, 멤버와 옅은 링크로 이어져 라이브 물리가 원형 군집을 만든다. 앵커를 끌면
-// NVL 네이티브 드래그 + reheat 로 멤버가 출렁이며 따라온다(별도 드래그 로직 불필요).
-// anchorMembers/anchorLinkIds 는 보기 전환 시 정리용으로만 보관.
+// 앵커는 멤버와 옅은 링크로 이어져 라이브 물리가 원형 군집을 만든다 — 대칭 링크라 앵커는 자연히
+// 군집 중앙(대표 허브)에 쉰다. 앵커를 끌면(아래 capture mousedown 가로채기) 그 그룹(멤버+앵커)이
+// **통째로 평행이동**해 중앙을 유지 — 일반 노드는 NVL 기본 드래그(그것만 출렁).
 const anchorMembers = new Map<string, string[]>()   // anchorId → 멤버 노드 id[]
 let anchorLinkIds: string[] = []                    // 앵커↔멤버 헬퍼 링크 id(정리용)
+let groupDrag: { ids: string[]; lastX: number; lastY: number } | null = null
+
+function onAnchorMouseDown(e: MouseEvent): void {
+  if (e.button !== 0 || !nvlInstance.value) return
+  const hits = nvlInstance.value.getHits(e, ['node'])?.nvlTargets?.nodes ?? []
+  const anchor = hits.find(h => h.insideNode && h.data.id.startsWith(ANCHOR_PREFIX))
+  if (!anchor) return                              // 앵커 아님 → NVL 노드/팬에 양보
+  const members = anchorMembers.get(anchor.data.id)
+  if (!members) return
+  groupDrag = { ids: [anchor.data.id, ...members], lastX: e.clientX, lastY: e.clientY }
+  e.stopPropagation()
+  e.preventDefault()
+  window.addEventListener('mousemove', onGroupDragMove, true)
+  window.addEventListener('mouseup', onGroupDragUp, true)
+}
+
+function onGroupDragMove(e: MouseEvent): void {
+  const nvl = nvlInstance.value
+  if (!groupDrag || !nvl) return
+  const scale = nvl.getScale() || 1
+  const dpr = window.devicePixelRatio || 1
+  const dxW = (e.clientX - groupDrag.lastX) * dpr / scale
+  const dyW = (e.clientY - groupDrag.lastY) * dpr / scale
+  const set = new Set(groupDrag.ids)
+  const updates = nvl.getNodePositions()
+    .filter(p => set.has(p.id))
+    .map(p => ({ id: p.id, x: p.x + dxW, y: p.y + dyW }))
+  if (updates.length) nvl.setNodePositions(updates as unknown as NvlNode[], false)
+  groupDrag.lastX = e.clientX
+  groupDrag.lastY = e.clientY
+  groupHulls.redraw()
+}
+
+function onGroupDragUp(): void {
+  groupDrag = null
+  window.removeEventListener('mousemove', onGroupDragMove, true)
+  window.removeEventListener('mouseup', onGroupDragUp, true)
+}
 
 function setupInteractions(): void {
   if (!nvlInstance.value || !containerRef.value) return
@@ -657,6 +697,10 @@ function setupInteractions(): void {
   // 사용자가 캔버스를 만지면(드래그/팬) 자동 프레임 중단 — 카메라 통제를 넘긴다.
   userGrabHandler = () => { needsFit = false }
   containerRef.value.addEventListener('mousedown', userGrabHandler)
+
+  // 앵커 드래그(그룹 평행이동) — capture 단계로 NVL 보다 먼저 가로채기(앵커일 때만 차단).
+  anchorMouseDownHandler = onAnchorMouseDown
+  containerRef.value.addEventListener('mousedown', anchorMouseDownHandler, true)
 
   interactions.push(new DragNodeInteraction(nvl))
 
@@ -805,6 +849,9 @@ onUnmounted(() => {
   }
   if (containerRef.value && userGrabHandler) {
     containerRef.value.removeEventListener('mousedown', userGrabHandler)
+  }
+  if (containerRef.value && anchorMouseDownHandler) {
+    containerRef.value.removeEventListener('mousedown', anchorMouseDownHandler, true)
   }
   destroyNvl()
 })
