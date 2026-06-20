@@ -92,30 +92,19 @@ const NVL_OPTIONS = {
   minZoom: 0.08,
   layout: 'forceDirected' as const,
   layoutOptions: {
-    // 비물리(레이아웃 1회). 클러스터 보기는 layoutClusters 가 직접 유기적 좌표를 계산해
-    // setNodePositions 로 박는다(NVL force 는 교차 R/W 때문에 군집 분리를 제어 못 함).
-    // 비클러스터 보기(영역구조·드롭)는 이 1회 force 결과를 그대로 쓴다.
-    iterations: 150,
-    animationDuration: 0,
-    disableAnimation: true,
-    updateLayoutOnChange: false,
-    separateComponents: true,
-    componentSpacing: 200,
-    componentArrangement: 'grid',
+    // ★라이브 물리. 앵커↔멤버를 관계(링크)로 이으면 force 가 멤버를 앵커 둘레 원으로 모으고,
+    // 앵커끼리 반발해 군집이 분리된다. 드래그하면 reheat 되어 출렁이며 헐도 따라온다 —
+    // NVL 네이티브 물리/드래그를 그대로(억지 좌표계산·고정 없음).
+    physics: { enabled: true },
+    updateOnDrag: true,
+    updateOnClick: false,
+    updateLayoutOnChange: true,
+    separateComponents: false,
     nodeRepulsion: 800,
     linkDistance: 80,
-    gravity: 0.05,
-    physics: { enabled: false },
-    updateOnDrag: false,
-    updateOnClick: false
+    gravity: 0.05
   } as any
 } as const
-
-// 클러스터 유기 배치(spec 022) — world 단위. MEMBER_SPACING=그룹 내 멤버 최소 간격(겹침방지),
-// ANCHOR_RING=멤버가 앵커에서 떨어지는 최소 반경(허브 공간), CLUSTER_GAP=그룹 셀 사이 여백.
-const MEMBER_SPACING = 82
-const ANCHOR_RING = 86
-const CLUSTER_GAP = 180
 
 // 그룹 앵커(대표 노드, spec 022). 합성 노드 id 접두사 + 강조색/크기(일반 노드와 구분).
 const ANCHOR_PREFIX = '__anchor__:'
@@ -184,6 +173,7 @@ const { showLogicalNames } = storeToRefs(navigatorStore)
 const containerRef = ref<HTMLElement>()
 const nvlInstance = shallowRef<NVL | null>(null)
 const isInitializing = ref(false)
+let needsFit = false   // 라이브 물리 정착(onLayoutDone) 시 1회 프레임할지 — 최초/뷰전환에만 true
 
 // 그룹 영역(바운디드 컨텍스트) 오버레이. 변환·hull·동기화는 useGroupHulls 가 캡슐화하고,
 // 여기서는 라이프사이클 배선만 한다(단일 책임 분리).
@@ -191,7 +181,9 @@ const groupHulls = useGroupHulls(
   containerRef,
   nvlInstance,
   () => props.graphData.nodes,
-  () => ({ levels: props.hullLevels ?? [] })
+  () => ({ levels: props.hullLevels ?? [] }),
+  // 클러스터 보기는 실엣지를 NVL force 에서 빼고 오버레이로 그린다(군집 분리 유지). 비클러스터는 NVL 이.
+  () => props.clusterKeyOf ? props.graphData.links.filter(matchesRelFilter) : []
 )
 
 const nodeStats = ref<Map<string, NodeStat>>(new Map())
@@ -328,12 +320,17 @@ async function initNvl(): Promise<void> {
     nodes.push(n)
   }
   const visibleIds = new Set(nodes.map(n => n.id))
-  for (const link of props.graphData.links) {
-    if (!visibleIds.has(link.source) || !visibleIds.has(link.target)) continue
-    if (!matchesRelFilter(link)) continue
-    const r = toNvlRelationship(link, props.selectedRelationshipId === link.id)
-    relationshipMap.set(link.id, r)
-    rels.push(r)
+  // 클러스터 보기: 실엣지(R/W 등)는 force 에서 제외해야 앵커로 군집 분리가 된다(NVL force 는
+  // 교차엣지를 못 약화시켜 전부 한 덩어리로 뭉침). 그 엣지는 useGroupHulls 오버레이가 직접 그린다.
+  const clusterMode = !!props.clusterKeyOf
+  if (!clusterMode) {
+    for (const link of props.graphData.links) {
+      if (!visibleIds.has(link.source) || !visibleIds.has(link.target)) continue
+      if (!matchesRelFilter(link)) continue
+      const r = toNvlRelationship(link, props.selectedRelationshipId === link.id)
+      relationshipMap.set(link.id, r)
+      rels.push(r)
+    }
   }
 
   await nextTick()
@@ -344,8 +341,9 @@ async function initNvl(): Promise<void> {
     rels,
     NVL_OPTIONS,
     {
+      // 라이브 물리: 매 틱 헐 추종, 정착(onLayoutDone) 시 최초/뷰전환에만 1회 프레임(드래그 후엔 안 튐).
       onLayoutStep: () => groupHulls.redraw(),
-      onLayoutDone: () => groupHulls.redraw()
+      onLayoutDone: () => { if (needsFit) fitView(); groupHulls.redraw() }
     }
   )
 
@@ -354,13 +352,31 @@ async function initNvl(): Promise<void> {
   updateStats()
   visibleNodeCount.value = nodeMap.size
 
-  // 비물리라 onLayoutDone 이 스스로 안 불려 다음 프레임에 직접 마감(클러스터 유기배치 + 프레임).
+  // 다음 프레임에 앵커/링크 주입 → 라이브 물리가 군집을 형성. 퍼지며 정착하므로 시간차로 프레임.
   requestAnimationFrame(() => {
     isInitializing.value = false
     layoutClusters()
-    fitView()
+    scheduleFit()
     groupHulls.redraw()
   })
+}
+
+/**
+ * 클러스터 보기는 R/W 를 force 에서 빼 군집이 퍼지며 천천히 정착한다 → onLayoutDone 한 번으론
+ * 이른 시점을 잡아 한 군집만 확대된다. 정착 시간을 두고 여러 번 프레임해 **마지막 정착**을 잡되,
+ * 사용자가 캔버스를 만지면(needsFit=false) 즉시 멈춰 카메라 통제를 넘긴다.
+ */
+let fitTimer: ReturnType<typeof setTimeout> | undefined
+function scheduleFit(): void {
+  needsFit = true
+  if (fitTimer) clearTimeout(fitTimer)
+  let tries = 0
+  const tick = () => {
+    if (!needsFit || !nvlInstance.value) return
+    fitView(); groupHulls.redraw()
+    if (++tries < 5) fitTimer = setTimeout(tick, 450)
+  }
+  fitTimer = setTimeout(tick, 450)
 }
 
 /**
@@ -398,12 +414,10 @@ function fitView(): void {
 }
 
 /**
- * 클러스터 유기 배치(spec 022) — clusterKeyOf 로 멤버를 그룹지어, 각 그룹을 격자 셀에 분리
- * 배치하고 그룹 안은 **JS 오프라인 relaxation**(멤버 반발 + 약한 중심인력)으로 유기적으로 모은다.
- * 각 그룹 중앙엔 앵커(대표 노드)를 두고 멤버와 옅은 링크로 잇는다(허브 모양).
- *
- * NVL force 는 교차 R/W 엣지 때문에 군집 분리를 못 한다(전부 한 덩어리로 뭉침) — 그래서 좌표를
- * 직접 계산해 setNodePositions(,false) 로 박는다. 비클러스터 보기(영역구조 등)는 무동작.
+ * 클러스터 보기(spec 022) — clusterKeyOf 로 멤버를 그룹지어, 각 그룹에 앵커(대표 노드)를 두고
+ * **앵커↔멤버를 관계(링크)로 연결만** 한다. 좌표는 일절 고정/계산하지 않는다.
+ * 라이브 물리가 알아서: 앵커 링크 인력 → 멤버가 앵커 둘레 원으로 모이고, 앵커끼리 반발 → 군집 분리,
+ * 드래그하면 reheat → 출렁이며 헐도 따라온다(NVL 기본 상호작용 그대로). 비클러스터 보기는 무동작.
  */
 function layoutClusters(): void {
   const keyOf = props.clusterKeyOf
@@ -421,71 +435,19 @@ function layoutClusters(): void {
   }
   if (groups.size === 0) { clearAnchors(); return }
 
-  // 그룹별 유기 배치(로컬좌표) + 반경 → 격자 셀 크기·중심(원점 정렬) 산정.
-  const clusters = [...groups.entries()].map(([key, ids]) => {
-    const local = relaxCluster(ids.length)
-    const radius = local.reduce((m, p) => Math.max(m, Math.hypot(p.x, p.y)), ANCHOR_RING)
-    return { key, ids, local, radius }
-  })
-  const cell = clusters.reduce((m, c) => Math.max(m, 2 * c.radius), 0) + CLUSTER_GAP
-  const cols = Math.ceil(Math.sqrt(clusters.length))
-  const rows = Math.ceil(clusters.length / cols)
-  const ox = (cols - 1) * cell / 2, oy = (rows - 1) * cell / 2
-  const centers = clusters.map((_, ci) => ({ cx: (ci % cols) * cell - ox, cy: Math.floor(ci / cols) * cell - oy }))
   const labelOf = props.clusterLabelOf
-
-  rebuildAnchors(clusters.map((c, ci) => ({
-    key: c.key, memberIds: c.ids, label: labelOf ? labelOf(c.key) : c.key,
-    cx: centers[ci].cx, cy: centers[ci].cy,
+  rebuildAnchors([...groups.entries()].map(([key, ids]) => ({
+    key, memberIds: ids, label: labelOf ? labelOf(key) : key,
   })))
-
-  const updates: { id: string; x: number; y: number }[] = []
-  clusters.forEach((c, ci) => {
-    c.ids.forEach((id, i) => updates.push({ id, x: centers[ci].cx + c.local[i].x, y: centers[ci].cy + c.local[i].y }))
-    updates.push({ id: ANCHOR_PREFIX + c.key, x: centers[ci].cx, y: centers[ci].cy })
-  })
-  try { nvl.setNodePositions(updates as unknown as NvlNode[], false) } catch { /* 무해 */ }
 }
 
 /**
- * 한 그룹 멤버 n개를 (0,0) 둘레에 **유기적으로** 배치(중심은 앵커 몫). 의사난수로 깨진 나선에서
- * 시작해 "멤버끼리 반발 + 약한 중심인력"을 몇 번 풀어, 완벽한 원이 아닌 자연스러운 군집을 만든다.
- * 결정적(좌표가 인덱스로만 정해짐) — 재배치해도 안 흔들린다.
+ * 그룹 앵커 동기화(spec 022) — 클러스터마다 ①앵커 노드(대표) ②앵커→멤버 옅은 링크(허브 스포크)를
+ * NVL 에 주입만 한다(위치 고정 없음). updateLayoutOnChange 로 라이브 물리가 이 링크를 반영해
+ * 멤버를 앵커 둘레 원으로 모은다. 앵커도 고정 안 해 네이티브 드래그로 끌면 출렁이며 따라온다.
+ * 앵커·링크는 props.graphData 에 없는 가상 요소라 stats/selection/필터에서 자연히 제외된다.
  */
-function relaxCluster(n: number): { x: number; y: number }[] {
-  if (n <= 0) return []
-  const GOLDEN = 2.399963
-  const pts = Array.from({ length: n }, (_, i) => {
-    const j = (Math.sin(i * 12.9898) * 43758.5453) % 1   // 결정적 의사난수 [-1,1)
-    const r = (ANCHOR_RING + MEMBER_SPACING * Math.sqrt(i)) * (0.9 + 0.25 * Math.abs(j))
-    const a = i * GOLDEN + j
-    return { x: r * Math.cos(a), y: r * Math.sin(a) }
-  })
-  for (let it = 0; it < 90; it++) {
-    for (let i = 0; i < n; i++) {
-      let fx = 0, fy = 0
-      for (let k = 0; k < n; k++) {
-        if (i === k) continue
-        const dx = pts[i].x - pts[k].x, dy = pts[i].y - pts[k].y
-        const d = Math.hypot(dx, dy) || 0.01
-        if (d < MEMBER_SPACING) { const f = (MEMBER_SPACING - d) / d * 0.5; fx += dx * f; fy += dy * f }
-      }
-      const cd = Math.hypot(pts[i].x, pts[i].y) || 0.01
-      if (cd < ANCHOR_RING) { fx += pts[i].x / cd * (ANCHOR_RING - cd); fy += pts[i].y / cd * (ANCHOR_RING - cd) }
-      else { const pull = (cd - ANCHOR_RING) * 0.015; fx -= pts[i].x / cd * pull; fy -= pts[i].y / cd * pull }
-      pts[i].x += fx; pts[i].y += fy
-    }
-  }
-  return pts
-}
-
-/**
- * 그룹 앵커 동기화(spec 022) — 클러스터마다 ①앵커 노드(중심) ②앵커→멤버 옅은 헬퍼 링크(허브
- * 스포크)를 NVL 에 주입하고 앵커를 중심 좌표에 놓는다. 앵커를 끌면 그룹 멤버+헐이 통째로 따라온다
- * (onAnchorMouseDown). 앵커·헬퍼링크는 props.graphData 에 없는 가상 요소라 stats/selection/
- * 필터에서 자연히 제외된다.
- */
-function rebuildAnchors(specs: Array<{ key: string; memberIds: string[]; label: string; cx: number; cy: number }>): void {
+function rebuildAnchors(specs: Array<{ key: string; memberIds: string[]; label: string }>): void {
   const nvl = nvlInstance.value
   if (!nvl) return
   clearAnchors()
@@ -505,12 +467,7 @@ function rebuildAnchors(specs: Array<{ key: string; memberIds: string[]; label: 
       rels.push({ id: lid, from: id, to: m, color: ANCHOR_LINK_COLOR, width: 1, properties: { __anchorlink: true } } as unknown as NvlRelationship)
     }
   }
-  if (!nodes.length) return
-  try {
-    nvl.addAndUpdateElementsInGraph(nodes, rels)
-    const anchorPos = specs.map(s => ({ id: ANCHOR_PREFIX + s.key, x: s.cx, y: s.cy }))
-    nvl.setNodePositions(anchorPos as unknown as NvlNode[], false)
-  } catch { /* 무해 */ }
+  if (nodes.length) { try { nvl.addAndUpdateElementsInGraph(nodes, rels) } catch { /* 무해 */ } }
 }
 
 /** 앵커 노드 + 헬퍼 링크를 모두 제거(보기 전환·정리). */
@@ -534,10 +491,12 @@ function destroyNvl(): void {
     nvlInstance.value.destroy()
     nvlInstance.value = null
   }
+  if (fitTimer) { clearTimeout(fitTimer); fitTimer = undefined }
+  needsFit = false
   nodeMap.clear()
   relationshipMap.clear()
   anchorMembers.clear()
-  onGroupDragUp()   // 드래그 중 파괴 시 window 리스너 정리
+  anchorLinkIds = []
   isInitializing.value = false
   visibleNodeCount.value = 0
 }
@@ -585,26 +544,29 @@ function syncGraph(): void {
     newNvlNodes.push(n)
   }
 
-  // 4) 추가할 관계 (양 끝이 모두 캔버스에 있을 때만)
+  // 4) 추가할 관계 (양 끝이 모두 캔버스에 있을 때만). 클러스터 보기는 실엣지를 force 에서 빼고
+  //    오버레이로 그리므로 NVL 엔 안 넣는다(군집 분리 유지).
   const newNvlRels: NvlRelationship[] = []
-  for (const link of props.graphData.links) {
-    if (relationshipMap.has(link.id)) continue
-    if (!targetIds.has(link.source) || !targetIds.has(link.target)) continue
-    if (!matchesRelFilter(link)) continue
-    const r = toNvlRelationship(link, props.selectedRelationshipId === link.id)
-    relationshipMap.set(link.id, r)
-    newNvlRels.push(r)
+  if (!props.clusterKeyOf) {
+    for (const link of props.graphData.links) {
+      if (relationshipMap.has(link.id)) continue
+      if (!targetIds.has(link.source) || !targetIds.has(link.target)) continue
+      if (!matchesRelFilter(link)) continue
+      const r = toNvlRelationship(link, props.selectedRelationshipId === link.id)
+      relationshipMap.set(link.id, r)
+      newNvlRels.push(r)
+    }
   }
 
   if (newNvlNodes.length > 0 || newNvlRels.length > 0) {
     nvlInstance.value.addAndUpdateElementsInGraph(newNvlNodes, newNvlRels)
   }
 
-  // 대량 주입(보기모드 전환 등)이면 클러스터 유기배치 후 카메라 맞춤. 드래그-드롭 단건(1~2개)은
+  // 대량 주입(보기모드 전환 등)이면 앵커 재구성 후 물리 정착 시 프레임. 드래그-드롭 단건(1~2개)은
   // 기존 화면을 유지하려고 재배치/재맞춤하지 않는다(수동 배치 보존).
   if (newNvlNodes.length >= 3) {
     layoutClusters()
-    fitView()
+    scheduleFit()
   }
 
   updateStats()
@@ -618,59 +580,17 @@ function syncGraph(): void {
 
 let contextMenuHandler: ((e: MouseEvent) => void) | null = null
 let documentClickHandler: ((e: MouseEvent) => void) | null = null
-let anchorMouseDownHandler: ((e: MouseEvent) => void) | null = null
+let userGrabHandler: (() => void) | null = null
 // NVL 인터랙션 핸들러(Click/Drag/Pan/Zoom) — 각자 컨테이너에 리스너를 단다. destroyNvl 에서
 // destroy() 해야 init/destroy 반복(필터 토글) 시 리스너가 누적되지 않는다.
 let interactions: Array<{ destroy(): void }> = []
 
-// ── 그룹 앵커 드래그 (spec 022) ──────────────────────────────────────────
-// 각 클러스터 중심의 합성 앵커 노드를 끌면 그 그룹 멤버 전부 + 앵커가 같은 델타로 이동한다
-// (타 그룹 불변). hit 판정은 NVL getHits(insideNode) — 노드 반지름 추측 폐기.
-// NVL 은 mousedown/move/up 으로 팬·노드드래그를 처리하므로, capture 단계 mousedown 에서
-// 앵커 hit 이면 stopPropagation 으로 NVL(단일노드 드래그)을 차단하고 직접 그룹 이동한다.
-// 일반 노드는 가로채지 않아 NVL 기본 드래그(그 노드만 이동)가 그대로 동작한다.
+// ── 그룹 앵커 (spec 022) ──────────────────────────────────────────────────
+// 앵커는 NVL 노드로, 멤버와 옅은 링크로 이어져 라이브 물리가 원형 군집을 만든다. 앵커를 끌면
+// NVL 네이티브 드래그 + reheat 로 멤버가 출렁이며 따라온다(별도 드래그 로직 불필요).
+// anchorMembers/anchorLinkIds 는 보기 전환 시 정리용으로만 보관.
 const anchorMembers = new Map<string, string[]>()   // anchorId → 멤버 노드 id[]
 let anchorLinkIds: string[] = []                    // 앵커↔멤버 헬퍼 링크 id(정리용)
-let groupDrag: { ids: string[]; lastX: number; lastY: number } | null = null
-
-function isAnchorId(id: string): boolean { return id.startsWith(ANCHOR_PREFIX) }
-
-function onAnchorMouseDown(e: MouseEvent): void {
-  if (e.button !== 0 || !nvlInstance.value) return
-  const hits = nvlInstance.value.getHits(e, ['node'])?.nvlTargets?.nodes ?? []
-  const anchor = hits.find(h => h.insideNode && isAnchorId(h.data.id))
-  if (!anchor) return                              // 앵커 아님 → NVL 노드/팬에 양보
-  const members = anchorMembers.get(anchor.data.id)
-  if (!members) return
-  groupDrag = { ids: [anchor.data.id, ...members], lastX: e.clientX, lastY: e.clientY }
-  e.stopPropagation()
-  e.preventDefault()
-  window.addEventListener('mousemove', onGroupDragMove, true)
-  window.addEventListener('mouseup', onGroupDragUp, true)
-}
-
-function onGroupDragMove(e: MouseEvent): void {
-  const nvl = nvlInstance.value
-  if (!groupDrag || !nvl) return
-  const scale = nvl.getScale() || 1
-  const dpr = window.devicePixelRatio || 1
-  const dxW = (e.clientX - groupDrag.lastX) * dpr / scale
-  const dyW = (e.clientY - groupDrag.lastY) * dpr / scale
-  const set = new Set(groupDrag.ids)
-  const updates = nvl.getNodePositions()
-    .filter(p => set.has(p.id))
-    .map(p => ({ id: p.id, x: p.x + dxW, y: p.y + dyW }))
-  if (updates.length) nvl.setNodePositions(updates as unknown as NvlNode[], false)
-  groupDrag.lastX = e.clientX
-  groupDrag.lastY = e.clientY
-  groupHulls.redraw()
-}
-
-function onGroupDragUp(): void {
-  groupDrag = null
-  window.removeEventListener('mousemove', onGroupDragMove, true)
-  window.removeEventListener('mouseup', onGroupDragUp, true)
-}
 
 function setupInteractions(): void {
   if (!nvlInstance.value || !containerRef.value) return
@@ -734,9 +654,9 @@ function setupInteractions(): void {
   containerRef.value.addEventListener('contextmenu', contextMenuHandler)
   document.addEventListener('click', documentClickHandler as EventListener)
 
-  // 앵커 드래그 — capture 단계로 NVL(canvas) 보다 먼저 mousedown 가로채기(앵커일 때만 차단).
-  anchorMouseDownHandler = onAnchorMouseDown
-  containerRef.value.addEventListener('mousedown', anchorMouseDownHandler, true)
+  // 사용자가 캔버스를 만지면(드래그/팬) 자동 프레임 중단 — 카메라 통제를 넘긴다.
+  userGrabHandler = () => { needsFit = false }
+  containerRef.value.addEventListener('mousedown', userGrabHandler)
 
   interactions.push(new DragNodeInteraction(nvl))
 
@@ -745,10 +665,10 @@ function setupInteractions(): void {
   // (interaction-handlers base.js) 기본 동작에 영향 없다.
   // 팬/줌은 버튼 없는 전이(휠)도 있어 idle 루프가 안 돈다 → kick 으로 잠깐 깨워 추종.
   const panInteraction = new PanInteraction(nvl)
-  panInteraction.updateCallback('onPan', () => groupHulls.kick())
+  panInteraction.updateCallback('onPan', () => { needsFit = false; groupHulls.kick() })
   interactions.push(panInteraction)
   const zoomInteraction = new ZoomInteraction(nvl)
-  zoomInteraction.updateCallback('onZoom', () => groupHulls.kick())
+  zoomInteraction.updateCallback('onZoom', () => { needsFit = false; groupHulls.kick() })
   interactions.push(zoomInteraction)
 }
 
@@ -883,10 +803,9 @@ onUnmounted(() => {
   if (documentClickHandler) {
     document.removeEventListener('click', documentClickHandler)
   }
-  if (containerRef.value && anchorMouseDownHandler) {
-    containerRef.value.removeEventListener('mousedown', anchorMouseDownHandler, true)
+  if (containerRef.value && userGrabHandler) {
+    containerRef.value.removeEventListener('mousedown', userGrabHandler)
   }
-  onGroupDragUp()   // 혹시 드래그 중 unmount 시 window 리스너 정리
   destroyNvl()
 })
 
@@ -927,9 +846,9 @@ watch(() => props.hullLevels, () => {
   groupHulls.redraw()
 })
 
-// 클러스터 키가 바뀌면(보기 전환) 새 그룹 기준으로 다시 유기배치 + 프레임.
+// 클러스터 키가 바뀌면(보기 전환) 앵커 재구성 → 물리 정착 시 프레임.
 watch(() => props.clusterKeyOf, () => {
-  if (nvlInstance.value) { layoutClusters(); fitView(); groupHulls.redraw() }
+  if (nvlInstance.value) { layoutClusters(); scheduleFit(); groupHulls.redraw() }
 })
 
 // 우측 패널 열림/닫힘으로 가시영역이 바뀌면 다시 프레임(리사이즈 중 매 px 재맞춤은 피하고 토글만).

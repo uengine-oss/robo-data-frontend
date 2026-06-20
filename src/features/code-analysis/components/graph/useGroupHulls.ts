@@ -24,8 +24,8 @@
 
 import type { NVL } from '@neo4j-nvl/base'
 import type { Ref } from 'vue'
-import type { GraphNode } from '@/shared/types'
-import { getNodeSize } from '@/shared/config/graphStyles'
+import type { GraphNode, GraphLink } from '@/shared/types'
+import { getNodeSize, getRelationshipColor } from '@/shared/config/graphStyles'
 
 // ============================================================================
 // 타입
@@ -114,6 +114,11 @@ export function useGroupHulls(
   getNodes: () => GraphNode[],
   /** 그룹/색 설정 getter */
   getConfig: () => GroupHullConfig,
+  /**
+   * 오버레이에 직접 그릴 관계(spec 022) — 클러스터 보기는 R/W 등 실엣지를 NVL force 에서 빼고
+   * (그래야 앵커로 군집 분리) 여기서 그린다. 비클러스터 보기는 NVL 이 그리므로 빈 배열.
+   */
+  getEdges: () => GraphLink[] = () => [],
 ) {
   let overlay: HTMLCanvasElement | null = null
   let ctx: CanvasRenderingContext2D | null = null
@@ -123,6 +128,11 @@ export function useGroupHulls(
   let wakeUntil = 0         // 휠 줌 등 버튼 없는 전이를 잠깐 추종하는 마감 시각(ms)
   let downHandler: ((e: MouseEvent) => void) | null = null
   let upHandler: (() => void) | null = null
+  // 헐 합성용 오프스크린 버퍼 — 헐을 솔리드로 그린 뒤 한 번에 반투명 합성해 밴드/채움 겹침으로
+  // 안쪽에 진한 윤곽선이 생기는 걸 없앤다(균일 투명도).
+  let buffer: HTMLCanvasElement | null = null
+  let bctx: CanvasRenderingContext2D | null = null
+  const HULL_ALPHA = 0.18
 
   // ── 오버레이 캔버스 부착/해제 ─────────────────────────────────────────
   function attach(): void {
@@ -140,6 +150,8 @@ export function useGroupHulls(
     })
     host.appendChild(overlay)
     ctx = overlay.getContext('2d')
+    buffer = document.createElement('canvas')
+    bctx = buffer.getContext('2d')
 
     resizeObserver = new ResizeObserver(() => { sizeCanvas(); redraw() })
     resizeObserver.observe(host)
@@ -166,15 +178,19 @@ export function useGroupHulls(
     resizeObserver = null
     overlay = null
     ctx = null
+    buffer = null
+    bctx = null
   }
 
   function sizeCanvas(): void {
     if (!overlay || !containerRef.value) return
     const dpr = window.devicePixelRatio || 1
     const { clientWidth: w, clientHeight: h } = containerRef.value
-    overlay.width = Math.max(1, Math.round(w * dpr))
-    overlay.height = Math.max(1, Math.round(h * dpr))
+    const pw = Math.max(1, Math.round(w * dpr)), ph = Math.max(1, Math.round(h * dpr))
+    overlay.width = pw; overlay.height = ph
     ctx?.setTransform(dpr, 0, 0, dpr, 0, 0) // 그리기는 CSS 픽셀 좌표로
+    if (buffer) { buffer.width = pw; buffer.height = ph }
+    bctx?.setTransform(dpr, 0, 0, dpr, 0, 0)
   }
 
   // ── 상호작용 중에만 rAF 추종 (idle 정지로 반응성·CPU 확보, spec 022 FR-007) ──────
@@ -238,8 +254,47 @@ export function useGroupHulls(
     }
     const nodes = getNodes()
 
-    // 바깥 레벨(패키지)부터 안 레벨(파일)까지 순서대로 그린다 → 중첩 헐(원 안의 원).
-    // 안 레벨은 바깥 레벨의 부분집합 그룹이라 같은 좌표 기준상 자연히 안쪽에 들어간다.
+    // 클러스터 보기 실엣지(R/W·CALL 등) — NVL force 에서 뺀 관계를 직접 그린다. 노드 테두리~테두리로
+    // 트림해 노드 면을 안 가리고, 타입색으로 종류를 구분(READS/WRITES 다른 색). 화살표로 방향 표시.
+    const edges = getEdges()
+    if (edges.length) {
+      const radById = new Map<string, number>()
+      for (const n of nodes) radById.set(n.id, (getNodeSize(n.labels || []) / 2) * scale)
+      ctx.save()
+      ctx.lineWidth = 1.4
+      ctx.globalAlpha = 0.55
+      for (const e of edges) {
+        const a = posById.get(e.source), b = posById.get(e.target)
+        if (!a || !b) continue
+        const sa = toScreen(a.x, a.y), sb = toScreen(b.x, b.y)
+        const dx = sb.x - sa.x, dy = sb.y - sa.y
+        const len = Math.hypot(dx, dy) || 1
+        const ux = dx / len, uy = dy / len
+        const x1 = sa.x + ux * ((radById.get(e.source) || 0) + 1)
+        const y1 = sa.y + uy * ((radById.get(e.source) || 0) + 1)
+        const x2 = sb.x - ux * ((radById.get(e.target) || 0) + 3)
+        const y2 = sb.y - uy * ((radById.get(e.target) || 0) + 3)
+        const col = getRelationshipColor(e.type)
+        ctx.strokeStyle = col
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke()
+        // 화살촉(방향)
+        const ah = 6
+        ctx.fillStyle = col
+        ctx.beginPath()
+        ctx.moveTo(x2, y2)
+        ctx.lineTo(x2 - ux * ah - uy * ah * 0.5, y2 - uy * ah + ux * ah * 0.5)
+        ctx.lineTo(x2 - ux * ah + uy * ah * 0.5, y2 - uy * ah - ux * ah * 0.5)
+        ctx.closePath(); ctx.fill()
+      }
+      ctx.restore()
+    }
+
+    // 헐 도형은 **버퍼에 솔리드로** 그린 뒤 한 번에 반투명 합성한다 → 밴드(2R)+내부채움이 가장자리에서
+    // 겹쳐 안쪽에 진한 윤곽선이 생기던 부작용 제거(균일 투명도). 라벨은 합성 뒤 또렷하게 위에.
+    if (!bctx || !buffer) return
+    bctx.clearRect(0, 0, w, h)
+    bctx.save(); bctx.lineJoin = 'round'; bctx.lineCap = 'round'
+    const pending: Array<{ x: number; y: number; text: string; color: string }> = []
     for (const level of cfg.levels) {
       const groups = new Map<string, { pts: Pt[]; nodes: GraphNode[] }>()
       for (const node of nodes) {
@@ -257,67 +312,51 @@ export function useGroupHulls(
       const ordered = [...groups.entries()].sort((a, b) => b[1].pts.length - a[1].pts.length)
       for (const [key, g] of ordered) {
         if (g.nodes.length < minSize) continue   // 1노드 파일 등은 링 생략(도배 방지)
-        // ★줌해도 절대 안 삐져나오게: padding = 고정여백(level.padding) + 노드 스크린 반지름.
-        // 헐은 노드 중심 기준으로 그려지므로, 노드 원(반지름=size/2·줌비례)을 감싸려면
-        // 그 반지름만큼 더 확장해야 한다(줌인하면 노드가 커지니 반지름도 scale 비례로 증가).
-        // ★NVL 노드 화면반지름 = (size/2)·scale (dpr 미분할 — 노드 렌더는 CSS px 에서 scale 만 적용).
-        //  과거 /dpr 로 나눠 레티나(dpr=2)서 밴드가 노드의 절반이던 버그 제거. 위치(toScreen)는 /dpr 유지.
+        // ★줌해도 절대 안 삐져나오게: padding = 고정여백 + 노드 스크린 반지름((size/2)·scale, dpr 미분할).
         let nodeR = 0
         for (const n of g.nodes) {
           const r = (getNodeSize(n.labels || []) / 2) * scale
           if (r > nodeR) nodeR = r
         }
-        // 밴드 반폭 R = 고정여백 + 정확반지름×1.08(테두리/링) + 4px(AA 고정안전). 타이트하면서 절대 안삐짐.
         const effPad = level.padding + nodeR * 1.08 + 4
-        drawGroup(ctx, g.pts, hashColor(key), level.labelOf(key, g.nodes), effPad, nodeR)
+        const color = hashColor(key)
+        const a = drawHullShape(bctx, g.pts, color, effPad)
+        const label = level.labelOf(key, g.nodes)
+        if (label) {
+          const labelGap = Math.min(effPad, nodeR * 1.3 + 26)
+          pending.push({ x: a.labelX, y: a.topY - labelGap - 6, text: label, color })
+        }
       }
     }
+    bctx.restore()
+    ctx.save(); ctx.globalAlpha = HULL_ALPHA; ctx.drawImage(buffer, 0, 0, w, h); ctx.restore()
+    for (const p of pending) drawLabel(ctx, p.x, p.y, p.text, p.color)
   }
 
   /**
-   * 그룹 영역 그리기 — ★Minkowski 합 방식(절대 안 삐져나옴).
-   * 노드 중심들의 볼록헐(폴리곤)을 **두께 2R 둥근 선**으로 칠하면, 그 영역 = 모든 노드 중심에서
-   * 반경 R 이내. R = padding(=고정여백+노드반지름·줌비례)이라 노드 원이 수학적으로 반드시 내부.
-   * (과거의 무게중심 방사확장 + 베지어 코너깎임이 길쭉배치·꼭짓점 노드를 밖으로 흘리던 근본결함 제거.)
+   * 그룹 영역 도형(★Minkowski 합 — 절대 안 삐져나옴)을 **솔리드로** 그린다. 노드 중심 볼록헐을
+   * 두께 2R 둥근선 + 내부채움으로 칠하면 영역 = 모든 노드 중심에서 반경 R 이내. 투명도는 호출측이
+   * 버퍼 합성에서 한 번에 입혀 균일하게 한다. 라벨 앵커(맨위 가로중앙)를 반환.
    */
-  function drawGroup(c: CanvasRenderingContext2D, pts: Pt[], color: string, label: string, R: number, nodeR: number): void {
-    if (pts.length === 0) return
-    // 반투명 채움 — 둥근 굵은선(2R)의 바깥 가장자리가 자연히 크리스프 경계가 된다.
-    const fill = hexToRgba(color, 0.16)
-
-    c.save()
-    c.lineJoin = 'round'
-    c.lineCap = 'round'
-
-    let labelX: number, topCenterY: number
-
+  function drawHullShape(c: CanvasRenderingContext2D, pts: Pt[], color: string, R: number): { labelX: number; topY: number } {
+    c.fillStyle = color
+    c.strokeStyle = color
     if (pts.length === 1) {
       const p = pts[0]
-      c.beginPath(); c.arc(p.x, p.y, R, 0, Math.PI * 2); c.fillStyle = fill; c.fill()
-      labelX = p.x; topCenterY = p.y
-    } else {
-      const hull = pts.length >= 3 ? convexHull(pts) : pts
-      const closed = hull.length >= 3
-      const buildPath = () => {
-        c.beginPath()
-        c.moveTo(hull[0].x, hull[0].y)
-        for (let i = 1; i < hull.length; i++) c.lineTo(hull[i].x, hull[i].y)
-        if (closed) c.closePath()
-      }
-      // 채움 밴드(두께 2R 둥근선 = Minkowski 합) + 내부 채움(닫힌 폴리곤 가운데).
-      buildPath(); c.strokeStyle = fill; c.lineWidth = 2 * R; c.stroke()
-      if (closed) { buildPath(); c.fillStyle = fill; c.fill() }
-      labelX = hull.reduce((s, p) => s + p.x, 0) / hull.length
-      topCenterY = Math.min(...hull.map(p => p.y))
+      c.beginPath(); c.arc(p.x, p.y, R, 0, Math.PI * 2); c.fill()
+      return { labelX: p.x, topY: p.y }
     }
-
-    c.restore()
-    // 라벨 빈 문자열이면 생략 — 앵커(대표 노드) 캡션이 그룹 이름을 보여주는 보기(모듈간/협력군집)는
-    // 헐 라벨이 중복이라 호출측이 ''로 끈다.
-    if (!label) return
-    // 라벨 = 영역 맨 위 바깥·가로중앙. 밴드 위(R)에 두되, 극단 줌서 너무 멀어지지 않게 상한(노드 바로 위 수준)으로 캡.
-    const labelGap = Math.min(R, nodeR * 1.3 + 26)
-    drawLabel(c, labelX, topCenterY - labelGap - 6, label, color)
+    const hull = pts.length >= 3 ? convexHull(pts) : pts
+    const closed = hull.length >= 3
+    const buildPath = () => {
+      c.beginPath()
+      c.moveTo(hull[0].x, hull[0].y)
+      for (let i = 1; i < hull.length; i++) c.lineTo(hull[i].x, hull[i].y)
+      if (closed) c.closePath()
+    }
+    buildPath(); c.lineWidth = 2 * R; c.stroke()
+    if (closed) { buildPath(); c.fill() }
+    return { labelX: hull.reduce((s, p) => s + p.x, 0) / hull.length, topY: Math.min(...hull.map(p => p.y)) }
   }
 
   function drawLabel(c: CanvasRenderingContext2D, x: number, y: number, text: string, color: string): void {
