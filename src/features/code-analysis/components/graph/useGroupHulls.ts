@@ -69,15 +69,6 @@ function hashColor(key: string): string {
   return PALETTE[Math.abs(h) % PALETTE.length]
 }
 
-function hexToRgba(hex: string, alpha: number): string {
-  const m = hex.replace('#', '')
-  const full = m.length === 3 ? m.split('').map(c => c + c).join('') : m
-  const r = parseInt(full.slice(0, 2), 16)
-  const g = parseInt(full.slice(2, 4), 16)
-  const b = parseInt(full.slice(4, 6), 16)
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`
-}
-
 // ============================================================================
 // 볼록 껍질(convex hull) — Andrew's monotone chain. 외부 의존성 없음.
 // 반환: 반시계 정점 배열 (점 ≤2 면 그대로)
@@ -119,6 +110,11 @@ export function useGroupHulls(
    * (그래야 앵커로 군집 분리) 여기서 그린다. 비클러스터 보기는 NVL 이 그리므로 빈 배열.
    */
   getEdges: () => GraphLink[] = () => [],
+  /**
+   * 그룹 앵커(spec 022) — {id, key(=헐 그룹키와 일치), label, size}. 앵커를 ①헐 영역의 일원으로
+   * 포함(움직이면 헐이 따라 확장) ②그룹 이름을 **고정크기 칩**으로 그린다(줌해도 안 커짐).
+   */
+  getAnchors: () => Array<{ id: string; key: string; label: string; size: number }> = () => [],
 ) {
   let overlay: HTMLCanvasElement | null = null
   let ctx: CanvasRenderingContext2D | null = null
@@ -292,9 +288,13 @@ export function useGroupHulls(
     // 헐 도형은 **버퍼에 솔리드로** 그린 뒤 한 번에 반투명 합성한다 → 밴드(2R)+내부채움이 가장자리에서
     // 겹쳐 안쪽에 진한 윤곽선이 생기던 부작용 제거(균일 투명도). 라벨은 합성 뒤 또렷하게 위에.
     if (!bctx || !buffer) return
+    const anchors = getAnchors()
+    const anchorByKey = new Map(anchors.map(a => [a.key, a]))
+    const labeledKeys = new Set<string>()
+
     bctx.clearRect(0, 0, w, h)
     bctx.save(); bctx.lineJoin = 'round'; bctx.lineCap = 'round'
-    const pending: Array<{ x: number; y: number; text: string; color: string }> = []
+    const pending: Array<{ x: number; y: number; text: string }> = []
     for (const level of cfg.levels) {
       const groups = new Map<string, { pts: Pt[]; nodes: GraphNode[] }>()
       for (const node of nodes) {
@@ -318,19 +318,34 @@ export function useGroupHulls(
           const r = (getNodeSize(n.labels || []) / 2) * scale
           if (r > nodeR) nodeR = r
         }
+        // 앵커도 이 영역의 일원 — 헐 점에 포함(움직이면 헐이 따라 확장) + 반지름도 밴드에 반영.
+        const anc = anchorByKey.get(key)
+        if (anc) {
+          const ap = posById.get(anc.id)
+          if (ap) { g.pts.push(toScreen(ap.x, ap.y)); nodeR = Math.max(nodeR, (anc.size / 2) * scale) }
+        }
         const effPad = level.padding + nodeR * 1.08 + 4
-        const color = hashColor(key)
-        const a = drawHullShape(bctx, g.pts, color, effPad)
-        const label = level.labelOf(key, g.nodes)
-        if (label) {
+        const a = drawHullShape(bctx, g.pts, hashColor(key), effPad)
+        const text = anc?.label ?? level.labelOf(key, g.nodes)
+        if (text) {
           const labelGap = Math.min(effPad, nodeR * 1.3 + 26)
-          pending.push({ x: a.labelX, y: a.topY - labelGap - 6, text: label, color })
+          pending.push({ x: a.labelX, y: a.topY - labelGap - 6, text })
+          if (anc) labeledKeys.add(anc.key)
         }
       }
     }
     bctx.restore()
     ctx.save(); ctx.globalAlpha = HULL_ALPHA; ctx.drawImage(buffer, 0, 0, w, h); ctx.restore()
-    for (const p of pending) drawLabel(ctx, p.x, p.y, p.text, p.color)
+
+    // 헐 없는 군집(예: 모듈간 테이블)의 앵커는 헐 라벨이 없으니 앵커 노드 바로 위에 칩을 그린다.
+    for (const a of anchors) {
+      if (labeledKeys.has(a.key) || !a.label) continue
+      const ap = posById.get(a.id)
+      if (!ap) continue
+      const s = toScreen(ap.x, ap.y)
+      pending.push({ x: s.x, y: s.y - (a.size / 2) * scale - 12, text: a.label })
+    }
+    for (const p of pending) drawChip(ctx, p.x, p.y, p.text)
   }
 
   /**
@@ -359,25 +374,32 @@ export function useGroupHulls(
     return { labelX: hull.reduce((s, p) => s + p.x, 0) / hull.length, topY: Math.min(...hull.map(p => p.y)) }
   }
 
-  function drawLabel(c: CanvasRenderingContext2D, x: number, y: number, text: string, color: string): void {
+  /**
+   * 그룹 이름 칩(spec 022) — 줌 무관 **고정 14px**, 다크 글래스 알약 + 옅은 테두리 + 부드러운 그림자.
+   * (x, y) 를 칩 중심으로. 과거 진한 색 알약보다 가독성·세련도↑.
+   */
+  function drawChip(c: CanvasRenderingContext2D, x: number, y: number, text: string): void {
     c.save()
-    // 폰트는 고정 px(줌해도 크기 그대로 = 항상 읽기 좋음). 가독성 위해 14px 볼드 + 진한 알약 + 그림자.
-    c.font = '700 14px system-ui, sans-serif'
+    c.font = '600 14px -apple-system, system-ui, "Segoe UI", sans-serif'
     c.textAlign = 'center'
     c.textBaseline = 'middle'
     const tw = c.measureText(text).width
-    const px = 9
-    const ph = 20
-    const cy = y - ph / 2
-    c.shadowColor = 'rgba(0,0,0,0.45)'
-    c.shadowBlur = 6
-    c.shadowOffsetY = 1
-    c.fillStyle = hexToRgba(color, 0.96)
-    roundRect(c, x - tw / 2 - px, cy - ph / 2, tw + px * 2, ph, 9)
+    const padX = 11, h = 24
+    const w = tw + padX * 2
+    const left = x - w / 2, top = y - h / 2
+    c.shadowColor = 'rgba(0,0,0,0.38)'
+    c.shadowBlur = 10
+    c.shadowOffsetY = 2
+    c.fillStyle = 'rgba(26,28,36,0.9)'   // 다크 글래스
+    roundRect(c, left, top, w, h, h / 2)
     c.fill()
     c.shadowColor = 'transparent'
-    c.fillStyle = '#ffffff'
-    c.fillText(text, x, cy + 0.5)
+    c.lineWidth = 1
+    c.strokeStyle = 'rgba(255,255,255,0.14)'
+    roundRect(c, left, top, w, h, h / 2)
+    c.stroke()
+    c.fillStyle = '#eef0f3'
+    c.fillText(text, x, y + 0.5)
     c.restore()
   }
 

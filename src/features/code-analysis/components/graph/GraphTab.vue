@@ -73,11 +73,11 @@ const hullLevels = computed<HullLevel[]>(() => {
     }]
   }
   if (viewMode.value === 'area-struct') {
-    // 패키지 외곽 헐 1겹으로 파일 클러스터들을 감싼다(파일 이름은 파일 앵커 캡션이 표시).
+    // 패키지 외곽 헐 1겹(이름은 앵커 칩이 표시 — 헐 라벨 중복 제거).
     const hmap = canvasStore.buildHierarchyMap()
     return [{
       keyOf: (n) => hmap.get(n.id)?.packageKey ?? null,
-      labelOf: (_k, nodes) => hmap.get(nodes[0].id)?.packageLabel || _k,
+      labelOf: () => '',
       padding: 26,
     }]
   }
@@ -117,7 +117,7 @@ const clusterKeyOf = computed<((n: GraphNode) => string | null) | null>(() => {
   }
   if (viewMode.value === 'area-struct') {
     const hmap = canvasStore.buildHierarchyMap()
-    return (n) => hmap.get(n.id)?.fileKey ?? null   // 파일 단위 클러스터(각 파일=허브)
+    return (n) => hmap.get(n.id)?.packageKey ?? null   // 패키지(폴더) 단위 허브 — 다른 보기와 일관
   }
   return null
 })
@@ -147,9 +147,9 @@ const clusterLabelOf = computed<((key: string) => string) | null>(() => {
   }
   if (viewMode.value === 'area-struct') {
     const hmap = canvasStore.buildHierarchyMap()
-    const labelByFile = new Map<string, string>()
-    for (const info of hmap.values()) if (info.fileKey) labelByFile.set(info.fileKey, info.fileLabel)
-    return (key) => labelByFile.get(key) || key
+    const labelByPkg = new Map<string, string>()
+    for (const info of hmap.values()) if (info.packageKey) labelByPkg.set(info.packageKey, info.packageLabel)
+    return (key) => labelByPkg.get(key) || key
   }
   return null
 })
