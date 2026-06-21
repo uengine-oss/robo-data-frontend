@@ -69,11 +69,7 @@ function hashColor(key: string): string {
   return PALETTE[Math.abs(h) % PALETTE.length]
 }
 
-// ============================================================================
-// 볼록 껍질(convex hull) — Andrew's monotone chain. 외부 의존성 없음.
-// 반환: 반시계 정점 배열 (점 ≤2 면 그대로)
-// ============================================================================
-
+// 볼록 껍질(convex hull) — Andrew's monotone chain. 군집 "모양에 맞는" 영역의 외곽. 점 ≤2 면 그대로.
 function convexHull(points: Pt[]): Pt[] {
   if (points.length <= 2) return points.slice()
   const pts = points.slice().sort((a, b) => (a.x - b.x) || (a.y - b.y))
@@ -89,8 +85,7 @@ function convexHull(points: Pt[]): Pt[] {
     while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop()
     upper.push(p)
   }
-  lower.pop()
-  upper.pop()
+  lower.pop(); upper.pop()
   return lower.concat(upper)
 }
 
@@ -255,12 +250,13 @@ export function useGroupHulls(
     const edges = getEdges()
     if (edges.length) {
       const radById = new Map<string, number>()
-      for (const n of nodes) radById.set(n.id, (getNodeSize(n.labels || []) / 2) * scale)
-      // 노드 테두리에서 GAP 만큼 떨어뜨려(찌름 방지) 선·화살표를 그리고, 중간에 타입 글자.
-      const GAP = 8
-      const labels: Array<{ x: number; y: number; text: string; col: string }> = []
+      // 노드 화면 반지름 = size·scale (size 가 곧 반지름 — 라이브 실측 확정). 과거 size/2 는 절반이라
+      // 줌인 시 화살표가 노드 안에서 출발해 노드를 찌르던 원인. GAP 4 = NVL 네이티브 NodeGap 동일.
+      for (const n of nodes) radById.set(n.id, getNodeSize(n.labels || []) * scale)
+      const GAP = 4
+      const labels: Array<{ x: number; y: number; text: string; ang: number }> = []
       ctx.save()
-      ctx.lineWidth = 1.4
+      ctx.lineWidth = 2            // NVL relationshipWidth 기본과 동일
       ctx.lineCap = 'round'
       for (const e of edges) {
         const a = posById.get(e.source), b = posById.get(e.target)
@@ -275,31 +271,45 @@ export function useGroupHulls(
         const x1 = sa.x + ux * rs, y1 = sa.y + uy * rs
         const x2 = sb.x - ux * rt, y2 = sb.y - uy * rt
         const col = getRelationshipColor(e.type)
-        ctx.globalAlpha = 0.5
+        ctx.globalAlpha = 1          // NVL 과 동일 = 불투명 솔리드
         ctx.strokeStyle = col
         ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke()
-        // 화살촉(방향) — 타깃 노드 앞에서 멈춤
-        const ah = 7
-        ctx.globalAlpha = 0.7
+        // 화살촉 = NVL 치수 그대로(HeadHeight 9 · HeadWidth 7). 타깃 노드 앞에서 멈춤.
+        const HH = 9, HW = 3.5
         ctx.fillStyle = col
         ctx.beginPath()
         ctx.moveTo(x2, y2)
-        ctx.lineTo(x2 - ux * ah - uy * ah * 0.55, y2 - uy * ah + ux * ah * 0.55)
-        ctx.lineTo(x2 - ux * ah + uy * ah * 0.55, y2 - uy * ah - ux * ah * 0.55)
+        ctx.lineTo(x2 - ux * HH - uy * HW, y2 - uy * HH + ux * HW)
+        ctx.lineTo(x2 - ux * HH + uy * HW, y2 - uy * HH - ux * HW)
         ctx.closePath(); ctx.fill()
-        labels.push({ x: (x1 + x2) / 2, y: (y1 + y2) / 2, text: e.type, col })
+        labels.push({ x: (x1 + x2) / 2, y: (y1 + y2) / 2, text: e.type, ang: Math.atan2(y2 - y1, x2 - x1) })
       }
-      // 관계 타입 글자(중간점, 고정 11px) — 선 위에 또렷하게.
-      ctx.globalAlpha = 1
-      ctx.font = '600 11px system-ui, sans-serif'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      for (const l of labels) {
-        ctx.lineWidth = 3
-        ctx.strokeStyle = 'rgba(18,18,24,0.85)'   // 어두운 외곽선으로 가독성
-        ctx.strokeText(l.text, l.x, l.y)
-        ctx.fillStyle = l.col
-        ctx.fillText(l.text, l.x, l.y)
+      // 관계 타입 글자 = NVL 처럼 **줌 연동**. 멀어지면(scale 작음) 폰트가 작아지다 임계 이하면 아예
+      // 안 그림 → 줌아웃 시 자연히 사라져 떡칠 해소. 가까이서만 또렷. 남은 것도 겹치면 생략(de-clutter).
+      // 관계 타입 글자 = NVL 네이티브 스타일 그대로: **엣지 각도로 회전**(선 따라 누움) + 회색 + 외곽선/배경
+      // 없음 + 선 바로 위. NVL relationshipLabelFontSize:10 에 맞춰 ~10.5px, 줌 비례(멀면 사라짐).
+      const labelPx = Math.min(9, scale * 16)
+      if (labelPx >= 7) {
+        ctx.globalAlpha = 1
+        ctx.font = `${labelPx.toFixed(1)}px system-ui, sans-serif`
+        ctx.fillStyle = '#9aa1ab'   // NVL 관계라벨 회색(#818790 계열)
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        const placed: Pt[] = []
+        const minGap = labelPx * 2.6
+        for (const l of labels) {
+          if (placed.some(q => Math.hypot(q.x - l.x, q.y - l.y) < minGap)) continue
+          placed.push({ x: l.x, y: l.y })
+          // 글자가 뒤집히지 않게 각도를 ±90° 안으로 접는다(NVL 과 동일).
+          let a = l.ang
+          if (a > Math.PI / 2) a -= Math.PI
+          else if (a < -Math.PI / 2) a += Math.PI
+          ctx.save()
+          ctx.translate(l.x, l.y)
+          ctx.rotate(a)
+          ctx.fillText(l.text, 0, -labelPx * 0.6)   // 선 바로 위
+          ctx.restore()
+        }
       }
       ctx.restore()
     }
@@ -309,6 +319,7 @@ export function useGroupHulls(
     if (!bctx || !buffer) return
     const anchors = getAnchors()
     const anchorByKey = new Map(anchors.map(a => [a.key, a]))
+    const regionLabels: Array<{ x: number; y: number; text: string; color: string }> = []
 
     bctx.clearRect(0, 0, w, h)
     bctx.save(); bctx.lineJoin = 'round'; bctx.lineCap = 'round'
@@ -329,46 +340,46 @@ export function useGroupHulls(
       const ordered = [...groups.entries()].sort((a, b) => b[1].pts.length - a[1].pts.length)
       for (const [key, g] of ordered) {
         if (g.nodes.length < minSize) continue   // 1노드 파일 등은 링 생략(도배 방지)
-        // ★줌해도 절대 안 삐져나오게: padding = 고정여백 + 노드 스크린 반지름((size/2)·scale, dpr 미분할).
+        // 영역이 노드를 확실히 덮도록 가장 큰 노드 화면 반지름(size·scale, 실측)을 패딩에 가산.
         let nodeR = 0
         for (const n of g.nodes) {
-          const r = (getNodeSize(n.labels || []) / 2) * scale
+          const r = getNodeSize(n.labels || []) * scale
           if (r > nodeR) nodeR = r
         }
-        // 앵커도 이 영역의 일원 — 헐 점에 포함(움직이면 헐이 따라 확장) + 반지름도 밴드에 반영.
+        // 앵커도 이 영역의 일원 — 헐 점에 포함(움직이면 헐이 따라 확장).
         const anc = anchorByKey.get(key)
+        let ancScreen: Pt | null = null
         if (anc) {
           const ap = posById.get(anc.id)
-          if (ap) { g.pts.push(toScreen(ap.x, ap.y)); nodeR = Math.max(nodeR, (anc.size / 2) * scale) }
+          if (ap) { ancScreen = toScreen(ap.x, ap.y); g.pts.push(ancScreen); nodeR = Math.max(nodeR, anc.size * scale) }
         }
-        drawHullShape(bctx, g.pts, hashColor(key), level.padding + nodeR * 1.08 + 4)
+        drawHullShape(bctx, g.pts, hashColor(key), level.padding + nodeR + 4)
+        // 영역 이름 = **앵커 바로 위**, `앵커 화면반지름(size·scale) + 고정 간격`. 줌·군집모양 무관하게
+        // 앵커와 안 겹치는 일정한 위치(앵커 커지면 그만큼 위로 — 항상 앵커 윗변 바로 위).
+        if (anc?.label && ancScreen) {
+          regionLabels.push({ x: ancScreen.x, y: ancScreen.y - anc.size * scale - 22, text: anc.label, color: hashColor(key) })
+        }
       }
     }
     bctx.restore()
     ctx.save(); ctx.globalAlpha = HULL_ALPHA; ctx.drawImage(buffer, 0, 0, w, h); ctx.restore()
 
-    // 그룹 이름 칩 = **앵커 노드 바로 위**(모든 군집 일관). 앵커가 곧 대표라 이름이 앵커에 붙는다.
-    for (const a of anchors) {
-      if (!a.label) continue
-      const ap = posById.get(a.id)
-      if (!ap) continue
-      const s = toScreen(ap.x, ap.y)
-      drawChip(ctx, s.x, s.y - (a.size / 2) * scale - 16, a.label)
-    }
+    // 영역 이름 라벨 — 합성 위에 또렷이(줌 무관 고정). [● 영역색] 이름.
+    for (const r of regionLabels) drawRegionLabel(ctx, r.x, r.y, r.text, r.color)
   }
 
   /**
-   * 그룹 영역 도형(★Minkowski 합 — 절대 안 삐져나옴)을 **솔리드로** 그린다. 노드 중심 볼록헐을
-   * 두께 2R 둥근선 + 내부채움으로 칠하면 영역 = 모든 노드 중심에서 반경 R 이내. 투명도는 호출측이
-   * 버퍼 합성에서 한 번에 입혀 균일하게 한다. 라벨 앵커(맨위 가로중앙)를 반환.
+   * 영역 = 군집 **모양에 맞는** 둥근 도형(Minkowski 합). 노드 중심 볼록헐을 두께 2R 둥근선 + 내부채움으로
+   * 칠하면 = 모든 노드에서 반경 R 이내의 부드러운 영역. 원으로 통일하지 않으므로 끌면 그 노드 쪽으로만
+   * 늘어나고(원처럼 사방 부풂 없음), 흩어진 군집도 자연스럽게 감싼다.
    */
-  function drawHullShape(c: CanvasRenderingContext2D, pts: Pt[], color: string, R: number): { labelX: number; topY: number } {
+  function drawHullShape(c: CanvasRenderingContext2D, pts: Pt[], color: string, R: number): void {
     c.fillStyle = color
     c.strokeStyle = color
     if (pts.length === 1) {
       const p = pts[0]
       c.beginPath(); c.arc(p.x, p.y, R, 0, Math.PI * 2); c.fill()
-      return { labelX: p.x, topY: p.y }
+      return
     }
     const hull = pts.length >= 3 ? convexHull(pts) : pts
     const closed = hull.length >= 3
@@ -378,37 +389,35 @@ export function useGroupHulls(
       for (let i = 1; i < hull.length; i++) c.lineTo(hull[i].x, hull[i].y)
       if (closed) c.closePath()
     }
-    buildPath(); c.lineWidth = 2 * R; c.stroke()
+    buildPath(); c.lineWidth = 2 * R; c.stroke()   // 둥근선(2R) = 외곽을 R 만큼 부풀려 둥글게
     if (closed) { buildPath(); c.fill() }
-    return { labelX: hull.reduce((s, p) => s + p.x, 0) / hull.length, topY: Math.min(...hull.map(p => p.y)) }
   }
 
   /**
-   * 그룹 이름 칩(spec 022) — 줌 무관 **고정 14px**, 다크 글래스 알약 + 옅은 테두리 + 부드러운 그림자.
-   * (x, y) 를 칩 중심으로. 과거 진한 색 알약보다 가독성·세련도↑.
+   * 영역 이름 라벨 — 줌 무관 정제된 알약. `[● 영역색 점] 이름`. 흰 글자 + 반투명 다크 라운드 +
+   * 은은한 테두리/그림자. 색 점이 "어느 영역인지" 한눈에 매칭. (x, y) = 알약 중심.
    */
-  function drawChip(c: CanvasRenderingContext2D, x: number, y: number, text: string): void {
+  function drawRegionLabel(c: CanvasRenderingContext2D, x: number, y: number, text: string, color: string): void {
     c.save()
-    c.font = '600 14px -apple-system, system-ui, "Segoe UI", sans-serif'
-    c.textAlign = 'center'
+    c.font = '700 13px -apple-system, system-ui, "Segoe UI", sans-serif'
     c.textBaseline = 'middle'
+    const dot = 8, gap = 7, padX = 11, h = 24
     const tw = c.measureText(text).width
-    const padX = 11, h = 24
-    const w = tw + padX * 2
+    const w = padX + dot + gap + tw + padX
     const left = x - w / 2, top = y - h / 2
-    c.shadowColor = 'rgba(0,0,0,0.38)'
-    c.shadowBlur = 10
-    c.shadowOffsetY = 2
-    c.fillStyle = 'rgba(26,28,36,0.9)'   // 다크 글래스
-    roundRect(c, left, top, w, h, h / 2)
-    c.fill()
+    // 알약 배경
+    c.shadowColor = 'rgba(0,0,0,0.45)'; c.shadowBlur = 12; c.shadowOffsetY = 2
+    c.fillStyle = 'rgba(20,22,30,0.94)'
+    roundRect(c, left, top, w, h, h / 2); c.fill()
     c.shadowColor = 'transparent'
-    c.lineWidth = 1
-    c.strokeStyle = 'rgba(255,255,255,0.14)'
-    roundRect(c, left, top, w, h, h / 2)
-    c.stroke()
-    c.fillStyle = '#eef0f3'
-    c.fillText(text, x, y + 0.5)
+    c.lineWidth = 1; c.strokeStyle = 'rgba(255,255,255,0.20)'
+    roundRect(c, left, top, w, h, h / 2); c.stroke()
+    // 영역색 점
+    c.fillStyle = color
+    c.beginPath(); c.arc(left + padX + dot / 2, y, dot / 2, 0, Math.PI * 2); c.fill()
+    // 이름(흰 글자)
+    c.fillStyle = '#ffffff'; c.textAlign = 'left'
+    c.fillText(text, left + padX + dot + gap, y + 0.5)
     c.restore()
   }
 

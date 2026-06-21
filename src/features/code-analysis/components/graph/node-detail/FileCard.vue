@@ -17,25 +17,6 @@ const props = defineProps<Props>()
 
 const projectStore = useAnalyzerStore()
 
-const filePath = computed(() => {
-  const p = props.node.properties || {}
-  return (p.file_path as string) || ''
-})
-
-const fileName = computed(() => {
-  const p = props.node.properties || {}
-  return (p.file_name as string) || filePath.value.split(/[/\\]/).pop() || (p.name as string) || props.node.id
-})
-
-const subInfo = computed(() => {
-  const p = props.node.properties || {}
-  const dir = (p.directory as string) || ''
-  const startLine = p.start_line as number | undefined
-  const endLine = p.end_line as number | undefined
-  const lines = startLine && endLine ? `${endLine - startLine + 1}줄` : ''
-  return [dir, lines].filter(Boolean).join(' · ')
-})
-
 const groups = computed(() =>
   getRelationshipGroups(props.node.id, projectStore.linkMap.values()),
 )
@@ -56,10 +37,7 @@ const functions = computed(() =>
 </script>
 
 <template>
-  <NodeDetailBase :node="node" icon="📄" label-badge="FILE" :sub-info="subInfo">
-    <template #sub-header>
-      <div class="file-name">{{ fileName }}</div>
-    </template>
+  <NodeDetailBase :node="node" icon="📄" label-badge="FILE">
     <template #body>
       <section v-if="functions.length > 0" class="member-section">
         <h4 class="section-title">🔧 함수 ({{ functions.length }})</h4>
@@ -75,13 +53,6 @@ const functions = computed(() =>
 </template>
 
 <style lang="scss" scoped>
-.file-name {
-  font-family: monospace;
-  font-size: 0.75rem;
-  color: var(--color-accent);
-  margin-top: 4px;
-}
-
 .member-section {
   padding: 10px 12px;
   background: var(--color-bg-secondary);

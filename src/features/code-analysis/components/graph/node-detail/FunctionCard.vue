@@ -6,11 +6,7 @@
 
 import { computed } from 'vue'
 import type { GraphNode } from '@/shared/types'
-import {
-  technicalNodeName,
-  logicalNodeName,
-  stripCStyleComments,
-} from '@/shared/utils/graphDisplay'
+import { technicalNodeName, stripCStyleComments } from '@/shared/utils/graphDisplay'
 import { getSemanticReport } from '@/shared/utils/nodeRelationships'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import NodeDetailBase from './NodeDetailBase.vue'
@@ -54,24 +50,9 @@ const subLabel = computed(() => {
 })
 
 const headerTech = computed(() => technicalNodeName(props.node))
-const headerLogical = computed(() => logicalNodeName(props.node))
-
-// 역할 = stereotype
-const actor = computed(() => (props.node.properties?.stereotype as string) || '')
 const codeText = computed(() => (props.node.properties?.code_text as string) || '')
-const moduleName = computed(() => (props.node.properties?.module_name as string) || '')
 const codeForViewer = computed(() => stripCStyleComments(codeText.value))
-
-const subInfo = computed(() => {
-  const p = props.node.properties || {}
-  const file = (p.file_path as string) || ''
-  const fileName = (p.file_name as string) || file.split(/[/\\]/).pop() || ''
-  const startLine = p.start_line as number | undefined
-  const endLine = p.end_line as number | undefined
-  const lines = startLine && endLine ? `라인 ${startLine}~${endLine}` : ''
-  const parts = [moduleName.value, fileName, lines].filter(Boolean)
-  return parts.join(' · ')
-})
+// 논리명·경로·라인·분류(역할=stereotype)는 모두 식별 행(buildIdentityRows)에서 표시 — 카드 중복 제거.
 </script>
 
 <template>
@@ -79,18 +60,9 @@ const subInfo = computed(() => {
     :node="node"
     icon="🔧"
     :label-badge="subLabel"
-    :sub-info="subInfo"
     :header-title="headerTech"
-    :header-logical="headerLogical"
   >
     <template #body>
-      <section v-if="actor" class="detail-card">
-        <span class="detail-card__label">역할</span>
-        <div class="detail-card__body detail-card__body--tight">
-          <p class="fn-actor">{{ actor }}</p>
-        </div>
-      </section>
-
       <section v-if="hasSemantic" class="detail-card">
         <span class="detail-card__label">업무 규칙 · 예시 · 질문</span>
         <p class="sem-hint">코드에서 뽑아낸 비즈니스 규칙 · 시나리오(예시) · 사람 확인이 필요한 질문</p>

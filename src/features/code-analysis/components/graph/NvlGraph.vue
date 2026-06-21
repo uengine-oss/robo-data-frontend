@@ -462,9 +462,10 @@ function rebuildAnchors(specs: Array<{ key: string; memberIds: string[]; label: 
   for (const s of specs) {
     const id = ANCHOR_PREFIX + s.key
     anchorMembers.set(id, s.memberIds)
-    // 캡션은 비움 — 그룹 이름은 useGroupHulls 가 줌 무관 고정크기 칩으로 그린다(NVL 캡션은 줌비례 확대).
+    // 앵커도 다른 노드처럼 자기 캡션(그룹 이름)을 갖는다. 영역 이름은 useGroupHulls 가 앵커 위 알약으로도 그려
+    // 줌 무관하게 또렷이 보이고, 이 네이티브 캡션은 노드 자체의 라벨 역할(NVL 기본 동작).
     nodes.push({
-      id, caption: '', color: ANCHOR_COLOR, size: ANCHOR_SIZE,
+      id, caption: s.label, color: ANCHOR_COLOR, size: ANCHOR_SIZE,
       selected: false, properties: { __anchor: true },
     } as unknown as NvlNode)
     for (const m of s.memberIds) {

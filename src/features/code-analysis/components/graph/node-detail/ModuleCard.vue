@@ -20,7 +20,6 @@ const projectStore = useAnalyzerStore()
 
 const subLabel = computed(() => (props.node.properties?.type as string) || 'MODULE')
 
-const displayName = computed(() => (props.node.properties?.logical_name as string) || '')
 const intent = computed(() => (props.node.properties?.intent as string) || '')
 const notes = computed(() => (props.node.properties?.notes as string) || '')
 
@@ -77,10 +76,6 @@ const umlEdges = computed(() =>
     :label-badge="subLabel"
     :sub-info="subInfo"
   >
-    <template #sub-header v-if="displayName">
-      <div class="module-display-name">{{ displayName }}</div>
-    </template>
-
     <template #body>
       <section v-if="intent" class="detail-card">
         <span class="detail-card__label">의도</span>
@@ -127,13 +122,6 @@ const umlEdges = computed(() =>
 </template>
 
 <style lang="scss" scoped>
-.module-display-name {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--color-accent-secondary, #a5b4fc);
-  font-style: italic;
-}
-
 .module-prose {
   margin: 0;
   font-size: 0.8rem;

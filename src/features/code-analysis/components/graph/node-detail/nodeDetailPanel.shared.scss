@@ -315,8 +315,4 @@
   background: rgba(var(--nd-rel-accent-call), 0.22);
 }
 
-.node-detail-base .detail-sub-header {
-  padding: 8px 12px 10px;
-  border-top: 1px solid var(--color-border);
-  background: var(--color-bg-elevated);
-}
+// (구 .detail-sub-header / .subhead-row — 식별행이 NodeDetailBase 의 .identity-rows 로 통합되며 폐기)

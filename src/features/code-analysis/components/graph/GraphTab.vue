@@ -74,7 +74,7 @@ const hullLevels = computed<HullLevel[]>(() => {
   }
   if (viewMode.value === 'area-struct') {
     // 패키지 외곽 헐 1겹(이름은 앵커 칩이 표시 — 헐 라벨 중복 제거).
-    const hmap = canvasStore.buildHierarchyMap()
+    const hmap = canvasStore.hierarchyMap
     return [{
       keyOf: (n) => hmap.get(n.id)?.packageKey ?? null,
       labelOf: () => '',
@@ -82,14 +82,15 @@ const hullLevels = computed<HullLevel[]>(() => {
     }]
   }
   if (viewMode.value === 'module' || viewMode.value === 'health') {
-    // 모듈간·건강: 패키지 1겹으로 루틴을 감싼다(테이블은 헐 제외). external 은 '__external__' 그룹.
-    const hmap = canvasStore.buildHierarchyMap()
+    // 모듈간·건강: 패키지 1겹으로 루틴을 감싸고, **테이블도 '__tables__' 한 영역으로** 묶어 헐을 그린다
+    // (앵커 키 '__tables__' 와 일치 → 테이블 영역 + '테이블' 이름표). external 은 '__external__' 그룹.
+    const hmap = canvasStore.hierarchyMap
     return [{
       keyOf: (n) => {
-        if ((n.labels || []).includes('TABLE')) return null   // 테이블은 헐에 안 넣음
+        if ((n.labels || []).includes('TABLE')) return '__tables__'
         return hmap.get(n.id)?.packageKey ?? null
       },
-      labelOf: () => '',   // 이름은 앵커 캡션이 보여줌(헐 라벨 중복 제거)
+      labelOf: () => '',
       padding: 22,
     }]
   }
@@ -104,7 +105,7 @@ const hullLevels = computed<HullLevel[]>(() => {
  */
 const clusterKeyOf = computed<((n: GraphNode) => string | null) | null>(() => {
   if (viewMode.value === 'module' || viewMode.value === 'health') {
-    const hmap = canvasStore.buildHierarchyMap()
+    const hmap = canvasStore.hierarchyMap
     return (n) => (n.labels || []).includes('TABLE')
       ? '__tables__'
       : (hmap.get(n.id)?.packageKey ?? null)
@@ -116,7 +117,7 @@ const clusterKeyOf = computed<((n: GraphNode) => string | null) | null>(() => {
     }
   }
   if (viewMode.value === 'area-struct') {
-    const hmap = canvasStore.buildHierarchyMap()
+    const hmap = canvasStore.hierarchyMap
     return (n) => hmap.get(n.id)?.packageKey ?? null   // 패키지(폴더) 단위 허브 — 다른 보기와 일관
   }
   return null
@@ -146,7 +147,7 @@ const clusterLabelOf = computed<((key: string) => string) | null>(() => {
     }
   }
   if (viewMode.value === 'area-struct') {
-    const hmap = canvasStore.buildHierarchyMap()
+    const hmap = canvasStore.hierarchyMap
     const labelByPkg = new Map<string, string>()
     for (const info of hmap.values()) if (info.packageKey) labelByPkg.set(info.packageKey, info.packageLabel)
     return (key) => labelByPkg.get(key) || key

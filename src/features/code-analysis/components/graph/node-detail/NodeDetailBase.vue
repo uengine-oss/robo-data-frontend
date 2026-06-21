@@ -12,6 +12,7 @@ import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import TextViewer from '@/shared/components/TextViewer.vue'
 import { relationshipRowParts, technicalNodeName } from '@/shared/utils/graphDisplay'
 import { getNodeColor } from '@/shared/config/graphStyles'
+import { buildIdentityRows } from '@/shared/utils/nodeIdentity'
 
 interface Props {
   node: GraphNode
@@ -19,7 +20,6 @@ interface Props {
   labelBadge?: string
   subInfo?: string
   headerTitle?: string
-  headerLogical?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -27,15 +27,16 @@ const props = withDefaults(defineProps<Props>(), {
   labelBadge: '',
   subInfo: '',
   headerTitle: '',
-  headerLogical: '',
 })
 
 const projectStore = useAnalyzerStore()
 const slots = useSlots()
-const hasSubHeader = computed(() => Boolean(slots['sub-header']?.()))
 const hasIdentityExtra = computed(() => Boolean(slots['identity-extra']?.()))
 
 const nodeName = computed(() => technicalNodeName(props.node))
+
+// 식별 정보 행(논리명·경로·라인·분류·종류별) — 단일 생성처(nodeIdentity). 종류 무관 일관 + 빠짐없이.
+const identityRows = computed(() => buildIdentityRows(props.node))
 
 // 식별 배지 색 = 그래프 캔버스와 동일한 노드 색(단일 소스 getNodeColor 재사용=DRY).
 // 같은 라벨 → 같은 색(재현). 어떤 색 포맷(hex/hsl)이든 CSS color-mix 로 틴트 처리.
@@ -52,10 +53,6 @@ const RISK_LABEL: Record<string, string> = { high: '높음', medium: '보통', l
 
 const displayHeaderTitle = computed(() =>
   (props.headerTitle && props.headerTitle.trim()) ? props.headerTitle.trim() : nodeName.value,
-)
-
-const trimmedLogical = computed(() =>
-  (props.headerLogical && props.headerLogical.trim()) ? props.headerLogical.trim() : '',
 )
 
 const summaryRaw = computed(() => {
@@ -211,19 +208,24 @@ const relStripToneClass = computed(() => {
         <span class="identity-icon">{{ icon }}</span>
         <div class="identity-main">
           <div class="identity-title-row">
-            <span class="identity-name" :class="{ 'identity-name--composite': trimmedLogical }">
+            <span class="identity-name">
               <span class="identity-tech">{{ displayHeaderTitle }}</span>
-              <template v-if="trimmedLogical">
-                <span class="identity-paren">&nbsp;(</span>
-                <span class="identity-logical">{{ trimmedLogical }}</span>
-                <span class="identity-paren">)</span>
-              </template>
             </span>
             <span v-if="labelBadge" class="identity-badge" :style="{ '--badge-color': badgeColor }">{{ labelBadge }}</span>
           </div>
-          <div v-if="subInfo" class="detail-locate">
-            <span class="detail-locate__k">소속</span>
-            <span class="detail-locate__v">{{ subInfo }}</span>
+          <!-- 식별 정보 행 목록(논리명·경로·라인·분류·종류별) — 단일 생성처. 값 있는 것만, 종류 무관 일관. -->
+          <div v-if="identityRows.length" class="identity-rows">
+            <div v-for="r in identityRows" :key="r.k" class="identity-row">
+              <span class="identity-row__k">{{ r.k }}</span>
+              <span class="identity-row__v">{{ r.v }}</span>
+            </div>
+          </div>
+          <!-- buildIdentityRows 가 비는 최소노드(패키지 등)만 카드가 준 subInfo 를 소속 폴백으로. -->
+          <div v-else-if="subInfo" class="identity-rows">
+            <div class="identity-row">
+              <span class="identity-row__k">소속</span>
+              <span class="identity-row__v">{{ subInfo }}</span>
+            </div>
           </div>
           <div v-if="health" class="detail-health">
             <span v-if="health.risk" class="health-risk" :class="'health-risk--' + health.risk" title="건강지표(위험도)">
@@ -235,9 +237,6 @@ const relStripToneClass = computed(() => {
             <slot name="identity-extra" />
           </div>
         </div>
-      </div>
-      <div v-if="hasSubHeader" class="detail-sub-header">
-        <slot name="sub-header" />
       </div>
     </header>
 
@@ -315,6 +314,36 @@ const relStripToneClass = computed(() => {
 .identity-main {
   flex: 1;
   min-width: 0;
+}
+
+// 식별 정보 행 목록 — 라벨(고정폭)+값. 소속·파일명·논리명 등을 한 흐름에 빠짐없이.
+.identity-rows {
+  margin: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.identity-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.identity-row__k {
+  flex-shrink: 0;
+  width: 4.4rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--color-text-muted);
+}
+.identity-row__v {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.74rem;
+  line-height: 1.42;
+  color: var(--color-text-light);
+  word-break: break-word;
 }
 
 .identity-title-row {

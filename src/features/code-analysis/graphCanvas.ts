@@ -337,7 +337,9 @@ export const useCanvasStore = defineStore('canvas', () => {
    *   폴백        = 루틴.file_path (HAS_MEMBER 없을 때 파일 키)
    * external 라벨이면 패키지를 가상 `"__external__"` 로 묶어 분리(프론트 분리 그룹).
    */
-  function buildHierarchyMap(): Map<string, HierarchyInfo> {
+  // ★캐시되는 computed — hullLevels·clusterKeyOf·clusterLabelOf 가 공유한다. 과거엔 각 computed 가
+  // 따로 호출해 한 렌더에 nodeMap+linkMap 전수 순회를 5번 했다 → 1회로(nodeMap/linkMap 바뀔 때만 재계산).
+  const hierarchyMap = computed<Map<string, HierarchyInfo>>(() => {
     const fileToPackage = new Map<string, string>()   // fileNodeId -> packageNodeId (BELONGS_TO)
     const memberToFile = new Map<string, string>()    // memberId -> containerId (HAS_MEMBER)
     for (const link of projectStore.linkMap.values()) {
@@ -366,7 +368,7 @@ export const useCanvasStore = defineStore('canvas', () => {
       map.set(node.id, { fileKey, fileLabel, packageKey, packageLabel, isExternal })
     }
     return map
-  }
+  })
 
   /** NvlGraph 에 전달할 부분집합. 프리셋이 활성화되면 가상 그래프를 반환. */
   const canvasGraphData = computed<GraphData>(() => {
@@ -517,6 +519,6 @@ export const useCanvasStore = defineStore('canvas', () => {
     setCanvasNodes,
     setPreset,
     isolateLabel,
-    buildHierarchyMap,
+    hierarchyMap,
   }
 })
