@@ -256,9 +256,12 @@ export function useGroupHulls(
     if (edges.length) {
       const radById = new Map<string, number>()
       for (const n of nodes) radById.set(n.id, (getNodeSize(n.labels || []) / 2) * scale)
+      // 노드 테두리에서 GAP 만큼 떨어뜨려(찌름 방지) 선·화살표를 그리고, 중간에 타입 글자.
+      const GAP = 8
+      const labels: Array<{ x: number; y: number; text: string; col: string }> = []
       ctx.save()
       ctx.lineWidth = 1.4
-      ctx.globalAlpha = 0.55
+      ctx.lineCap = 'round'
       for (const e of edges) {
         const a = posById.get(e.source), b = posById.get(e.target)
         if (!a || !b) continue
@@ -266,21 +269,37 @@ export function useGroupHulls(
         const dx = sb.x - sa.x, dy = sb.y - sa.y
         const len = Math.hypot(dx, dy) || 1
         const ux = dx / len, uy = dy / len
-        const x1 = sa.x + ux * ((radById.get(e.source) || 0) + 1)
-        const y1 = sa.y + uy * ((radById.get(e.source) || 0) + 1)
-        const x2 = sb.x - ux * ((radById.get(e.target) || 0) + 3)
-        const y2 = sb.y - uy * ((radById.get(e.target) || 0) + 3)
+        const rs = (radById.get(e.source) || 0) + GAP
+        const rt = (radById.get(e.target) || 0) + GAP
+        if (len <= rs + rt + 4) continue   // 두 노드가 너무 가까우면 선 생략(찌름·뭉개짐 방지)
+        const x1 = sa.x + ux * rs, y1 = sa.y + uy * rs
+        const x2 = sb.x - ux * rt, y2 = sb.y - uy * rt
         const col = getRelationshipColor(e.type)
+        ctx.globalAlpha = 0.5
         ctx.strokeStyle = col
         ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke()
-        // 화살촉(방향)
-        const ah = 6
+        // 화살촉(방향) — 타깃 노드 앞에서 멈춤
+        const ah = 7
+        ctx.globalAlpha = 0.7
         ctx.fillStyle = col
         ctx.beginPath()
         ctx.moveTo(x2, y2)
-        ctx.lineTo(x2 - ux * ah - uy * ah * 0.5, y2 - uy * ah + ux * ah * 0.5)
-        ctx.lineTo(x2 - ux * ah + uy * ah * 0.5, y2 - uy * ah - ux * ah * 0.5)
+        ctx.lineTo(x2 - ux * ah - uy * ah * 0.55, y2 - uy * ah + ux * ah * 0.55)
+        ctx.lineTo(x2 - ux * ah + uy * ah * 0.55, y2 - uy * ah - ux * ah * 0.55)
         ctx.closePath(); ctx.fill()
+        labels.push({ x: (x1 + x2) / 2, y: (y1 + y2) / 2, text: e.type, col })
+      }
+      // 관계 타입 글자(중간점, 고정 11px) — 선 위에 또렷하게.
+      ctx.globalAlpha = 1
+      ctx.font = '600 11px system-ui, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      for (const l of labels) {
+        ctx.lineWidth = 3
+        ctx.strokeStyle = 'rgba(18,18,24,0.85)'   // 어두운 외곽선으로 가독성
+        ctx.strokeText(l.text, l.x, l.y)
+        ctx.fillStyle = l.col
+        ctx.fillText(l.text, l.x, l.y)
       }
       ctx.restore()
     }
@@ -290,11 +309,9 @@ export function useGroupHulls(
     if (!bctx || !buffer) return
     const anchors = getAnchors()
     const anchorByKey = new Map(anchors.map(a => [a.key, a]))
-    const labeledKeys = new Set<string>()
 
     bctx.clearRect(0, 0, w, h)
     bctx.save(); bctx.lineJoin = 'round'; bctx.lineCap = 'round'
-    const pending: Array<{ x: number; y: number; text: string }> = []
     for (const level of cfg.levels) {
       const groups = new Map<string, { pts: Pt[]; nodes: GraphNode[] }>()
       for (const node of nodes) {
@@ -324,28 +341,20 @@ export function useGroupHulls(
           const ap = posById.get(anc.id)
           if (ap) { g.pts.push(toScreen(ap.x, ap.y)); nodeR = Math.max(nodeR, (anc.size / 2) * scale) }
         }
-        const effPad = level.padding + nodeR * 1.08 + 4
-        const a = drawHullShape(bctx, g.pts, hashColor(key), effPad)
-        const text = anc?.label ?? level.labelOf(key, g.nodes)
-        if (text) {
-          const labelGap = Math.min(effPad, nodeR * 1.3 + 26)
-          pending.push({ x: a.labelX, y: a.topY - labelGap - 6, text })
-          if (anc) labeledKeys.add(anc.key)
-        }
+        drawHullShape(bctx, g.pts, hashColor(key), level.padding + nodeR * 1.08 + 4)
       }
     }
     bctx.restore()
     ctx.save(); ctx.globalAlpha = HULL_ALPHA; ctx.drawImage(buffer, 0, 0, w, h); ctx.restore()
 
-    // 헐 없는 군집(예: 모듈간 테이블)의 앵커는 헐 라벨이 없으니 앵커 노드 바로 위에 칩을 그린다.
+    // 그룹 이름 칩 = **앵커 노드 바로 위**(모든 군집 일관). 앵커가 곧 대표라 이름이 앵커에 붙는다.
     for (const a of anchors) {
-      if (labeledKeys.has(a.key) || !a.label) continue
+      if (!a.label) continue
       const ap = posById.get(a.id)
       if (!ap) continue
       const s = toScreen(ap.x, ap.y)
-      pending.push({ x: s.x, y: s.y - (a.size / 2) * scale - 12, text: a.label })
+      drawChip(ctx, s.x, s.y - (a.size / 2) * scale - 16, a.label)
     }
-    for (const p of pending) drawChip(ctx, p.x, p.y, p.text)
   }
 
   /**
