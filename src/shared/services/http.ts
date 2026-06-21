@@ -6,6 +6,7 @@
  * 도메인별 api 는 이 코어를 import 해 엔드포인트만 정의한다.
  */
 import type { StreamEvent } from '@/shared/types'
+import { logger } from '@/shared/utils/logger'
 
 // ============================================================================
 // Base URL — API Gateway(/api/gateway/*) 단일 진입점. Vite 프록시 → Spring Gateway(9000).
@@ -208,10 +209,16 @@ export async function streamSseFetch(
   const flushEvent = () => {
     if (currentDataLines.length === 0) return
     const rawData = currentDataLines.join('\n')
-    onEvent({
-      event: currentEvent,
-      data: JSON.parse(rawData)
-    })
+    let data: any
+    try {
+      data = JSON.parse(rawData)
+    } catch (e) {
+      logger.warn('[stream] SSE 데이터 파싱 실패 — 이 이벤트는 건너뜁니다:', rawData, e)
+      currentEvent = 'message'
+      currentDataLines = []
+      return
+    }
+    onEvent({ event: currentEvent, data })
     currentEvent = 'message'
     currentDataLines = []
   }
@@ -317,6 +324,7 @@ function processBuffer(buffer: string, onEvent: StreamCallback): string {
     if (!line.trim()) continue
 
     const event = parseJsonLine(line)
+    if (!event) continue   // 손상 줄 — 이미 기록됨, 다음 줄 계속
     onEvent(event)
     if (event.type === 'complete' || event.type === 'error') {
       return ''
@@ -331,10 +339,15 @@ function processFinalBuffer(buffer: string, onEvent: StreamCallback): void {
   if (!buffer.trim()) return
 
   const event = parseJsonLine(buffer)
-  onEvent(event)
+  if (event) onEvent(event)
 }
 
-/** JSON 라인 파싱 (내부) */
-function parseJsonLine(line: string): StreamEvent {
-  return JSON.parse(line)
+/** JSON 라인 파싱 (내부) — 손상된 줄은 기록 후 null 반환(스트림 전체를 죽이지 않는다). */
+function parseJsonLine(line: string): StreamEvent | null {
+  try {
+    return JSON.parse(line)
+  } catch (e) {
+    logger.warn('[stream] NDJSON 한 줄 파싱 실패 — 이 줄은 건너뜁니다:', line, e)
+    return null
+  }
 }

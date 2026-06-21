@@ -45,13 +45,29 @@ function bumpVersion(): void {
 }
 
 // ============================================================================
+// 메모이즈 캐시 — loadStyles 가 렌더 프레임마다 노드·관계 수만큼 호출되므로
+// (getNodeColor/Size/RelColor/Width 경유) localStorage.getItem+JSON.parse 반복을 제거.
+// mutation 시 무효화하여 반환값은 캐시 전과 동일하게 유지(반응성은 storageVersion 이 담당).
+// ============================================================================
+
+const styleCache: Partial<Record<StyleCategory, StyleMap>> = {}
+
+function invalidateCache(category: StyleCategory): void {
+  styleCache[category] = undefined
+}
+
+// ============================================================================
 // 사용자 명시 스타일 (color + size) CRUD
 // ============================================================================
 
 export function loadStyles(category: StyleCategory): StyleMap {
+  const cached = styleCache[category]
+  if (cached) return cached
   try {
     const raw = localStorage.getItem(CATEGORY_STORAGE_KEY[category])
-    return raw ? (JSON.parse(raw) as StyleMap) : {}
+    const parsed = raw ? (JSON.parse(raw) as StyleMap) : {}
+    styleCache[category] = parsed
+    return parsed
   } catch (e) {
     logger.warn(`[graphStyleStorage] load ${category} 실패:`, e)
     return {}
@@ -61,6 +77,7 @@ export function loadStyles(category: StyleCategory): StyleMap {
 export function saveStyles(category: StyleCategory, styles: StyleMap): void {
   try {
     localStorage.setItem(CATEGORY_STORAGE_KEY[category], JSON.stringify(styles))
+    invalidateCache(category)
     bumpVersion()
   } catch (e) {
     logger.warn(`[graphStyleStorage] save ${category} 실패:`, e)
@@ -93,6 +110,7 @@ export function removeStyle(category: StyleCategory, type: string): void {
 export function clearStyles(category: StyleCategory): void {
   try {
     localStorage.removeItem(CATEGORY_STORAGE_KEY[category])
+    invalidateCache(category)
     bumpVersion()
   } catch (e) {
     logger.warn(`[graphStyleStorage] clear ${category} 실패:`, e)

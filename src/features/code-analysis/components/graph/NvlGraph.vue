@@ -10,7 +10,7 @@
  */
 
 import { logger } from '@/shared/utils/logger'
-import { logicalModeName } from '@/shared/utils/nodeClassify'
+import { applyLogicalMode } from '@/shared/utils/graphDisplay'
 import { ref, computed, onMounted, onUnmounted, watch, shallowRef, nextTick } from 'vue'
 import { NVL } from '@neo4j-nvl/base'
 import {
@@ -225,9 +225,9 @@ const contextMenuRef = ref<HTMLElement | null>(null)
 // ============================================================================
 
 function resolveCaption(node: GraphNode): string {
+  // type 산출은 캔버스 고유(마지막 라벨), 줄번호 미표기(현 동작). 논리명 모드는 공유 헬퍼에 위임.
   const physical = (node.properties?.name as string) || node.labels?.[node.labels.length - 1] || node.id
-  // 논리명 모드는 단일 결정처에 위임(논리명→구조한글→'논리명 없음·물리').
-  return showLogicalNames.value ? logicalModeName(node, physical) : physical
+  return applyLogicalMode(node, physical, showLogicalNames.value)
 }
 
 function toNvlNode(node: GraphNode, isSelected = false): NvlNode {
@@ -415,7 +415,7 @@ function fitView(): void {
   )
   // bbox 중심을 가시영역(좌측, 패널 제외) 중앙에 오게 pan. screenX=(wx-panX)·scale/dpr+cssW/2.
   const panX = bx + ((props.rightInset || 0) / 2) * dpr / scale
-  try { nvl.setZoomAndPan(scale, panX, by) } catch { /* 무해 */ }
+  try { nvl.setZoomAndPan(scale, panX, by) } catch (e) { logger.debug('[NvlGraph] setZoomAndPan 무시(라이브러리 가드):', e) }
 }
 
 /**
@@ -474,16 +474,16 @@ function rebuildAnchors(specs: Array<{ key: string; memberIds: string[]; label: 
       rels.push({ id: lid, from: id, to: m, color: ANCHOR_LINK_COLOR, width: 1, properties: { __anchorlink: true } } as unknown as NvlRelationship)
     }
   }
-  if (nodes.length) { try { nvl.addAndUpdateElementsInGraph(nodes, rels) } catch { /* 무해 */ } }
+  if (nodes.length) { try { nvl.addAndUpdateElementsInGraph(nodes, rels) } catch (e) { logger.debug('[NvlGraph] addAndUpdateElementsInGraph 무시(라이브러리 가드):', e) } }
 }
 
 /** 앵커 노드 + 헬퍼 링크를 모두 제거(보기 전환·정리). */
 function clearAnchors(): void {
   const nvl = nvlInstance.value
   if (nvl) {
-    if (anchorLinkIds.length) { try { nvl.removeRelationshipsWithIds(anchorLinkIds) } catch { /* 무해 */ } }
+    if (anchorLinkIds.length) { try { nvl.removeRelationshipsWithIds(anchorLinkIds) } catch (e) { logger.debug('[NvlGraph] removeRelationshipsWithIds 무시(라이브러리 가드):', e) } }
     const ids = [...anchorMembers.keys()]
-    if (ids.length) { try { nvl.removeNodesWithIds(ids) } catch { /* 무해 */ } }
+    if (ids.length) { try { nvl.removeNodesWithIds(ids) } catch (e) { logger.debug('[NvlGraph] removeNodesWithIds 무시(라이브러리 가드):', e) } }
   }
   anchorMembers.clear()
   anchorLinkIds = []
@@ -492,7 +492,7 @@ function clearAnchors(): void {
 function destroyNvl(): void {
   closeContextMenu()
   groupHulls.detach()
-  for (const it of interactions) { try { it.destroy() } catch { /* 무해 */ } }
+  for (const it of interactions) { try { it.destroy() } catch (e) { logger.debug('[NvlGraph] interaction.destroy 무시(라이브러리 가드):', e) } }
   interactions = []
   if (nvlInstance.value) {
     nvlInstance.value.destroy()

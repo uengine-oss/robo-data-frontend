@@ -15,7 +15,8 @@ import { computed, ref } from 'vue'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import type { GraphLink, GraphNode } from '@/shared/types'
 import { ROUTINE_LABELS } from '@/shared/utils/nodeRelationships'
-import { logicalModeName, isContainerNode } from '@/shared/utils/nodeClassify'
+import { isContainerNode } from '@/shared/utils/nodeClassify'
+import { typeWithLine, applyLogicalMode } from '@/shared/utils/graphDisplay'
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 타입 정의
@@ -95,15 +96,10 @@ function pickDisplayName(node: GraphNode): string {
     const title = String(p['title'] ?? p['name'] ?? node.id)
     return seq != null ? `[${seq}] ${title}` : title
   }
-  // 물리 식별자 — 이름 우선, 없으면 `타입[라인]` (예: SELECT [30]).
+  // 물리 식별자 — 이름 우선, 없으면 `타입 [라인]`(트리는 라인 표기). type 산출은 트리 고유(pickDisplayLabel).
   const name = p['name']
-  const type = pickDisplayLabel(node.labels)
-  const line = p['start_line']
-  const physical = name
-    ? String(name)
-    : (line != null && line !== 0 ? `${type} [${line}]` : (type || String(p['id'] ?? node.id)))
-  // 논리명 모드는 단일 결정처에 위임(논리명→구조한글→'논리명 없음·물리').
-  return showLogicalNames.value ? logicalModeName(node, physical) : physical
+  const physical = name ? String(name) : typeWithLine(pickDisplayLabel(node.labels), p['start_line'], true)
+  return applyLogicalMode(node, physical, showLogicalNames.value)
 }
 
 /** BL 의 sequence 는 "1", "2", "2-1" 형식 — 튜플 비교로 정렬. */

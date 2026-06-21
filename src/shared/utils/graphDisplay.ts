@@ -3,7 +3,24 @@
  */
 
 import type { GraphLink, GraphNode } from '@/shared/types'
-import { nodeTypeLabel } from './nodeClassify'
+import { nodeTypeLabel, logicalModeName } from './nodeClassify'
+
+/**
+ * 이름 없는 노드의 표시 — `타입` 또는 `타입 [line]`.
+ * 트리·캔버스·패널 세 표시이름이 공유하던 줄번호 조립의 단일 처리처(복붙 제거).
+ * `withLine`이 화면별 차이: 패널·트리=true, 캔버스=false(현 동작 보존).
+ */
+export function typeWithLine(typeLabel: string, startLine: unknown, withLine: boolean): string {
+  return withLine && startLine != null && startLine !== 0 ? `${typeLabel} [${startLine}]` : typeLabel
+}
+
+/**
+ * 논리명 모드면 `logicalModeName`(논리명→구조한글→물리)에 위임, 아니면 물리명 그대로.
+ * 트리·캔버스가 공유하던 `showLogical ? logicalModeName : physical` 분기의 단일 처리처.
+ */
+export function applyLogicalMode(node: GraphNode, physical: string, logical: boolean): string {
+  return logical ? logicalModeName(node, physical) : physical
+}
 
 /** C 계열 소스에서 블록/행 주석을 제거해 디테일 패널에 표시 (문자열 리터럴 내부는 미세 조정 안 함). */
 export function stripCStyleComments(source: string): string {
@@ -47,14 +64,13 @@ export function technicalNodeName(node: GraphNode | undefined): string {
   const idVal = p.id as string | undefined
   // TABLE/COLUMN 만: 점 구분 경로("db.schema.name") → 마지막 세그먼트.
   if (idVal && idVal.includes('.')) return idVal.split('.').pop() || idVal
-  // 이름 없는 DBMS 구문(콜론 id)은 `타입[라인]` — 긴 raw 식별자 노출 금지.
+  // 이름 없는 DBMS 구문(콜론 id)은 `타입 [라인]` — 긴 raw 식별자 노출 금지.
   const line = p.start_line
-  const lineSuffix = (k: string) => (line != null && line !== 0 ? `${k} [${line}]` : k)
   const kind = nodeTypeLabel(node)
-  if (kind) return lineSuffix(kind)
+  if (kind) return typeWithLine(kind, line, true)
   // 구체 타입 라벨이 없어도(예: :FUNCTION 단독) raw 콜론-id 는 절대 노출하지 않는다 —
   // 첫 라벨 + 라인으로 깨끗하게(`FUNCTION [6]`). 점 구분 fqn 만 그대로 허용(이미 위에서 처리).
-  if (labels[0]) return lineSuffix(labels[0])
+  if (labels[0]) return typeWithLine(labels[0], line, true)
   if (idVal && !idVal.includes(':')) return idVal
   return node.id
 }
