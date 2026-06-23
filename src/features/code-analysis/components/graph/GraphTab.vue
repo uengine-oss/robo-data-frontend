@@ -511,24 +511,16 @@ function handleStylePanelClose(): void {
 }
 
 /**
- * 노드 라벨 칩 클릭 = 다중선택 토글(spec 025). 여러 라벨을 골라 "선택된 것만" 표시.
- * 누르면 추가, 다시 누르면 제거(누적). 비면 캔버스 비움. `loadNodesByLabels`가 다중 whitelist를 처리.
+ * 노드 라벨 칩 클릭 = 캔버스에 그 라벨 노드들을 **누적 로드**(isolate, spec 025).
+ * 표시필터(labelFilters)가 아니라 캔버스 구성 — 여러 개 누르면 누적, 다시 누르면 제거.
  */
 function handleLabelFilter(label: string): void {
-  const set = new Set(labelFilters.value)
-  if (set.has(label)) set.delete(label)
-  else set.add(label)
-  labelFilters.value = [...set]
-  if (labelFilters.value.length === 0) canvasStore.clearCanvas()
-  else canvasStore.loadNodesByLabels(labelFilters.value)
+  canvasStore.toggleLabelLoad(label)
 }
 
-/** 관계 타입 다중선택 토글(whitelist, spec 025) — 선택된 관계만 표시. relFilter 를 NvlGraph 가 소비. */
+/** 관계 칩 클릭 = 캔버스에 그 관계 + 양끝 노드를 **누적 로드**(표시필터 아님). 노드와 함께 다중. */
 function handleRelFilterToggle(relType: string): void {
-  const set = new Set(relFilter.value)
-  if (set.has(relType)) set.delete(relType)
-  else set.add(relType)
-  relFilter.value = [...set]
+  canvasStore.toggleRelLoad(relType)
 }
 
 /**
@@ -536,7 +528,10 @@ function handleRelFilterToggle(relType: string): void {
  * 둘 사이를 잇는 가상 링크(VIRTUAL_USES) 를 합성해 그려준다.
  * 가상 링크 합성은 canvasStore.canvasGraphData(computed) 에서 처리하므로 여기선 프리셋만 토글.
  */
-const { presetMode: canvasPresetMode } = storeToRefs(canvasStore)
+const { presetMode: canvasPresetMode, loadedLabels, loadedRelTypes } = storeToRefs(canvasStore)
+// 노드패널 칩 active 표시 = 캔버스에 로드된 라벨/관계(표시필터 아님)
+const activeNodeLoads = computed(() => [...loadedLabels.value])
+const activeRelLoads = computed(() => [...loadedRelTypes.value])
 
 // 프리셋(모듈간/건강 가상그래프)이 외부 동작(캔버스 비우기·라벨 격리 등)으로 해제되면
 // 해당 보기도 default 로 환원 — 상태 일관성.
@@ -795,7 +790,7 @@ watch(hasGraph, (has, prev) => {
           class="view-menu-btn"
           :class="{ active: isViewModeActive }"
           title="보기 — 그래프를 보는 방식 (하나만 선택)"
-          @click="showViewMenu = !showViewMenu"
+          @click="showViewMenu = !showViewMenu; showFilterMenu = false"
         >
           <span class="vm-eye">👁</span>
           <span class="vm-btn-label">보기: <strong>{{ activeViewLabel }}</strong></span>
@@ -834,7 +829,7 @@ watch(hasGraph, (has, prev) => {
           class="view-menu-btn"
           :class="{ active: hiddenRelCount > 0 || relFilter.length > 0 }"
           title="필터 — 관계 종류 끄고/켜기"
-          @click="showFilterMenu = !showFilterMenu"
+          @click="showFilterMenu = !showFilterMenu; showViewMenu = false"
         >
           <span class="vm-eye">⛛</span>
           <span class="vm-btn-label">필터<strong v-if="hiddenRelCount > 0"> {{ hiddenRelCount }}</strong></span>
@@ -886,8 +881,8 @@ watch(hasGraph, (has, prev) => {
             :totalRelationships="graphData?.links.length || 0"
             :hasGraph="hasGraph"
             :isProcessing="isProcessing"
-            :activeFilters="labelFilters"
-            :activeRelFilters="relFilter"
+            :activeFilters="activeNodeLoads"
+            :activeRelFilters="activeRelLoads"
             :allNodes="graphData?.nodes || []"
             @node-type-select="handleNodeTypeSelect"
             @relationship-type-select="handleRelTypeSelect"

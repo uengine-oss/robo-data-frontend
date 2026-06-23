@@ -60,6 +60,10 @@ export const useCanvasStore = defineStore('canvas', () => {
   /** 활성 프리셋. null 이면 일반 모드. */
   const presetMode = ref<CanvasPreset>(null)
 
+  // 노드패널 칩 = 캔버스에 "누적 로드"(spec 025, 표시필터 아님). 누른 노드 라벨·관계 타입을 다중으로 캔버스에 띄운다.
+  const loadedLabels = ref<Set<string>>(new Set())
+  const loadedRelTypes = ref<Set<string>>(new Set())
+
   /**
    * 모듈간 상호작용 가상 그래프 — MODULE/TABLE 노드 + 그 사이를 잇는 가상 링크.
    *
@@ -506,10 +510,50 @@ export const useCanvasStore = defineStore('canvas', () => {
     canvasNodeIds.value = next
   }
 
+  /**
+   * 노드패널 칩 클릭 = 캔버스에 누적 로드(isolate). 표시필터(NvlGraph labelFilters/relFilter)가 아니라
+   * "누른 것을 캔버스에 직접 띄우는" 것. 노드 라벨 → 그 라벨 노드들 / 관계 타입 → 그 관계 + 양끝 노드.
+   * 여러 개 누르면 누적(union). 보기모드(preset)는 해제한다(섞임·경고 방지).
+   */
+  function rebuildPanelLoad(): void {
+    const ids = new Set<string>()
+    for (const node of projectStore.nodeMap.values()) {
+      if ((node.labels || []).some(l => loadedLabels.value.has(l.toUpperCase()))) ids.add(node.id)
+    }
+    for (const link of projectStore.linkMap.values()) {
+      if (loadedRelTypes.value.has(link.type)) { ids.add(link.source); ids.add(link.target) }
+    }
+    canvasNodeIds.value = ids
+  }
+  function toggleLabelLoad(label: string): void {
+    presetMode.value = null
+    const up = label.toUpperCase()
+    const s = new Set(loadedLabels.value)
+    s.has(up) ? s.delete(up) : s.add(up)
+    loadedLabels.value = s
+    rebuildPanelLoad()
+  }
+  function toggleRelLoad(relType: string): void {
+    presetMode.value = null
+    const s = new Set(loadedRelTypes.value)
+    s.has(relType) ? s.delete(relType) : s.add(relType)
+    loadedRelTypes.value = s
+    rebuildPanelLoad()
+  }
+  function clearPanelLoad(): void {
+    loadedLabels.value = new Set()
+    loadedRelTypes.value = new Set()
+  }
+
   return {
     canvasNodeIds,
     canvasGraphData,
     presetMode,
+    loadedLabels,
+    loadedRelTypes,
+    toggleLabelLoad,
+    toggleRelLoad,
+    clearPanelLoad,
     addNodeToCanvas,
     expandNodeOnCanvas,
     collapseNodeOnCanvas,
