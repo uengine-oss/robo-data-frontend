@@ -57,7 +57,7 @@ canvasNodeIds = ids   // union
 
 ## 위험과 처리
 - **spec 021 supersede**: 단일 isolate(`labelFilters=[label]`) → 다중 누적 isolate(`canvasStore.loadedLabels`)로 변경 = 사용자 명시 요구(FR-008). 옛 스펙 보존.
-- **데드 ref**: 노드패널을 canvasStore 로드로 옮긴 뒤 `labelFilters`/`relFilter`는 설정처가 없어 비활성(데드, FR-007). 표시필터로 작동하지 않으며 제거는 리팩토링 세션 범위(본 plan은 동작 변경 0).
+- **데드 ref 제거 완료**: 노드패널을 canvasStore 로드로 옮긴 뒤 비활성이던 `labelFilters`/`relFilter` 및 연관 데드(`matchesLabelFilter`·`showFilterEmptyOverlay`·watch·`clear-filters`/`open-navigator` emit·`handleOpenNavigator`)를 제거(FR-007, 동작 보존·회귀 0). NvlGraph는 `hiddenRelTypes`만 소비.
 - **보기모드 상호작용**: 노드패널 칩 로드 시 preset 해제 → 보기모드 가상그래프와 표시필터 충돌(경고)이 사라짐. 회귀 검증 완료.
 
 ## Project Structure

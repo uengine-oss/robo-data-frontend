@@ -15,7 +15,7 @@
 - **노드패널 칩 = 캔버스 누적 로드(isolate, 표시필터 아님)**: `NodeDetailPanel`의 라벨/관계 통계 칩을 누르면, 그 라벨 노드들(노드 칩)·그 관계 + 양끝 노드(관계 칩)를 캔버스(`canvasNodeIds`)에 **직접 union**으로 띄운다. 여러 개 누르면 누적, 다시 누르면 제거. 보기모드(preset)는 해제. → `canvasStore.loadedLabels`/`loadedRelTypes` + `toggleLabelLoad`/`toggleRelLoad`/`rebuildPanelLoad`.
 - **필터▾ = 관계 숨김 필터(별도)**: 표시에서 특정 관계 타입을 끄는 blacklist(`hiddenRelTypes`). 노드패널 isolate와 **독립**.
 - **스타일**: `GraphStylePanel.vue`·`graphStyleStorage`에 이미 존재·노출(노드=색+크기, 관계=색+선두께, localStorage 영속, 5단계).
-- **데드/충돌 정리**: 옛 기획의 다중 표시필터 ref `labelFilters`/`relFilter`(GraphTab)는 노드패널을 isolate로 분리한 뒤 **설정처가 없어 비활성(데드)**다. NvlGraph에 전달되나 항상 빈 배열 → 표시필터로 작동하지 않는다. **잔여 ref 제거는 별도 리팩토링 세션(refactor-estimate) 범위**로 둔다(본 spec은 동작 변경 0).
+- **데드/충돌 정리(제거 완료)**: 옛 기획의 다중 표시필터 ref `labelFilters`/`relFilter`(GraphTab)는 노드패널을 isolate로 분리한 뒤 설정처가 없어 비활성(데드)이 됐고, 연관 데드(`matchesLabelFilter`·`showFilterEmptyOverlay`=필터 매치0 경고카드·관련 watch·`clear-filters`/`open-navigator` emit·`handleOpenNavigator`)와 함께 **제거 완료**다. NvlGraph는 이제 `hiddenRelTypes` blacklist만 소비한다(동작 보존·회귀 0).
 - **spec 021 충돌**: spec 021의 단일 isolate(`labelFilters=[label]` 덮어쓰기, `canvasStore.isolateLabel`)는 본 spec의 **다중 누적 isolate**(`canvasStore.loadedLabels`)로 supersede. 옛 문서는 보존하되 본 spec이 현재 진실이다.
 
 ## User Scenarios & Testing *(mandatory)*
@@ -94,7 +94,7 @@
 - **FR-004**: 노드패널 칩 로드는 보기모드(preset)를 **해제**하고, `canvasStore.loadedLabels`/`loadedRelTypes` + `toggleLabelLoad`/`toggleRelLoad`/`rebuildPanelLoad`로 구현한다. 칩의 active 표시 = 캔버스 로드 상태(`loadedLabels`/`loadedRelTypes`)이며 표시필터(`labelFilters`/`relFilter`)와 무관하다.
 - **FR-005**: 표시 숨김 필터(필터▾)는 노드패널 isolate와 **분리된 별도 기능** — 관계 타입 숨김(`hiddenRelTypes` blacklist). 노드패널 칩은 "보여주기", 필터▾는 "숨기기".
 - **FR-006**: 노드 라벨(색·크기)·관계 타입(색·선두께) 스타일 지정은 **기존 `GraphStylePanel`·`graphStyleStorage`를 재사용**해 영속한다(중복 구현 금지).
-- **FR-007 (충돌 정리)**: 옛 기획의 다중 표시필터 ref `labelFilters`/`relFilter`(GraphTab)는 노드패널 isolate 분리 후 **비활성(데드)**다 — 설정처가 없어 NvlGraph에 항상 빈 배열로 전달되어 표시필터로 작동하지 않는다. "선택된 것만 보기"는 노드패널 isolate(FR-001·002)가 충족한다. **잔여 ref 제거는 리팩토링 세션(refactor-estimate) 범위**이며 본 spec은 동작 변경 0.
+- **FR-007 (충돌 정리·데드 제거 완료)**: 옛 기획의 다중 표시필터 ref `labelFilters`/`relFilter`(GraphTab)는 노드패널 isolate 분리 후 비활성(데드)이 됐고, "선택된 것만 보기"는 노드패널 isolate(FR-001·002)가 충족한다. 이에 따라 `labelFilters`/`relFilter` props·`matchesLabelFilter`·`showFilterEmptyOverlay`(필터 매치0 경고카드)·관련 watch·`clear-filters`/`open-navigator` emit·`handleOpenNavigator`를 **제거 완료**했다 — NvlGraph는 `hiddenRelTypes` blacklist만 소비한다(동작 보존·회귀 0).
 - **FR-008**: spec 021의 단일 isolate(`labelFilters=[label]`)·legacy의 다중 표시필터는 본 spec의 **다중 누적 isolate**(`canvasStore.loadedLabels`)로 **supersede**하되, 옛 스펙 문서는 보존하고 충돌을 본 개요에 명시한다.
 
 ### Key Entities *(데이터 관련)*
@@ -120,7 +120,7 @@
 - **"선택된 것만 보기"** = 노드패널 칩의 **캔버스 누적 로드(isolate)** 가 충족한다(별도 표시필터 whitelist 아님). 빈 로드 = 캔버스 비움.
 - 노드 스타일 = 색+크기, 관계 스타일 = 색+선두께(기존 GraphStylePanel 의미 유지, 5단계).
 - 보기모드 전환·노드패널 칩 클릭 시 보기모드(preset)는 **해제**한다(isolate 로드가 자체 노드집합을 구성하므로).
-- `labelFilters`/`relFilter`는 현재 **데드**(FR-007) — 향후 필터▾ 다중 표시필터로 살릴 여지는 있으나 본 spec 범위 밖(리팩토링).
+- `labelFilters`/`relFilter` 및 연관 데드는 **제거 완료**(FR-007). 향후 필터▾에 다중 표시필터가 필요하면 새로 설계한다.
 - 검증은 실데이터(catalog 그래프)로 풀스택 Playwright 라이브 + 로직 검증.
 
 ## 구현 후속 다듬기 (2026-06-23 사용자 피드백 반영)

@@ -28,7 +28,7 @@
 - [x] T011 로직 검증(실데이터) — SELECT129+TABLE16=145 누적 → +READS 양끝노드 union 149, 토글 해제 102. READS 양끝노드 전부 포함 확인.
 - [x] T012 풀스택 Playwright 라이브 — 노드 칩 누적(SELECT·TABLE) + 관계 칩(READS) active, 캔버스 149노드 로드, **"필터 매치 0" 경고 0**(SC-003), pageerror 0.
 - [x] T013 커밋·푸시(frontend `622b5bb`) + spec 025 박제 + architect 서브모듈 포인터 bump(`eb0e21b`).
-- [ ] T014 (리팩토링 세션) 데드 ref `labelFilters`/`relFilter` 제거 — refactor-estimate 범위, 본 spec 밖.
+- [x] T014 데드 ref 제거 — `labelFilters`/`relFilter` props·`matchesLabelFilter`·`showFilterEmptyOverlay`(필터 매치0 경고카드)·관련 watch·`clear-filters`/`open-navigator` emit·`handleOpenNavigator` 삭제. NvlGraph는 `hiddenRelTypes`만 소비. `handleClearFilters`(* 초기화)를 `clearPanelLoad`로 수정. 타입0·회귀0(노드/관계 칩·보기모드 전환·필터▾·경고0·pageerror0).
 
 ## Dependencies
 - T003·T004(canvasStore) → T005·T006·T007(GraphTab) → T012(검증).

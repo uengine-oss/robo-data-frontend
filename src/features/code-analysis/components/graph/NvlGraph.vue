@@ -34,8 +34,6 @@ interface Props {
   graphData: GraphData
   selectedNodeId?: string
   selectedRelationshipId?: string
-  /** 노드 라벨 필터 (비어있으면 전체 표시) */
-  labelFilters?: string[]
   /**
    * 중첩 영역(헐) 레벨들 — 바깥→안 순서(예: [패키지, 파일]). 빈 배열/미지정이면 표시 안 함.
    * 그룹 키/라벨은 호출측(GraphTab)이 계층 조상맵 기반 closure 로 주입(spec 021).
@@ -58,8 +56,6 @@ interface Props {
    *  - 'health'      → 건강지표(risk)별 색 — 나쁜 함수 강조. 지표 없는 노드는 회색.
    */
   colorMode?: 'label' | 'health'
-  /** 표시할 관계 타입 필터 (비어있으면 전체). 예: ['READS'] = 읽기만, ['WRITES'] = 쓰기만. */
-  relFilter?: string[]
   /** 숨길 관계 타입 (끄고/켜기 blacklist, spec 020). 여기 든 타입은 그리지 않는다. */
   hiddenRelTypes?: string[]
   /**
@@ -119,12 +115,10 @@ const ANCHOR_LINK_COLOR = '#32353c'
 // ============================================================================
 
 const props = withDefaults(defineProps<Props>(), {
-  labelFilters: () => [],
   hullLevels: () => [],
   clusterKeyOf: null,
   clusterLabelOf: null,
   colorMode: 'label',
-  relFilter: () => [],
   hiddenRelTypes: () => [],
   rightInset: 0
 })
@@ -155,8 +149,6 @@ const emit = defineEmits<{
   'node-isolate-label': [nodeId: string]
   'node-drop': [payload: { nodeId: string; nodeType?: string; labels?: string[] }]
   'node-expand': [nodeId: string]
-  'clear-filters': []
-  'open-navigator': []
 }>()
 
 // ============================================================================
@@ -193,19 +185,6 @@ const groupHulls = useGroupHulls(
 
 const nodeStats = ref<Map<string, NodeStat>>(new Map())
 const relationshipStats = ref<Map<string, NodeStat>>(new Map())
-
-/** 현재 필터/렌더 결과로 캔버스에 표시 중인 노드 수 */
-const visibleNodeCount = ref(0)
-
-/**
- * "필터는 걸려있는데 매치되는 노드가 0건" 상태 — 빈 캔버스에 안내 카드 표시.
- * 데이터 자체가 비었거나 필터가 없는 경우엔 표시하지 않는다 (각각 다른 상태).
- */
-const showFilterEmptyOverlay = computed(() =>
-  props.labelFilters.length > 0
-  && props.graphData.nodes.length > 0
-  && visibleNodeCount.value === 0
-)
 
 // 내부 맵 (id → NvlNode/Relationship) — 반응형 불필요
 const nodeMap = new Map<string, NvlNode>()
@@ -264,18 +243,10 @@ function toNvlRelationship(link: GraphLink, isSelected = false): NvlRelationship
   return base
 }
 
-function matchesLabelFilter(node: GraphNode): boolean {
-  if (!props.labelFilters || props.labelFilters.length === 0) return true
-  const labels = node.labels || ['Unknown']
-  const targets = props.labelFilters.map(l => l.toUpperCase())
-  return labels.some(label => targets.includes(label.toUpperCase()))
-}
-
-/** 관계 타입 필터 — 숨김(blacklist) 우선, 그다음 표시 whitelist(읽기만/쓰기만). */
+/** 관계 타입 필터 — 숨김(blacklist)만. 필터▾에서 끈 타입은 그리지 않는다. */
 function matchesRelFilter(link: GraphLink): boolean {
   if (props.hiddenRelTypes && props.hiddenRelTypes.includes(link.type)) return false
-  if (!props.relFilter || props.relFilter.length === 0) return true
-  return props.relFilter.includes(link.type)
+  return true
 }
 
 // ============================================================================
@@ -319,7 +290,6 @@ async function initNvl(): Promise<void> {
   const rels: NvlRelationship[] = []
 
   for (const node of props.graphData.nodes) {
-    if (!matchesLabelFilter(node)) continue
     const n = toNvlNode(node, props.selectedNodeId === node.id)
     nodeMap.set(node.id, n)
     nodes.push(n)
@@ -355,7 +325,6 @@ async function initNvl(): Promise<void> {
   setupInteractions()
   groupHulls.attach()
   updateStats()
-  visibleNodeCount.value = nodeMap.size
 
   // 다음 프레임에 앵커/링크 주입 → 라이브 물리가 군집을 형성. 퍼지며 정착하므로 시간차로 프레임.
   requestAnimationFrame(() => {
@@ -505,7 +474,6 @@ function destroyNvl(): void {
   anchorMembers.clear()
   anchorLinkIds = []
   isInitializing.value = false
-  visibleNodeCount.value = 0
 }
 
 /**
@@ -523,8 +491,8 @@ function syncGraph(): void {
     return
   }
 
-  // 1) 현재 표시해야 할 노드 결정
-  const visibleNodes = props.graphData.nodes.filter(matchesLabelFilter)
+  // 1) 현재 표시해야 할 노드 결정 (라벨 표시필터 폐지 — 캔버스에 있는 모든 노드를 표시)
+  const visibleNodes = props.graphData.nodes
   const targetIds = new Set(visibleNodes.map(n => n.id))
 
   // 2) 제거할 노드
@@ -577,7 +545,6 @@ function syncGraph(): void {
   }
 
   updateStats()
-  visibleNodeCount.value = nodeMap.size
   groupHulls.redraw()
 }
 
@@ -824,12 +791,8 @@ watch(() => props.graphData, () => {
   syncGraph()
 }, { deep: false })
 
-watch(() => props.labelFilters, () => {
-  syncGraph()
-}, { deep: true })
-
-// 관계 필터(읽기만/쓰기만 + 숨김)는 엣지 기준이라 노드중심 syncGraph 로 못 지움 → 재빌드.
-watch([() => props.relFilter, () => props.hiddenRelTypes], () => {
+// 관계 숨김(blacklist)은 엣지 기준이라 노드중심 syncGraph 로 못 지움 → 재빌드.
+watch(() => props.hiddenRelTypes, () => {
   if (nvlInstance.value) { destroyNvl(); initNvl() }
 }, { deep: true })
 
@@ -939,19 +902,6 @@ defineExpose({
       </div>
     </Transition>
 
-    <!-- 필터 적용 결과 0건 안내 (필터 활성 + 데이터 있음 + 매치 0) -->
-    <Transition name="fade">
-      <div v-if="showFilterEmptyOverlay" class="filter-empty-overlay">
-        <div class="filter-empty-card">
-          <div class="filter-empty-title">필터에 매치되는 노드가 없습니다</div>
-          <div class="filter-empty-hint">현재 캔버스에 활성 필터에 해당하는 노드가 없습니다.</div>
-          <div class="filter-empty-actions">
-            <button class="btn-primary" @click="emit('clear-filters')">필터 해제</button>
-            <button class="btn-secondary" @click="emit('open-navigator')">Navigator 열기</button>
-          </div>
-        </div>
-      </div>
-    </Transition>
   </div>
 </template>
 
@@ -982,76 +932,6 @@ defineExpose({
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
-}
-
-// ============================================================================
-// 필터 매치 0건 안내 오버레이
-// ============================================================================
-
-.filter-empty-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  z-index: 10;
-}
-
-.filter-empty-card {
-  pointer-events: auto;
-  background: var(--color-bg-secondary, #1e1f23);
-  border: 1px solid var(--color-border, #373a40);
-  border-radius: 12px;
-  padding: 20px 24px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-  max-width: 320px;
-  text-align: center;
-}
-
-.filter-empty-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text-bright, #f8fafc);
-  margin-bottom: 6px;
-}
-
-.filter-empty-hint {
-  font-size: 12px;
-  color: var(--color-text-muted, #94a3b8);
-  margin-bottom: 16px;
-  line-height: 1.5;
-}
-
-.filter-empty-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: center;
-
-  button {
-    padding: 6px 14px;
-    font-size: 12px;
-    font-weight: 500;
-    border-radius: 6px;
-    cursor: pointer;
-    border: 1px solid transparent;
-    transition: all 0.15s ease;
-  }
-
-  .btn-primary {
-    background: var(--color-accent, #74c0fc);
-    color: white;
-
-    &:hover { filter: brightness(1.08); }
-  }
-
-  .btn-secondary {
-    background: transparent;
-    border-color: var(--color-border, #373a40);
-    color: var(--color-text, #c1c2c5);
-
-    &:hover { background: var(--color-bg-hover, #2c2e33); }
-  }
 }
 
 .context-menu {

@@ -35,7 +35,6 @@ const { showLogicalNames } = storeToRefs(navigatorStore)
 const showNodePanel = ref(false)
 const showConsole = ref(false)
 const progressPanelCollapsed = ref(false) // 진행 패널 축소 상태
-const labelFilters = ref<string[]>([]) // 레전드 필터 (노드 라벨)
 
 /**
  * 보기 모드 (spec 018 — 단일선택 enum).
@@ -158,9 +157,6 @@ const clusterLabelOf = computed<((key: string) => string) | null>(() => {
 /** 노드 색 기준 — health 모드면 'health', 그 외 'label'. NvlGraph :colorMode 소비. */
 const colorMode = computed<'label' | 'health'>(() => (viewMode.value === 'health' ? 'health' : 'label'))
 
-/** 관계 필터(READS/WRITES whitelist) — spec 021서 읽기만/쓰기만 UI 제거. NvlGraph prop 계약은 유지(빈 배열=필터 없음). */
-const relFilter = ref<string[]>([])
-
 /**
  * 필터 ▾ (spec 020) — 관계 종류 끄고/켜기(blacklist). 보기모드와 직교(동시 적용).
  * 빈 집합 = 전체 표시. 종류를 끄면 그 관계만 화면에서 사라진다(데이터는 유지).
@@ -205,13 +201,11 @@ function applyViewMode(mode: ViewMode): void {
 
   if (mode === 'module') {
     // 모듈간: 가상 그래프 프리셋(모듈↔모듈 CALL + 모듈↔테이블 R/W).
-    labelFilters.value = []
     canvasStore.setPreset('module-interaction')
     // FR-010: 합성 결과가 비면 빈 화면 침묵 대신 사유 안내(전략·DDL 무관, 데이터 유무로만).
     hintIfEmpty('모듈 간 상호작용을 그릴 데이터가 없습니다 — 모듈·호출(CALLS)·테이블 R/W 정보가 있어야 합니다')
   } else if (mode === 'health') {
     // 건강(spec 022): 위험 루틴 + 그들이 닿는 모든 관계(R/W 테이블·CALL 루틴). 위험색=colorMode.
-    labelFilters.value = []
     canvasStore.setPreset('health-rw')
     hintIfEmpty('위험도 정보를 가진 함수가 없습니다 — 분석을 끝까지 실행해 주세요')
   } else if (mode === 'area') {
@@ -512,7 +506,7 @@ function handleStylePanelClose(): void {
 
 /**
  * 노드 라벨 칩 클릭 = 캔버스에 그 라벨 노드들을 **누적 로드**(isolate, spec 025).
- * 표시필터(labelFilters)가 아니라 캔버스 구성 — 여러 개 누르면 누적, 다시 누르면 제거.
+ * 표시필터가 아니라 캔버스 구성(canvasStore) — 여러 개 누르면 누적, 다시 누르면 제거.
  */
 function handleLabelFilter(label: string): void {
   canvasStore.toggleLabelLoad(label)
@@ -541,9 +535,9 @@ watch(canvasPresetMode, (mode) => {
   }
 })
 
-/** isolate 해제 (오버뷰 `*` 클릭) — 강조 해제 + 캔버스 비움(빈 상태로 환원). */
+/** isolate 해제 (오버뷰 `*` 클릭) — 노드패널 로드(loadedLabels/loadedRelTypes) 해제 + 캔버스 비움. */
 function handleClearFilters(): void {
-  labelFilters.value = []
+  canvasStore.clearPanelLoad()
   canvasStore.clearCanvas()
 }
 
@@ -555,11 +549,6 @@ function handleResetGraph(): void {
   selectedNode.value = null
   selectedRelationship.value = null
   canvasStore.clearCanvas()
-}
-
-/** 0건 오버레이의 'Navigator 열기' 액션 */
-function handleOpenNavigator(): void {
-  navigatorStore.setPanelOpen(true)
 }
 
 /**
@@ -720,12 +709,10 @@ watch(hasGraph, (has, prev) => {
           :graphData="canvasGraphData"
           :selectedNodeId="selectedNode?.id"
           :selectedRelationshipId="selectedRelationship?.id"
-          :labelFilters="labelFilters"
           :hullLevels="hullLevels"
           :clusterKeyOf="clusterKeyOf"
           :clusterLabelOf="clusterLabelOf"
           :colorMode="colorMode"
-          :relFilter="relFilter"
           :hiddenRelTypes="hiddenRelTypes"
           :rightInset="showNodePanel ? panelWidth : 0"
           @node-select="handleNodeSelect"
@@ -735,8 +722,6 @@ watch(hasGraph, (has, prev) => {
           @node-isolate-label="handleNodeIsolateLabel"
           @node-drop="handleNodeDrop"
           @node-expand="handleNodeExpand"
-          @clear-filters="handleClearFilters"
-          @open-navigator="handleOpenNavigator"
         />
         <!-- 빈 상태 오버레이 -->
         <div v-if="!hasGraph" class="empty-state empty-overlay">
@@ -827,7 +812,7 @@ watch(hasGraph, (has, prev) => {
       <div class="view-menu-wrap">
         <button
           class="view-menu-btn"
-          :class="{ active: hiddenRelCount > 0 || relFilter.length > 0 }"
+          :class="{ active: hiddenRelCount > 0 }"
           title="필터 — 관계 종류 끄고/켜기"
           @click="showFilterMenu = !showFilterMenu; showViewMenu = false"
         >

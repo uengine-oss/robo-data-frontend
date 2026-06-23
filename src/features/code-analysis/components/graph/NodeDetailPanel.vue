@@ -36,8 +36,8 @@ interface Props {
   /** 캔버스에 표시 중인 노드가 있는가 — '캔버스 비우기' 버튼 표시 조건 */
   hasGraph?: boolean
   isProcessing?: boolean
-  activeFilters?: string[]  // 활성화된 필터 (노드 라벨)
-  activeRelFilters?: string[]  // 활성화된 관계 필터 (whitelist)
+  activeFilters?: string[]  // 캔버스에 로드된 노드 라벨(isolate)
+  activeRelFilters?: string[]  // 캔버스에 로드된 관계 타입(isolate)
   allNodes?: GraphNode[]   // 전체 노드 목록 (검색용)
 }
 
@@ -280,7 +280,7 @@ function isFilterActive(label: string): boolean {
  * 전체 필터가 적용되어 있는지
  */
 function hasActiveFilters(): boolean {
-  return (props.activeFilters?.length ?? 0) > 0
+  return (props.activeFilters?.length ?? 0) > 0 || (props.activeRelFilters?.length ?? 0) > 0
 }
 
 /**
