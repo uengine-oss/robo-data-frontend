@@ -93,6 +93,7 @@ const selectedSize = ref<number>(0)
 // ============================================================================
 
 const headerColor = computed(() => {
+  if (selectedColor.value) return selectedColor.value   // 색 선택 즉시 헤더 반영
   if (!props.elementType) return '#5AA0E0'
   if (savedStyle.value?.color) return savedStyle.value.color
   return resolveDefaultColor(props.elementType)
@@ -198,8 +199,8 @@ onMounted(() => loadCurrentStyle())
           class="size-swatch"
           :class="{ active: selectedSize === size }"
           :style="category === 'node'
-            ? { width: `${size * 0.6}px`, height: `${size * 0.6}px` }
-            : { width: '28px', height: `${size * 3}px`, borderRadius: '4px' }"
+            ? { width: `${size}px`, height: `${size}px`, minWidth: 'auto', minHeight: 'auto' }
+            : { width: '40px', height: `${size * 2 + 2}px`, minWidth: 'auto', minHeight: 'auto', borderRadius: '2px' }"
           @click="handleSizeSelect(size)"
           :title="category === 'node' ? `Size: ${size}` : `Width: ${size}`"
         ></button>
