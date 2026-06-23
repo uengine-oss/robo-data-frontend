@@ -50,11 +50,11 @@ const COLOR_PALETTE = [
   '#E0E0E0', '#FF8C00', '#48D1CC', '#CD5C5C'
 ]
 
-/** 노드 크기 옵션 */
-const NODE_SIZE_OPTIONS = [20, 25, 30, 35]
+/** 노드 크기 옵션 (5단계) */
+const NODE_SIZE_OPTIONS = [16, 20, 24, 28, 32]
 
-/** 관계 두께 옵션 */
-const REL_WIDTH_OPTIONS = [1, 2, 3, 5]
+/** 관계 두께 옵션 (5단계) */
+const REL_WIDTH_OPTIONS = [1, 2, 3, 4, 6]
 
 // ============================================================================
 // Computed
@@ -200,7 +200,7 @@ onMounted(() => loadCurrentStyle())
           :class="{ active: selectedSize === size }"
           :style="category === 'node'
             ? { width: `${size}px`, height: `${size}px`, minWidth: 'auto', minHeight: 'auto' }
-            : { width: '40px', height: `${size * 2 + 2}px`, minWidth: 'auto', minHeight: 'auto', borderRadius: '2px' }"
+            : { width: '26px', height: `${size * 2 + 2}px`, minWidth: 'auto', minHeight: 'auto', borderRadius: '2px' }"
           @click="handleSizeSelect(size)"
           :title="category === 'node' ? `Size: ${size}` : `Width: ${size}`"
         ></button>
@@ -294,8 +294,8 @@ onMounted(() => loadCurrentStyle())
   }
 
   &.active {
-    border-color: #1e293b;
-    box-shadow: 0 0 0 2px white, 0 0 0 4px #1e293b;
+    border-color: #64748b;
+    box-shadow: 0 0 0 2px #cbd5e1;
   }
 
   &.custom {
@@ -347,9 +347,9 @@ onMounted(() => loadCurrentStyle())
   }
 
   &.active {
-    border-color: #1e293b;
-    background: #64748b;
-    box-shadow: 0 0 0 2px white, 0 0 0 4px #1e293b;
+    border-color: #64748b;
+    background: #94a3b8;
+    box-shadow: 0 0 0 1px #cbd5e1;
   }
 }
 </style>

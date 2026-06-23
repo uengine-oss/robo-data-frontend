@@ -1069,8 +1069,8 @@ function getNodeSubInfo(node: GraphNode): string {
   }
   
   &.active {
-    box-shadow: 0 0 0 2px white, 0 0 0 4px var(--color-accent);
-    transform: scale(1.05);
+    box-shadow: 0 0 0 2px var(--color-accent);
+    transform: scale(1.02);
     z-index: 2;
   }
   
