@@ -37,6 +37,7 @@ interface Props {
   hasGraph?: boolean
   isProcessing?: boolean
   activeFilters?: string[]  // 활성화된 필터 (노드 라벨)
+  activeRelFilters?: string[]  // 활성화된 관계 필터 (whitelist)
   allNodes?: GraphNode[]   // 전체 노드 목록 (검색용)
 }
 
@@ -63,12 +64,14 @@ const props = withDefaults(defineProps<Props>(), {
   hasGraph: false,
   isProcessing: false,
   activeFilters: () => [],
+  activeRelFilters: () => [],
   allNodes: () => []
 })
 
 const emit = defineEmits<{
   'node-type-select': [nodeType: string, topOffset: number]
   'relationship-type-select': [relType: string, topOffset: number]
+  'relationship-filter': [relType: string]
   'label-filter': [label: string]
   'clear-filters': []
   'node-select': [node: GraphNode]
@@ -224,6 +227,16 @@ function toggleExpand(key: string): void {
  */
 function handleLabelFilter(label: string): void {
   emit('label-filter', label)
+}
+
+function handleRelFilter(relType: string): void {
+  emit('relationship-filter', relType)
+}
+function isRelFilterActive(relType: string): boolean {
+  return props.activeRelFilters?.includes(relType) ?? false
+}
+function hasActiveRelFilters(): boolean {
+  return (props.activeRelFilters?.length ?? 0) > 0
 }
 
 /**
@@ -516,10 +529,12 @@ function getNodeSubInfo(node: GraphNode): string {
             <span
               v-for="stat in sortedRelStats"
               :key="stat.type"
-              class="stat-badge rel"
+              class="stat-badge rel clickable"
+              :class="{ active: isRelFilterActive(stat.type), dimmed: hasActiveRelFilters() && !isRelFilterActive(stat.type) }"
               :style="{ background: stat.color }"
+              @click="handleRelFilter(stat.type)"
               @contextmenu="handleRelTypeContextMenu($event, stat.type)"
-              :title="`우클릭: 색상/두께 변경`"
+              :title="`좌클릭: 이 관계만 보기 / 우클릭: 색상·두께`"
             >
               {{ stat.type }} ({{ stat.count }})
             </span>

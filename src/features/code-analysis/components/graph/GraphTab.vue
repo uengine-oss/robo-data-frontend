@@ -511,19 +511,24 @@ function handleStylePanelClose(): void {
 }
 
 /**
- * 오버뷰 노드 라벨 칩 클릭 = "이것만 보기"(isolate, spec 020 FR-004).
- * 빈 캔버스여도 그 종류를 **로드**해 띄운다(loadNodesByLabels) — "필터인데 비었음" 혼란 제거.
- * 같은 라벨을 다시 누르면 해제(캔버스 비움). 종류 다중 끄고/켜기는 별도 필터(필터 ▾)가 담당.
+ * 노드 라벨 칩 클릭 = 다중선택 토글(spec 025). 여러 라벨을 골라 "선택된 것만" 표시.
+ * 누르면 추가, 다시 누르면 제거(누적). 비면 캔버스 비움. `loadNodesByLabels`가 다중 whitelist를 처리.
  */
 function handleLabelFilter(label: string): void {
-  const isActive = labelFilters.value.length === 1 && labelFilters.value[0] === label
-  if (isActive) {
-    labelFilters.value = []
-    canvasStore.clearCanvas()
-  } else {
-    labelFilters.value = [label]
-    canvasStore.loadNodesByLabels([label])   // 그 종류를 캔버스에 로드(빈 캔버스도)
-  }
+  const set = new Set(labelFilters.value)
+  if (set.has(label)) set.delete(label)
+  else set.add(label)
+  labelFilters.value = [...set]
+  if (labelFilters.value.length === 0) canvasStore.clearCanvas()
+  else canvasStore.loadNodesByLabels(labelFilters.value)
+}
+
+/** 관계 타입 다중선택 토글(whitelist, spec 025) — 선택된 관계만 표시. relFilter 를 NvlGraph 가 소비. */
+function handleRelFilterToggle(relType: string): void {
+  const set = new Set(relFilter.value)
+  if (set.has(relType)) set.delete(relType)
+  else set.add(relType)
+  relFilter.value = [...set]
 }
 
 /**
@@ -882,10 +887,12 @@ watch(hasGraph, (has, prev) => {
             :hasGraph="hasGraph"
             :isProcessing="isProcessing"
             :activeFilters="labelFilters"
+            :activeRelFilters="relFilter"
             :allNodes="graphData?.nodes || []"
             @node-type-select="handleNodeTypeSelect"
             @relationship-type-select="handleRelTypeSelect"
             @label-filter="handleLabelFilter"
+            @relationship-filter="handleRelFilterToggle"
             @clear-filters="handleClearFilters"
             @node-select="handleNodeSearchSelect"
             @reset-graph="handleResetGraph"
