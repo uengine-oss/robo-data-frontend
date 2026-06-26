@@ -160,6 +160,30 @@ const STEP_SUBLABEL: Record<string, string> = {
   embed_step: '검색 색인 만드는 중',
 }
 
+/** 노드 라벨(주 라벨) → 한국어 종류. 전략 무관 — framework FUNCTION/dbms PROCEDURE 등. */
+const LABEL_KIND_KO: Record<string, string> = {
+  FUNCTION: '함수', METHOD: '메서드', PROCEDURE: '프로시저', TRIGGER: '트리거',
+  FILE: '파일', PACKAGE: '패키지', MODULE: '모듈', GLOBAL_VARIABLE: '전역변수',
+  TABLE: '테이블', COLUMN: '컬럼',
+}
+
+/** processing_event.step → 그 단계에 맞는 사용자 동작 문구. 미등록 step 은 '처리 중' 폴백. */
+const STEP_VERB: Record<string, string> = {
+  'step5.build_context': '분석 중',
+  'step6.analyze_code': '분석 중',
+  'step6.module_pre_analysis': '살펴보는 중',
+  'step7.summarize_module': '정리 중',
+  'step7.enrich_table_description': '설명 채우는 중',
+  'step7.build_components': '묶는 중',
+}
+
+/** 종류(한국어) → 콘솔 이모지. 미등록은 🔹. */
+const KIND_EMOJI: Record<string, string> = {
+  '함수': '🧠', '메서드': '🧠', '프로시저': '🧠', '트리거': '🧠', '코드': '🧠', '코드 묶음': '🧠',
+  '모듈': '📦', '패키지': '📦', '파일': '📄', '테이블': '🗂️', '컬럼': '🗂️',
+  '전역변수': '🔧', '구성요소': '🧩',
+}
+
 /** 노드 properties + labels 에서 사람이 읽기 쉬운 이름 추출 */
 function resolveNodeName(
   properties: Record<string, unknown>,
@@ -345,13 +369,16 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   // step6(LLM 분석)은 처리 단위(processing_event)가 전부 sub_action 을 달고 와서
   // 과거엔 콘솔에 한 줄도 안 흘렀다(무음). 여기서 entity_id 단위로 dedup(한 코드노드의
   // 여러 split 을 1회로) + 종류별 throttle(K건마다 1줄) 해서 "쏟아짐 없이" 진행감만 전한다.
-  /** 종류별로 이미 진행 집계에 센 entity_id (중복 방지). */
+  /** 종류별로 이미 진행 집계에 센 entity_id (중복 방지) — framework 함수/모듈/테이블/구성요소. */
   const processedIds = new Map<string, Set<string>>()
-  /** 진행감 메시지 throttle 간격(종류별 N건마다 1줄). 코드노드가 대다수라 촘촘히. */
-  const PROGRESS_THROTTLE: Record<string, number> = { CodeNode: 5, Module: 1, Table: 1, Question: 5 }
+  /** dbms 배치 누계 — 배치는 부모 id 를 공유할 수 있어 dedup 하지 않고 묶음마다 +1(건수). */
+  let processedBatchCount = 0
+  /** 진행감 메시지 throttle 간격(종류별 N건마다 1줄). 코드/배치가 대다수라 촘촘히. */
+  const PROGRESS_THROTTLE: Record<string, number> = { CodeNode: 5, Batch: 5, Module: 1, Table: 1, Component: 1 }
 
   function resetProgressTracking(): void {
     processedIds.clear()
+    processedBatchCount = 0
     lastMessageMs = Date.now()
   }
 
@@ -616,42 +643,69 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     }
   }
 
-  /** entity_kind → 콘솔에 쓸 친절한 한글 명사. 미등록은 '항목'. */
+  /** entity_kind → 노드 라벨을 못 찾을 때 쓸 폴백 한글 종류. 미등록은 '항목'. */
   const PROCESSING_KIND_KO: Record<string, string> = {
-    Batch: '코드', CodeNode: '코드', Module: '모듈', Table: '테이블', Question: '질문',
+    CodeNode: '코드', Batch: '코드 묶음', Module: '모듈', Table: '테이블', Component: '구성요소',
   }
 
   /**
-   * processing_event(step 안 처리 단위) → 콘솔 진행감 (US4 FR-011a).
+   * processing_event(step 안 처리 단위) → 콘솔 진행감 (US4 FR-011a, spec 029).
    *
-   * ★근본수정: 과거엔 `sub_action` 있으면 전량 폐기해서 step6(LLM, 수 분)의 처리단위가
-   * 모두 sub_action 을 달고 오는 탓에 **콘솔이 step6 내내 무음**이었다(죽은 핸들러).
-   * 이제 **entity_id 단위 dedup**(한 코드노드의 warmup/3분할 = 1회로) + **종류별 throttle**
-   * (PROGRESS_THROTTLE 건마다 1줄)로 "쏟아짐 없이" 친절한 진행감만 전한다. 원시 ID 미노출.
+   * 메시지 형식 = `{이모지} {종류} {개수}{단위} {동작} — '{이름}'`.
+   * - 종류: 처리 대상 노드의 **라벨**(라이브 그래프에서 entity_id 로 조회)을 한글로(함수/프로시저/
+   *   테이블 …). 노드를 못 찾으면 entity_kind 폴백. → 전략(framework/dbms)을 몰라도 자동 구분.
+   * - 동작: 현재 step 에서 파생(분석/요약/설명 채움/묶음 …).
+   * - 개수: 단조 증가 진행감. framework(CodeNode/Module/Table/Component)=대상 id dedup(같은 대상 1회),
+   *   dbms(Batch)=묶음마다 1건(부모 id 공유 → dedup 안 함). 두 전략은 배타.
+   * - throttle 로 도배 방지, 원시 ID 미노출, 완료(done) 신호만 집계.
    */
   function applyProcessingEvent(event: AnalyzeEvent): void {
+    // 단계 라이브 전진(spec 028): node_done(완료)만으론 긴 단계(step6 코드분석)가 직전 단계에 멈춤.
+    // processing_event.step("stepN.*")으로 진행 중 단계를 즉시 반영(단조 증가, 역행 없음). ★보존.
+    const m = /^step(\d+)/.exec(event.step ?? '')
+    if (m) {
+      const phase = parseInt(m[1], 10) - 1   // step1→0 … step6→5(코드분석) … step7→6(후처리)
+      if (phase > currentPhaseIndex.value && phase < PHASES.length) currentPhaseIndex.value = phase
+    }
+
     if (event.status !== 'done') return
     const rawKind = event.entity_kind ?? ''
-    // ★'Batch'는 CodeNode 와 같은 '코드'로 매핑되는데 카운터가 종류별로 분리돼 있어,
-    //  코드 진행 카운트가 두 갈래(Batch/CodeNode)로 따로 올라가 "리셋"처럼 보였다(사용자 피드백).
-    //  코드 진행은 CodeNode(코드노드 1개 단위)로만 집계해 단조 증가 1줄로 만든다.
-    if (rawKind === 'Batch') return
     const id = event.entity_id ?? ''
-    if (!id) return
-    // 같은 처리 대상(코드노드 1개)이 여러 sub_action(done) 으로 와도 1회만 센다.
-    let seen = processedIds.get(rawKind)
-    if (!seen) { seen = new Set(); processedIds.set(rawKind, seen) }
-    if (seen.has(id)) return
-    seen.add(id)
-    const count = seen.size
+
+    // 진행 개수(단조 증가). Batch(dbms)는 묶음마다 1건, 그 외는 대상 id 로 dedup(중복 1회).
+    let count: number
+    if (rawKind === 'Batch') {
+      count = (processedBatchCount += 1)
+    } else {
+      if (!id) return
+      let seen = processedIds.get(rawKind)
+      if (!seen) { seen = new Set(); processedIds.set(rawKind, seen) }
+      if (seen.has(id)) return
+      seen.add(id)
+      count = seen.size
+    }
+
     const throttle = PROGRESS_THROTTLE[rawKind] ?? 5
     // 첫 건은 바로(시작 신호), 이후엔 throttle 건마다 한 줄(플러드 방지).
     if (count !== 1 && count % throttle !== 0) return
-    const kind = PROCESSING_KIND_KO[rawKind] ?? '항목'
-    // "무엇을" 처리 중인지 보이게 — 현재 대상의 사람이름(스트림으로 nodeMap 에 이미 적재됨).
-    const name = (nodeMap.value.get(id)?.properties?.name as string) || ''
-    const ctx = name ? ` (${name})` : ''
-    addMessage('message', `🧠 ${kind} ${count}개째 분석 중${ctx}`)
+
+    // 종류: Batch 는 카운트 단위가 '묶음'이라 라벨(프로시저)이 아닌 '코드 묶음'으로 고정.
+    //       그 외는 노드 라벨 우선(전략 무관) → 폴백 entity_kind.
+    const node = nodeMap.value.get(id)
+    let kind: string
+    if (rawKind === 'Batch') {
+      kind = PROCESSING_KIND_KO['Batch']
+    } else {
+      const subLabel = node ? extractSubLabel(node.labels) : ''
+      kind = LABEL_KIND_KO[subLabel] ?? PROCESSING_KIND_KO[rawKind] ?? '항목'
+    }
+    const verb = STEP_VERB[event.step ?? ''] ?? '처리 중'
+    const unit = rawKind === 'Batch' ? '건' : '개'
+    const emoji = KIND_EMOJI[kind] ?? '🔹'
+    // "무엇을" 처리 중인지 — 방금 대상의 사람이름(스트림으로 nodeMap 에 이미 적재됨). 없으면 생략.
+    const name = (node?.properties?.name as string) || ''
+    const tail = name ? ` — '${name}'` : ''
+    addMessage('message', `${emoji} ${kind} ${count}${unit} ${verb}${tail}`)
   }
 
   /** node_event/relationship_event(라이브 그래프) → 그래프 병합. */
