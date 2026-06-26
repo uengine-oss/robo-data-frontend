@@ -253,14 +253,28 @@ export function getSemanticReport(
       .map(l => nodes.get(l.target))
       .filter((n): n is GraphNode => !!n)
 
-  const ruleNodes = resolve(rulesBySource.get(nodeId))
+  // dbms: 룰이 자식 구문 노드에 붙음(노드 id = `{부모id}:{타입}:{라인}`). 선택 노드가
+  // 루틴(PROCEDURE/FUNCTION/METHOD/TRIGGER)이면 자손(id 접두어 일치)의 룰·질문까지 집계해
+  // "오퍼레이션 단위"로 표시. framework 는 자손 없어 자기 룰만 → 무변화. spec 044 FR-016.
+  const selfNode = nodes.get(nodeId)
+  const isRoutine = !!selfNode && (selfNode.labels ?? []).some(l => ROUTINE_LABELS.has(l))
+  const descPrefix = nodeId + ':'
+  const matchesNode = (srcId: string): boolean =>
+    srcId === nodeId || (isRoutine && srcId.startsWith(descPrefix))
+  const gather = (m: Map<string, GraphLink[]>): GraphLink[] => {
+    const out: GraphLink[] = []
+    m.forEach((links, src) => { if (matchesNode(src)) out.push(...links) })
+    return out
+  }
+
+  const ruleNodes = resolve(gather(rulesBySource))
   const rules: SemanticRule[] = ruleNodes.map(node => ({
     node,
     examples: resolve(examplesBySource.get(node.id)),
   }))
 
-  // 질문은 함수 직속 + 각 규칙 소속 둘 다 수집(emit from 이 둘 중 하나).
-  const questionNodes: GraphNode[] = [...resolve(questionsBySource.get(nodeId))]
+  // 질문은 노드(루틴이면 자손 포함) 직속 + 각 규칙 소속 둘 다 수집(emit from 이 둘 중 하나).
+  const questionNodes: GraphNode[] = [...resolve(gather(questionsBySource))]
   for (const r of ruleNodes) questionNodes.push(...resolve(questionsBySource.get(r.id)))
   const seen = new Set<string>()
   const questions = questionNodes.filter(q => (seen.has(q.id) ? false : (seen.add(q.id), true)))
