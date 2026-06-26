@@ -14,31 +14,30 @@ const projectStore = useAnalyzerStore()
 const {
   isProcessing,
   currentStep,
-  totalPhases,
-  currentPhase,
+  currentPhaseIndex,
   currentPhaseProgress,
   isPipelinePaused,
   graphEvents,
   consoleMessages,
-  dynamicSteps,
 } = storeToRefs(projectStore)
+
+// 7단계는 정적 상수(ref 아님) — storeToRefs 대상 아님.
+const PHASES = projectStore.PHASES
 
 const { pausePipeline, resumePipeline, clearMessages } = projectStore
 
-// 진행 단계/상태는 분석 NDJSON 스트림(phase_event)이 채우는 dynamicSteps·currentPhase 로 표시 (폴링 폐기)
-type PhaseStep = { num: number; name: string }
-
-function phaseStatusClass(phase: PhaseStep): string {
-  if (phase.num < currentPhase.value) return 'done'
-  if (phase.num === currentPhase.value) {
+// 단계 상태는 분석 NDJSON 스트림이 갱신하는 currentPhaseIndex 로 파생(앞=완료/같음=진행중/뒤=대기).
+function phaseStatusClass(idx: number): string {
+  if (idx < currentPhaseIndex.value) return 'done'
+  if (idx === currentPhaseIndex.value) {
     return isPipelinePaused.value ? 'paused' : 'active'
   }
   return 'pending'
 }
 
-function phaseStatusIcon(phase: PhaseStep): string {
-  if (phase.num < currentPhase.value) return '✓'
-  if (phase.num === currentPhase.value) {
+function phaseStatusIcon(idx: number): string {
+  if (idx < currentPhaseIndex.value) return '✓'
+  if (idx === currentPhaseIndex.value) {
     return isPipelinePaused.value ? '⏸' : '▶'
   }
   return '○'
@@ -60,7 +59,7 @@ const activeTab = ref<'phases' | 'progress' | 'console'>('phases')
 const progress = computed(() => currentPhaseProgress.value)
 
 const isCompleted = computed(() =>
-  currentPhase.value >= totalPhases.value - 1 && currentPhaseProgress.value >= 100
+  currentPhaseIndex.value >= PHASES.length - 1 && currentPhaseProgress.value >= 100
 )
 
 // 경과 시간 — 분석 중 1초마다 갱신. 패널은 분석 동안 마운트 유지되므로 컴포넌트 로컬로 충분.
@@ -268,7 +267,7 @@ watch(hasRecentError, (hasError) => {
             @click="activeTab = 'phases'"
           >
             단계
-            <span class="tab-count">{{ dynamicSteps.length }}</span>
+            <span class="tab-count">{{ Math.min(PHASES.length, Math.max(0, currentPhaseIndex + 1)) }}/{{ PHASES.length }}</span>
           </button>
           <button
             class="tab-btn"
@@ -291,18 +290,19 @@ watch(hasRecentError, (hasError) => {
         <!-- 단계 타임라인 -->
         <div v-show="activeTab === 'phases'" class="phase-timeline">
           <div
-            v-for="phase in dynamicSteps"
-            :key="phase.num"
+            v-for="(name, idx) in PHASES"
+            :key="idx"
             class="phase-row"
-            :class="phaseStatusClass(phase)"
+            :class="phaseStatusClass(idx)"
           >
-            <span class="phase-icon">{{ phaseStatusIcon(phase) }}</span>
+            <span class="phase-icon">{{ phaseStatusIcon(idx) }}</span>
             <div class="phase-info">
-              <span class="phase-name">{{ phase.name }}</span>
+              <span class="phase-name">{{ name }}</span>
+              <span
+                v-if="idx === currentPhaseIndex && currentStep"
+                class="phase-desc"
+              >{{ currentStep }}</span>
             </div>
-          </div>
-          <div v-if="dynamicSteps.length === 0" class="empty-hint">
-            대기 중
           </div>
         </div>
 

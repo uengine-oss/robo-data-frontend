@@ -98,32 +98,57 @@ function convertNeo4jRelationship(rel: Neo4jRelationship): GraphLink {
   }
 }
 
-/**
- * analyzer step 함수명 → 진행 표시용 한글 라벨. 표시 전용(백엔드 순서는 모름).
- * 미등록 step 은 generic 변환(_step 제거·언더스코어→공백)으로 폴백 → 백엔드가 step 추가해도 안 깨짐.
- */
-const STEP_LABELS: Record<string, string> = {
-  parse_ddl_step: 'DDL 파싱',
-  load_ast_step: 'AST 적재',
-  scan_codebase_step: '코드베이스 스캔',
-  link_deterministic_step: '결정론 연결',
-  link_calls_by_name_step: '호출 이름 분류',
-  link_residual_patterns_step: '잔여 패턴 연결',
-  link_dbms_tables_step: 'DBMS 테이블 연결',
-  link_calls_by_ast_step: 'AST 호출 분류',
-  build_context_step: '분석 컨텍스트 구성',
-  fetch_table_samples_step: '테이블 샘플 조회',
-  analyze_function_step: '함수 분석',
-  summarize_module_step: '모듈 요약',
-  enrich_table_description_step: '테이블 설명 강화',
-  enrich_lineage_from_catalog_step: '리니지 보강',
-  build_components_step: '컴포넌트 군집화',
-  health_metrics_step: '건강 지표',
-  embed_step: '임베딩',
+/** 분석 진행 7단계(analyzer analysis_flow step1~step7) — 표시 순서대로. */
+const PHASES = [
+  'DDL 파싱',
+  'AST 적재',
+  '코드베이스 스캔',
+  '관계 연결',
+  '분석 컨텍스트 구성',
+  '코드 분석',
+  '후처리',
+] as const
+
+/** analyzer leaf step(node_done.node) → 7단계 인덱스. 키는 실제 emit 노드명. */
+const STEP_TO_PHASE: Record<string, number> = {
+  parse_ddl_step: 0,
+  load_ast_step: 1,
+  scan_codebase_step: 2,
+  link_deterministic_step: 3,
+  link_calls_by_name_step: 3,
+  link_residual_patterns_step: 3,
+  link_dbms_tables_step: 3,
+  link_calls_by_ast_step: 3,
+  build_context_step: 4,
+  fetch_table_samples_step: 4,
+  analyze_code_step: 5,
+  summarize_module_step: 6,
+  enrich_table_description_step: 6,
+  enrich_lineage_from_catalog_step: 6,
+  build_components_step: 6,
+  health_metrics_step: 6,
+  embed_step: 6,
 }
 
-function stepLabel(node: string): string {
-  return STEP_LABELS[node] || node.replace(/_step$/, '').replace(/_/g, ' ') || '단계'
+/** leaf step → 진행 중 단계에 보일 사용자 세부 문구. */
+const STEP_SUBLABEL: Record<string, string> = {
+  parse_ddl_step: '테이블 정의 읽는 중',
+  load_ast_step: '코드 구조 불러오는 중',
+  scan_codebase_step: '소스 훑어보는 중',
+  link_deterministic_step: '확실한 관계 잇는 중',
+  link_calls_by_name_step: '함수 호출 분석 중',
+  link_residual_patterns_step: '남은 관계 보완 중',
+  link_dbms_tables_step: '테이블 사용 연결 중',
+  link_calls_by_ast_step: '호출 구조 분석 중',
+  build_context_step: '분석 맥락 만드는 중',
+  fetch_table_samples_step: '테이블 예시 수집 중',
+  analyze_code_step: 'AI가 코드 의미 분석 중',
+  summarize_module_step: '모듈 요약 중',
+  enrich_table_description_step: '테이블 설명 보강 중',
+  enrich_lineage_from_catalog_step: '데이터 흐름 보강 중',
+  build_components_step: '컴포넌트 묶는 중',
+  health_metrics_step: '품질 지표 계산 중',
+  embed_step: '검색 색인 만드는 중',
 }
 
 /** 노드 properties + labels 에서 사람이 읽기 쉬운 이름 추출 */
@@ -426,12 +451,12 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   // 처리 시작/종료에 맞춰 무음구간 안심 heartbeat 가동(전략 무관 — isProcessing 단일 신호).
   watch(isProcessing, (proc) => { if (proc) { reassureIdx = 0; startHeartbeat() } else stopHeartbeat() })
   const currentStep = ref('')
-  const totalPhases = ref(6) // 첫 phase_event 의 totalPhases 로 동적 조정됨
-  const currentPhase = ref(0)
+  // 진행 중 단계 인덱스(=지금까지 본 최고 단계, -1=시작 전). 7단계 파생의 단일 신호.
+  const currentPhaseIndex = ref(-1)
   const currentPhaseProgress = ref(0)
-  const currentPhaseName = ref('')
-  // backend phase_event (num, name) 누적 — strategy 별 단계 흐름 그대로 표시
-  const dynamicSteps = ref<{ num: number; name: string }[]>([])
+  // 진행바 % 추정용 leaf 카운트(전략별 예상 개수는 doAnalyze 에서 세팅).
+  const expectedLeafCount = ref(0)
+  const doneLeafCount = ref(0)
 
   // ----- 데이터 확인 모달 -----
   const showDataConfirmModal = ref(false)
@@ -536,28 +561,33 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   /**
    * phase_event(analyzer 진행) → 진행 상태 refs 갱신.
    * 백엔드 wire 는 `event`(start/node_done/stopped/complete/paused/resumed) + 완료 step `node` 다.
-   * node_done 한 건 = step 하나 완료 → 타임라인(dynamicSteps)에 정확히 누적하고,
-   * % 는 strategy 별 예상 단계수(totalPhases) 대비 추정치(완료 전까지 99% 상한)로 표시한다.
+   * node_done 한 건 = leaf 완료 → 그 leaf 의 단계로 currentPhaseIndex 를 올리고(7단계 파생),
+   * % 는 전략별 예상 leaf 수(expectedLeafCount) 대비 추정치(완료 전 99% 상한)로 표시한다.
    */
   function applyPhaseEvent(event: AnalyzeEvent): void {
     switch (event.event) {
       case 'start':
-        dynamicSteps.value = []
-        currentPhase.value = 0
+        currentPhaseIndex.value = -1
+        doneLeafCount.value = 0
         currentPhaseProgress.value = 0
         currentStep.value = '분석 시작...'
         break
       case 'node_done': {
-        const label = stepLabel(event.node ?? '')
-        const num = dynamicSteps.value.length
-        dynamicSteps.value = [...dynamicSteps.value, { num, name: label }]
-        currentPhase.value = num
-        currentPhaseName.value = label
-        currentStep.value = `${label} 완료`
-        currentPhaseProgress.value = Math.min(99, Math.round((num + 1) / totalPhases.value * 100))
+        const node = event.node ?? ''
+        const phase = STEP_TO_PHASE[node]
+        // 파이프라인 순차 — 뒤 단계 leaf 가 오면 앞 단계는 자동 완료. 미상 노드는 단계 안 낮춤.
+        if (phase !== undefined && phase > currentPhaseIndex.value) currentPhaseIndex.value = phase
+        currentStep.value = STEP_SUBLABEL[node] ?? currentStep.value
+        doneLeafCount.value += 1
+        const pct = expectedLeafCount.value > 0
+          ? Math.round(doneLeafCount.value / expectedLeafCount.value * 100)
+          : 0
+        currentPhaseProgress.value = Math.min(99, pct)
         break
       }
       case 'complete':
+        // 마지막 단계까지 done 표시 위해 인덱스를 단계 수로(모든 idx < length = 완료).
+        currentPhaseIndex.value = PHASES.length
         currentPhaseProgress.value = 100
         currentStep.value = '분석 완료 ✓'
         break
@@ -629,9 +659,9 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     currentStep.value = '🧠 AI 분석 진행 중...'
     clearGraphEvents()
     resetProgressTracking()
-    dynamicSteps.value = []
-    // % 추정용 예상 단계수(node_done 개수). 타임라인은 정확, 바는 추정(완료 시 100% 보정).
-    totalPhases.value = analyzeMeta.value.strategy === 'dbms' ? 13 : 14
+    // % 추정용 예상 leaf 개수(전략별). 바는 추정(완료 시 100% 보정), 단계 상태는 currentPhaseIndex.
+    expectedLeafCount.value = analyzeMeta.value.strategy === 'dbms' ? 13 : 14
+    doneLeafCount.value = 0
     addMessage('message', '🔍 코드 분석을 시작했어요 — 차근차근 진행할게요. 잠시만 기다려 주세요 🙂')
 
     await roboApi.analyze(
@@ -793,7 +823,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   async function executeUploadPipeline(files: File[], meta: BackendRequestMetadata) {
     isProcessing.value = true
-    currentPhase.value = 0
+    currentPhaseIndex.value = -1
     currentPhaseProgress.value = 0
     clearMessages()
 
@@ -842,7 +872,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   async function executeRestartPipeline(): Promise<void> {
     isProcessing.value = true
-    currentPhase.value = 0
+    currentPhaseIndex.value = -1
     currentPhaseProgress.value = 0
     clearMessages()
 
@@ -941,6 +971,8 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     clearGraphData()
     isProcessing.value = false
     currentStep.value = ''
+    currentPhaseIndex.value = -1
+    currentPhaseProgress.value = 0
     clearMessages()
 
     try {
@@ -962,11 +994,10 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     graphData,
     isProcessing,
     currentStep,
-    totalPhases,
-    currentPhase,
+    PHASES,
+    currentPhaseIndex,
     currentPhaseProgress,
-    currentPhaseName,
-    dynamicSteps,
+    expectedLeafCount,
     consoleMessages,
     graphEvents,
 
