@@ -81,18 +81,27 @@ function createTimestamp(): string {
 function convertNeo4jNode(node: Neo4jNode): GraphNode {
   const labels = node['Labels'] || []
   const properties = node['Properties'] || {}
+  // 식별키 = 논리 id(properties.id) 단일 — 스트림(mergeStreamNode)과 동일 키로 dedup.
+  // elementId(Node ID)는 fetch 응답에만 있는 neo4j 내부키라 키로 쓰지 않는다(폴백만).
   return {
-    id: node['Node ID'],
+    id: (properties.id as string) || node['Node ID'],
     labels,
     properties,
   }
 }
 
-function convertNeo4jRelationship(rel: Neo4jRelationship): GraphLink {
+// 끝점은 elementId→논리 id 로 변환(elemToLogical), id 는 스트림 비-semantic 링크와 동일
+// 형식(`type|src|tgt||`)으로 만들어 같은 엣지가 stream/fetch 양쪽서 dedup 되게 한다.
+function convertNeo4jRelationship(
+  rel: Neo4jRelationship,
+  elemToLogical: Map<string, string>,
+): GraphLink {
+  const source = elemToLogical.get(rel['Start Node ID']) ?? rel['Start Node ID']
+  const target = elemToLogical.get(rel['End Node ID']) ?? rel['End Node ID']
   return {
-    id: rel['Relationship ID'],
-    source: rel['Start Node ID'],
-    target: rel['End Node ID'],
+    id: `${rel['Type']}|${source}|${target}||`,
+    source,
+    target,
     type: rel['Type'],
     properties: rel['Properties'],
   }
@@ -284,8 +293,11 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     const newLinkMap = new Map(linkMap.value)
     const newSemanticMap = new Map(semanticLinkMap.value)
 
+    // elementId → 논리 id 매핑(이 응답 노드로). 관계 끝점(elementId)을 논리 id 로 변환.
+    const elemToLogical = new Map<string, string>()
     for (const node of nodes) {
       const converted = convertNeo4jNode(node)
+      elemToLogical.set(node['Node ID'], converted.id)
       newNodeMap.set(converted.id, converted)
     }
 
@@ -293,7 +305,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     // 일단 link 는 등록. 노드는 이후 batch 에서 들어오면 자동으로 연결됨.
     // 의미데이터 링크는 semanticLinkMap 으로 분리, hidden 타입/끝점은 적재 안 함.
     for (const rel of relationships) {
-      const converted = convertNeo4jRelationship(rel)
+      const converted = convertNeo4jRelationship(rel, elemToLogical)
       if (SEMANTIC_LINK_TYPES.has(converted.type)) {
         newSemanticMap.set(converted.id, converted)
         continue
@@ -311,6 +323,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     nodeMap.value = new Map()
     linkMap.value = new Map()
     semanticLinkMap.value = new Map()
+    nodeNameCache.clear()   // 보조 캐시도 함께 — 재분석/타프로젝트 stale 표시명 방지
   }
 
   // ----- 콘솔 메시지 -----
@@ -875,6 +888,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     currentPhaseIndex.value = -1
     currentPhaseProgress.value = 0
     clearMessages()
+    clearGraphData()   // 재분석 = 새 결과만 — 이전 그래프/표시명 잔재 제거(누적·혼합 방지)
 
     try {
       addMessage('message', '🔄 다시 분석을 시작했어요...')
