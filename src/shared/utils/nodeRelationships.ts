@@ -203,7 +203,7 @@ export function getMembersByLabels(
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// 의미데이터 보고서 — 함수→규칙→예시 + 질문 (노드패널 전용, semanticLinkMap 소스)
+// 의미데이터 보고서 — 함수→규칙→예시 + 질문 (노드패널 전용, linkMap 에서 의미 타입만 골라 씀)
 // 백엔드 emit 구조: FUNCTION -HAS_RULE-> RULE -HAS_EXAMPLE-> EXAMPLE,
 //                  FUNCTION|RULE -HAS_QUESTION-> QUESTION.
 // ─────────────────────────────────────────────────────────────────────────
@@ -225,7 +225,7 @@ export const EMPTY_SEMANTIC_REPORT: SemanticReport = { rules: [], questions: [] 
 /**
  * 선택 노드(보통 FUNCTION)의 업무규칙·예시·질문을 의미데이터 채널에서 조회.
  * @param nodeId         대상 노드 id
- * @param semanticLinks  analyzerStore.semanticLinkMap 의 values (HAS_RULE/EXAMPLE/QUESTION)
+ * @param semanticLinks  analyzerStore.linkMap 의 values — 함수가 HAS_RULE/EXAMPLE/QUESTION 타입만 추출
  * @param nodes          analyzerStore.nodeMap (RULE/EXAMPLE/QUESTION 노드 해석용)
  */
 export function getSemanticReport(

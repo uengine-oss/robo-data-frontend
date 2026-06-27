@@ -35,6 +35,7 @@ import type {
 import { useSessionStore } from '@/shared/stores/session'
 import { antlrApi, roboApi } from '@/features/code-analysis/api'
 import { kindOf } from '@/shared/utils/nodeLabels'
+import { isNodeHidden, isLinkHidden } from '@/shared/utils/graphVisibility'
 
 // 노드 종류 = labels[0] (위치 계약 spec 033) — stereotype/EXTERNAL 라벨은 후순위.
 function extractSubLabel(labels: readonly string[]): string {
@@ -273,75 +274,29 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   restoreFromStorage()
 
   // ----- 그래프 데이터 (Map 기반 — id 로 덮어쓰기) -----
+  // 노드·링크는 neo4j 날것 그대로 **전부** 여기 저장(메타·숨김 포함). 무엇을 가릴지는 오직
+  // 표시 단계(graphData·canvasGraphData)에서 graphVisibility 정의로 판단(단일 진실원).
   const nodeMap = ref<Map<string, GraphNode>>(new Map())
   const linkMap = ref<Map<string, GraphLink>>(new Map())
-
-  /**
-   * 의미데이터 전용 링크 채널 (HAS_RULE / HAS_EXAMPLE / HAS_QUESTION).
-   * 시각 그래프(캔버스·트리·graphData)에는 절대 넣지 않고 여기에만 적재 →
-   * 노드 디테일 패널이 함수→규칙→예시·질문을 보고서로 읽는 유일한 소스.
-   * (RULE/EXAMPLE/QUESTION 노드 자체는 nodeMap 에 그대로 존재하나, 이 링크가 없으면
-   *  어느 함수 소속인지 알 수 없어 과거엔 ingest 에서 통째로 버려졌음.)
-   */
-  const semanticLinkMap = ref<Map<string, GraphLink>>(new Map())
 
   // 숨김 요소(변수·INIT_BY·REFERENCES·메타노드 등)를 전부 드러낼지 — 필터 메뉴의 "숨김 요소 표시"
   // 토글. 기본 false(기본 숨김 적용). 관계 끄고/켜기(hiddenRelTypes)와는 독립 축.
   const showHidden = ref(false)
 
-  /**
-   * 임시: 비즈니스 로직 메타 라벨은 화면에 표시하지 않음.
-   * 풀려면 이 set 을 비우고 재인제스션하면 됨.
-   */
-  // 화면에 노출하지 않는 노드 라벨 — 메타 노드(RULE/EXAMPLE/QUESTION) + 시각 노이즈 노드.
-  // GLOBAL_VARIABLE 은 양이 많고 설계 흐름과 무관해 그래프에서 숨김(데이터는 보존).
-  const HIDDEN_NODE_LABELS = new Set(['RULE', 'EXAMPLE', 'QUESTION', 'GLOBAL_VARIABLE'])
-
-  /**
-   * 화면에 노출하지 않는 관계 타입.
-   * - 메타·문서성 링크 (HAS_RULE/EXAMPLE/QUESTION) : 대응 노드 자체도 숨김.
-   * - 정렬/추적용 링크 (NEXT, BRANCH) : 호출 흐름이 아니라서 그래프를 어지럽게 함.
-   * - 코드 참조 보조 링크 (REFERENCES, INIT_BY, AFFECTS_TABLE) : 의미가 모호하고 양이 많음.
-   * 풀려면 이 set 만 비우면 됨. 데이터는 그대로 두고 표시만 차단.
-   */
-  const HIDDEN_LINK_TYPES = new Set([
-    'NEXT',
-    'REFERENCES',
-    'INIT_BY',
-    'HAS_RULE',
-    'HAS_EXAMPLE',
-    'HAS_QUESTION',
-    'AFFECTS_TABLE',
-    'BRANCH',
-  ])
-
-  /**
-   * 의미데이터 링크 — 시각 그래프엔 안 넣고 semanticLinkMap 으로 따로 적재(패널 전용).
-   * 과거엔 HIDDEN_LINK_TYPES 로 ingest 에서 버려졌으나, 노드패널 보고서를 위해 보존한다.
-   */
-  const SEMANTIC_LINK_TYPES = new Set(['HAS_RULE', 'HAS_EXAMPLE', 'HAS_QUESTION'])
-
-  function isHiddenNode(node: GraphNode): boolean {
-    return (node.labels || []).some(l => HIDDEN_NODE_LABELS.has(l))
-  }
-
   const graphData = computed<GraphData>(() => {
-    // 적재는 전부 보존(linkMap/semanticLinkMap) — 표시 필터는 여기서. showHidden 이면 기본 숨김
-    // (노드 라벨·링크 종류)을 적용하지 않고 의미링크(메타노드 연결)까지 포함해 전부 노출.
+    // showHidden 이면 기본 숨김(노드 라벨·링크 종류) 미적용 — neo4j 날것 그대로 전부 노출.
     const showAll = showHidden.value
-    const nodes = Array.from(nodeMap.value.values()).filter(n => showAll || !isHiddenNode(n))
+    const nodes = Array.from(nodeMap.value.values()).filter(n => showAll || !isNodeHidden(n))
     const visibleIds = new Set(nodes.map(n => n.id))
-    const base = showAll
-      ? [...linkMap.value.values(), ...semanticLinkMap.value.values()]
-      : Array.from(linkMap.value.values()).filter(l => !HIDDEN_LINK_TYPES.has(l.type))
-    const links = base.filter(l => visibleIds.has(l.source) && visibleIds.has(l.target))
+    const links = Array.from(linkMap.value.values()).filter(
+      l => (showAll || !isLinkHidden(l.type)) && visibleIds.has(l.source) && visibleIds.has(l.target)
+    )
     return { nodes, links }
   })
 
   function updateGraphData(nodes: Neo4jNode[], relationships: Neo4jRelationship[]): void {
     const newNodeMap = new Map(nodeMap.value)
     const newLinkMap = new Map(linkMap.value)
-    const newSemanticMap = new Map(semanticLinkMap.value)
 
     // elementId → 논리 id 매핑(이 응답 노드로). 관계 끝점(elementId)을 논리 id 로 변환.
     const elemToLogical = new Map<string, string>()
@@ -351,27 +306,19 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
       newNodeMap.set(converted.id, converted)
     }
 
-    // 노드보다 관계가 먼저 도착하는 경우 (다른 batch · 다른 phase) 에도 일단 link 는 등록.
-    // 의미데이터 링크만 semanticLinkMap 으로 분리. 그 외는 hidden 타입이어도 **전부 적재**(데이터
-    // 보존) — 숨김 표시 여부는 graphData 표시 단계에서 결정(showHidden 토글로 복원 가능).
+    // 모든 링크(메타·숨김 포함)를 그대로 적재 — 표시 필터는 graphData/canvasGraphData 단계에서.
     for (const rel of relationships) {
       const converted = convertNeo4jRelationship(rel, elemToLogical)
-      if (SEMANTIC_LINK_TYPES.has(converted.type)) {
-        newSemanticMap.set(converted.id, converted)
-        continue
-      }
       newLinkMap.set(converted.id, converted)
     }
 
     nodeMap.value = newNodeMap
     linkMap.value = newLinkMap
-    semanticLinkMap.value = newSemanticMap
   }
 
   function clearGraphData(): void {
     nodeMap.value = new Map()
     linkMap.value = new Map()
-    semanticLinkMap.value = new Map()
     nodeNameCache.clear()   // 보조 캐시도 함께 — 재분석/타프로젝트 stale 표시명 방지
   }
 
@@ -478,7 +425,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   /**
    * 스트림 단건 그래프 엣지 병합 (relationship_event). Table 끝점은 id 대신 name 으로 온다.
-   * 의미링크만 패널 채널로 분리, 그 외는 hidden 이어도 전부 적재 — 표시는 graphData(showHidden)에서.
+   * 메타·숨김 포함 모든 링크를 linkMap 에 그대로 적재 — 표시 필터는 graphData/canvasGraphData 에서.
    */
   function mergeStreamRelationship(
     relType: string,
@@ -494,13 +441,6 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
       target,
       type: relType,
       properties: props,
-    }
-    // 의미데이터 링크(HAS_RULE/EXAMPLE/QUESTION)는 패널 전용 채널로만 — 캔버스/트리/그래프 미오염.
-    if (SEMANTIC_LINK_TYPES.has(relType)) {
-      const nextSem = new Map(semanticLinkMap.value)
-      nextSem.set(link.id, link)
-      semanticLinkMap.value = nextSem
-      return
     }
     const next = new Map(linkMap.value)
     next.set(link.id, link)
@@ -1114,7 +1054,6 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     uploadedDdlFiles,
     nodeMap,
     linkMap,
-    semanticLinkMap,
     graphData,
     showHidden,
     isProcessing,

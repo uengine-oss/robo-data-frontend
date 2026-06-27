@@ -19,9 +19,9 @@ const props = defineProps<Props>()
 
 const projectStore = useAnalyzerStore()
 
-// 의미데이터(업무규칙·예시·질문) — semanticLinkMap 채널에서 함수→규칙→예시 순회.
+// 의미데이터(업무규칙·예시·질문) — linkMap 에서 함수→규칙→예시 순회(getSemanticReport 가 의미 타입만 골라 씀).
 const semantic = computed(() =>
-  getSemanticReport(props.node.id, projectStore.semanticLinkMap.values(), projectStore.nodeMap),
+  getSemanticReport(props.node.id, projectStore.linkMap.values(), projectStore.nodeMap),
 )
 const rules = computed(() =>
   semantic.value.rules

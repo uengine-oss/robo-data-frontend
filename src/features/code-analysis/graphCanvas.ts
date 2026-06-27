@@ -18,6 +18,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { isContainerNode, CALLABLE_LABELS } from '@/shared/utils/nodeClassify'
+import { isLinkHidden } from '@/shared/utils/graphVisibility'
 import type { GraphData, GraphLink, GraphNode } from '@/shared/types'
 
 /**
@@ -375,6 +376,17 @@ export const useCanvasStore = defineStore('canvas', () => {
   })
 
   /** NvlGraph 에 전달할 부분집합. 프리셋이 활성화되면 가상 그래프를 반환. */
+  // 캔버스가 따라갈 링크 — linkMap(날것 전부)에서 기본 숨김 타입을 거른다. "숨김 요소 표시"면
+  // 거르지 않고 메타·보조 링크까지 전부(neo4j 그대로). graphData 와 동일한 단일 정의(graphVisibility).
+  function visibleLinks(): GraphLink[] {
+    const showAll = projectStore.showHidden
+    const out: GraphLink[] = []
+    for (const link of projectStore.linkMap.values()) {
+      if (showAll || !isLinkHidden(link.type)) out.push(link)
+    }
+    return out
+  }
+
   const canvasGraphData = computed<GraphData>(() => {
     if (presetMode.value === 'module-interaction') {
       return buildModuleInteractionGraph()
@@ -390,7 +402,7 @@ export const useCanvasStore = defineStore('canvas', () => {
       if (ids.has(node.id)) nodes.push(node)
     }
     const links: GraphLink[] = []
-    for (const link of projectStore.linkMap.values()) {
+    for (const link of visibleLinks()) {
       if (ids.has(link.source) && ids.has(link.target)) links.push(link)
     }
     return { nodes, links }
@@ -406,7 +418,7 @@ export const useCanvasStore = defineStore('canvas', () => {
   function expandNodeOnCanvas(nodeId: string): void {
     const next = new Set(canvasNodeIds.value)
     next.add(nodeId)
-    for (const link of projectStore.linkMap.values()) {
+    for (const link of visibleLinks()) {
       if (link.source === nodeId) next.add(link.target)
       else if (link.target === nodeId) next.add(link.source)
     }
@@ -428,7 +440,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     if (!canvasNodeIds.value.has(nodeId)) return
     const ids = canvasNodeIds.value
     const next = new Set(ids)
-    for (const link of projectStore.linkMap.values()) {
+    for (const link of visibleLinks()) {
       if (link.source === nodeId && ids.has(link.target)) next.delete(link.target)
       else if (link.target === nodeId && ids.has(link.source)) next.delete(link.source)
     }
@@ -520,7 +532,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     for (const node of projectStore.nodeMap.values()) {
       if ((node.labels || []).some(l => loadedLabels.value.has(l.toUpperCase()))) ids.add(node.id)
     }
-    for (const link of projectStore.linkMap.values()) {
+    for (const link of visibleLinks()) {
       if (loadedRelTypes.value.has(link.type)) { ids.add(link.source); ids.add(link.target) }
     }
     canvasNodeIds.value = ids

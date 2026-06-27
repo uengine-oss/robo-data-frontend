@@ -72,6 +72,7 @@
 - **FR-008**: 적재(updateGraphData·mergeStreamRelationship)는 숨김 링크도 **전부 보존**(linkMap) — 표시 필터는 graphData 단계에서. (옛 적재시 drop=`isHiddenLink` 제거, 데드.) showHidden 토글로 복원 가능해짐.
 - **FR-009**: showHidden 시 graphData가 의미링크(semanticLinkMap)도 포함 — 메타노드 연결 표시.
 - **FR-010**: `보기 ▾`/`필터 ▾` 아이콘을 SVG(대칭 viewBox)로 — 이모지 baseline 편차 근본 제거(매직 px 금지).
+- **FR-011**: ★근본 통합 — 링크는 `linkMap` **한 곳**에 날것 전부 저장(semanticLinkMap 이중맵 폐기). 숨김 정의는 `shared/utils/graphVisibility.ts` **단일 모듈**(HIDDEN_NODE_LABELS·HIDDEN_LINK_TYPES·isNodeHidden·isLinkHidden) — graphData·canvasGraphData 가 공유. 표시 필터는 오직 표시 단계. showHidden 시 메타노드(RULE/EXAMPLE/QUESTION)+의미링크까지 캔버스에 연결 표시. 노드패널 규칙보고서는 linkMap 에서 의미 타입만 추출(getSemanticReport self-filter).
 
 ## Success Criteria *(mandatory)*
 - **SC-001**: 캔버스 비우기 후 노드패널 칩 active 0.
