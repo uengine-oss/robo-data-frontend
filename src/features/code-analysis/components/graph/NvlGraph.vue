@@ -749,7 +749,9 @@ function updateNodeStyles(): void {
     const color = resolveNodeColor(labels, n.properties)
     const size = getNodeSize(labels)
     if (n.color !== color || n.size !== size) {
-      updates.push({ id, color, size })
+      // 선택된 요소는 NVL 선택 오버레이가 옛 색을 덮어 새 색이 즉시 안 보임 → selected 를 함께
+      // 보내 오버레이까지 새 색으로 다시 그린다(선택 안 푼 채 즉시 반영). 비선택은 영향 0.
+      updates.push(id === props.selectedNodeId ? { id, color, size, selected: true } : { id, color, size })
       nodeMap.set(id, { ...n, color, size })
     }
   }
@@ -767,7 +769,9 @@ function updateRelationshipStyles(): void {
     const color = getRelationshipColor(type)
     const width = getRelationshipWidth(type)
     if (r.color !== color || r.width !== width) {
-      updates.push({ id, color, width })
+      // 선택된 관계는 선택 오버레이가 옛 색을 덮어 새 색이 즉시 안 보임(노드는 선택=링이라 보임).
+      // selected 를 함께 보내 오버레이까지 새 색으로 다시 그린다 — "끄고 그래프 터치" 없이 즉시 반영.
+      updates.push(id === props.selectedRelationshipId ? { id, color, width, selected: true } : { id, color, width })
       relationshipMap.set(id, { ...r, color, width })
     }
   }

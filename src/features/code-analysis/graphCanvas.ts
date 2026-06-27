@@ -18,7 +18,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { isContainerNode, CALLABLE_LABELS } from '@/shared/utils/nodeClassify'
-import { isLinkHidden } from '@/shared/utils/graphVisibility'
+import { isLinkHidden, isNodeHidden } from '@/shared/utils/graphVisibility'
 import type { GraphData, GraphLink, GraphNode } from '@/shared/types'
 
 /**
@@ -420,9 +420,18 @@ export const useCanvasStore = defineStore('canvas', () => {
   function expandNodeOnCanvas(nodeId: string): void {
     const next = new Set(canvasNodeIds.value)
     next.add(nodeId)
+    // 확장 = 1-hop 이웃 추가. visibleLinks 가 숨김 "링크"는 거르지만, 보이는 링크(HAS_MEMBER 등)로
+    // 닿는 숨김 "노드"(변수·DEFINE 등)는 그냥 따라오면 안 된다 — "숨김 모두 보기" OFF 면 제외.
+    // (캔버스 표시는 사용자가 로드한 노드 기준이라 render 단계에서 안 거르므로, 여기서 안 넣는 게 근본.)
+    const showAll = projectStore.showHidden
+    const canAdd = (id: string): boolean => {
+      if (showAll) return true
+      const n = projectStore.nodeMap.get(id)
+      return !n || !isNodeHidden(n)
+    }
     for (const link of visibleLinks()) {
-      if (link.source === nodeId) next.add(link.target)
-      else if (link.target === nodeId) next.add(link.source)
+      if (link.source === nodeId && canAdd(link.target)) next.add(link.target)
+      else if (link.target === nodeId && canAdd(link.source)) next.add(link.source)
     }
     canvasNodeIds.value = next
   }
