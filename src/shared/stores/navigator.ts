@@ -69,6 +69,10 @@ const CHILD_REL_TYPES = new Set([
   'HAS_BUSINESS_LOGIC',   // Function → BusinessLogic
 ])
 
+// 비즈니스로직 메타(규칙·예시·질문) — 평소엔 트리에서 숨김, "숨김 요소 표시" 켜면 자식으로 펼침.
+// FUNCTION-[HAS_RULE]->RULE-[HAS_EXAMPLE]->EXAMPLE, FUNCTION-[HAS_QUESTION]->QUESTION 계층.
+const META_CHILD_RELS = new Set(['HAS_RULE', 'HAS_EXAMPLE', 'HAS_QUESTION'])
+
 /**
  * 노드의 표시용 sublabel 을 결정한다.
  * 1) 부가 역할 라벨 제외한 첫 번째 = 실제 종류(antlr type, 예 [:METHOD]→'METHOD').
@@ -95,6 +99,14 @@ function pickDisplayName(node: GraphNode): string {
     const seq = p['sequence']
     const title = String(p['title'] ?? p['name'] ?? node.id)
     return seq != null ? `[${seq}] ${title}` : title
+  }
+  // 비즈니스로직 메타 — name 이 없어 본문 텍스트(statement/description/text)를 트리 라벨로(자르기).
+  const metaText = node.labels.includes('RULE') ? p['statement']
+    : node.labels.includes('EXAMPLE') ? p['description']
+    : node.labels.includes('QUESTION') ? p['text'] : undefined
+  if (metaText != null) {
+    const s = String(metaText).trim()
+    return s.length > 40 ? s.slice(0, 40) + '…' : (s || pickDisplayLabel(node.labels))
   }
   // 물리 식별자 — 이름 우선, 없으면 `타입 [라인]`(트리는 라인 표기). type 산출은 트리 고유(pickDisplayLabel).
   const name = p['name']
@@ -208,7 +220,9 @@ function buildChildIndexes(
 
   for (const link of linkMap.values()) {
     if (link.type === 'PARENT_OF') { add(link.source, link.target, 'PARENT_OF'); continue }
-    if (!CHILD_REL_TYPES.has(link.type)) continue
+    // 메타(규칙·예시·질문)는 "숨김 요소 표시" 켤 때만 자식으로 — 평소엔 트리 노이즈 방지.
+    const isChildRel = CHILD_REL_TYPES.has(link.type) || (showHidden && META_CHILD_RELS.has(link.type))
+    if (!isChildRel) continue
     // HAS_MEMBER 는 기본 루틴만 트리에(데이터 멤버는 노이즈) — 숨김 표시 켜지면 변수/상수도 포함.
     if (link.type === 'HAS_MEMBER' && !showHidden) {
       const tgt = nodeMap.get(link.target)

@@ -395,10 +395,8 @@ export const useCanvasStore = defineStore('canvas', () => {
       return buildHealthGraph()
     }
 
-    // "숨김 요소까지 모두 보기"면 캔버스도 neo4j DB 그대로 — 전체 그래프(graphData=날것 전부)를
-    // 렌더. 평소엔 사용자가 캔버스에 올린 부분집합(canvasNodeIds)만.
-    if (projectStore.showHidden) return projectStore.graphData
-
+    // 캔버스는 "숨김 요소 표시" 토글과 무관 — 항상 사용자가 올린 부분집합(canvasNodeIds)만 렌더.
+    // (토글은 네비게이터·오버뷰에 숨김 노드를 "사용 가능"하게 드러낼 뿐, 캔버스를 강제로 안 채운다.)
     const ids = canvasNodeIds.value
     if (ids.size === 0) return { nodes: [], links: [] }
     const nodes: GraphNode[] = []
