@@ -10,9 +10,9 @@
  */
 import type { GraphNode } from '@/shared/types'
 
-/** 화면 기본 숨김 노드 라벨 — 메타 노드(RULE/EXAMPLE/QUESTION) + 시각 노이즈(전역변수). */
+/** 화면 기본 숨김 노드 라벨 — 메타 노드(RULE/EXAMPLE/QUESTION) + 시각 노이즈(전역변수·매크로). */
 export const HIDDEN_NODE_LABELS: ReadonlySet<string> = new Set([
-  'RULE', 'EXAMPLE', 'QUESTION', 'GLOBAL_VARIABLE',
+  'RULE', 'EXAMPLE', 'QUESTION', 'GLOBAL_VARIABLE', 'DEFINE',
 ])
 
 /**

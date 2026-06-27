@@ -38,17 +38,17 @@
 **Acceptance Scenarios**:
 1. **Given** GLOBAL_VARIABLE 노드, **When** 캔버스/필터 렌더, **Then** 미표시(HIDDEN_NODE_LABELS). 연결 링크도 숨김.
 
-### User Story 4 - "숨김 요소 표시" 토글 (Priority: P1)
-`필터 ▾` 메뉴에 **독립 섹션**으로 "숨김 요소 표시" 토글. 켜면 기본 숨김(변수·GLOBAL_VARIABLE·INIT_BY·REFERENCES·메타노드)이 **그래프·필터 목록·네비게이터 트리 전부**에 다시 나온다. 끄면 원복.
+### User Story 4 - "숨김 요소 표시" 토글 (Priority: P1) — ★최종 동작(후속 정정 반영)
+`필터 ▾` 메뉴에 **독립 섹션**으로 "숨김 요소 표시" 토글. 켜면 기본 숨김(변수·GLOBAL_VARIABLE·DEFINE·INIT_BY·REFERENCES·메타노드 RULE/EXAMPLE/QUESTION)을 **사용 가능**하게 드러낸다 — **네비게이터 트리**(변수 + 메타노드 본문 표시)와 **오버뷰/필터 목록**에 등장. **캔버스는 토글과 무관**(사용자가 네비에서 골라 올린 부분집합 유지 — 토글이 캔버스를 강제로 안 채움). 끄면 원복.
 
-**Why this priority**: 기본은 깔끔(숨김), 필요 시 전부 보기 — 사용자 핵심 요구.
+**Why this priority**: 기본은 깔끔(숨김), 필요 시 전부 사용 가능 — 사용자 핵심 요구.
 
-**Independent Test**: 토글 ON → graphData 노드/링크 수 증가, GLOBAL_VARIABLE·INIT_BY·REFERENCES 등장, 네비 트리에 변수 등장. OFF → 원복.
+**Independent Test**: 토글 ON → graphData 노드/링크 증가(GLOBAL_VARIABLE·INIT_BY·REFERENCES·RULE/EXAMPLE/QUESTION 등장), 네비 트리에 변수+메타 등장. 캔버스 노드수 불변. OFF → 원복.
 
 **Acceptance Scenarios**:
-1. **Given** 토글 OFF(기본), **When** 그래프, **Then** 변수·INIT_BY·REFERENCES 미표시.
-2. **Given** 토글 ON, **When** 그래프/필터/네비, **Then** 숨김 요소 전부 표시.
-3. **Given** 토글과 관계 끄고/켜기(섹션 A), **Then** 서로 독립(한쪽이 다른쪽 상태 불변).
+1. **Given** 토글 OFF(기본), **When** 그래프/네비, **Then** 변수·INIT_BY·REFERENCES·메타 미표시.
+2. **Given** 토글 ON, **When** 오버뷰/네비, **Then** 숨김 요소 전부 표시(캔버스는 불변).
+3. **Given** 토글과 노드·관계 끄고/켜기, **Then** 서로 독립(한쪽이 다른쪽 상태 불변).
 
 ### User Story 5 - 보기/필터 버튼 아이콘 세로 중앙정렬 (Priority: P3)
 `보기 ▾`·`필터 ▾` 버튼의 아이콘이 글자와 세로 중앙으로 정렬된다(이모지 baseline 편차 근본 제거).
@@ -59,7 +59,7 @@
 ### Edge Cases
 - INIT_BY/REFERENCES·GLOBAL_VARIABLE·변수는 **데이터는 보존**, 표시만 차단. 토글로 복원.
 - 캔버스 비우기 후 다시 라벨 칩 클릭하면 정상 재로드(상태 깨끗).
-- 토글 ON 시 메타노드(RULE/EXAMPLE/QUESTION)는 의미링크(semanticLinkMap)까지 그래프에 합쳐 연결 표시.
+- 토글 ON 시 메타노드(RULE/EXAMPLE/QUESTION)는 **네비게이터 트리**에 본문(statement/description/text)으로 펼쳐짐(FUNCTION→RULE→EXAMPLE, FUNCTION→QUESTION 계층). 링크는 단일 `linkMap`(semanticLinkMap 이중맵 폐기) — 표시 필터만 graphData/canvasGraphData에서.
 
 ## Requirements *(mandatory)*
 - **FR-001**: `handleResetGraph`가 `clearPanelLoad()`도 호출해 loadedLabels/loadedRelTypes 해제.
@@ -70,9 +70,9 @@
 - **FR-006**: `HIDDEN_NODE_LABELS`에 GLOBAL_VARIABLE 추가 — 캔버스·필터·연결 링크에서 숨김.
 - **FR-007**: 단일 reactive 플래그 `showHidden`(analyzer store) — 그래프(graphData)·네비(isExcluded·buildChildIndexes)가 공유. `필터 ▾` 메뉴 섹션 B 토글이 제어. 관계 끄고/켜기(섹션 A)와 독립.
 - **FR-008**: 적재(updateGraphData·mergeStreamRelationship)는 숨김 링크도 **전부 보존**(linkMap) — 표시 필터는 graphData 단계에서. (옛 적재시 drop=`isHiddenLink` 제거, 데드.) showHidden 토글로 복원 가능해짐.
-- **FR-009**: showHidden 시 graphData가 의미링크(semanticLinkMap)도 포함 — 메타노드 연결 표시.
+- **FR-009**: showHidden 시 메타노드(RULE/EXAMPLE/QUESTION)는 **네비게이터 트리**에 본문으로 펼쳐짐(buildChildIndexes가 메타 child 포함, pickDisplayName이 statement/description/text 표시). **캔버스는 토글 무관**(canvasGraphData가 showHidden 분기 없이 로드 부분집합만).
 - **FR-010**: `보기 ▾`/`필터 ▾` 아이콘을 SVG(대칭 viewBox)로 — 이모지 baseline 편차 근본 제거(매직 px 금지).
-- **FR-011**: ★근본 통합 — 링크는 `linkMap` **한 곳**에 날것 전부 저장(semanticLinkMap 이중맵 폐기). 숨김 정의는 `shared/utils/graphVisibility.ts` **단일 모듈**(HIDDEN_NODE_LABELS·HIDDEN_LINK_TYPES·isNodeHidden·isLinkHidden) — graphData·canvasGraphData 가 공유. 표시 필터는 오직 표시 단계. showHidden 시 메타노드(RULE/EXAMPLE/QUESTION)+의미링크까지 캔버스에 연결 표시. 노드패널 규칙보고서는 linkMap 에서 의미 타입만 추출(getSemanticReport self-filter).
+- **FR-011**: ★근본 통합 — 링크는 `linkMap` **한 곳**에 날것 전부 저장(semanticLinkMap 이중맵 폐기). 숨김 정의는 `shared/utils/graphVisibility.ts` **단일 모듈**(HIDDEN_NODE_LABELS·HIDDEN_LINK_TYPES·isNodeHidden·isLinkHidden) — graphData·canvasGraphData 가 공유. 표시 필터는 오직 표시 단계. 노드패널 규칙보고서는 linkMap 에서 의미 타입만 추출(getSemanticReport self-filter).
 
 ## Success Criteria *(mandatory)*
 - **SC-001**: 캔버스 비우기 후 노드패널 칩 active 0.

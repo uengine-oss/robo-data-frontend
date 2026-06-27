@@ -11,7 +11,7 @@
 
 import { logger } from '@/shared/utils/logger'
 import { applyLogicalMode } from '@/shared/utils/graphDisplay'
-import { ref, computed, onMounted, onUnmounted, watch, shallowRef, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch, shallowRef, nextTick } from 'vue'
 import { NVL } from '@neo4j-nvl/base'
 import {
   ClickInteraction,
@@ -59,6 +59,8 @@ interface Props {
   colorMode?: 'label' | 'health'
   /** 숨길 관계 타입 (끄고/켜기 blacklist, spec 020). 여기 든 타입은 그리지 않는다. */
   hiddenRelTypes?: string[]
+  /** 숨길 노드 타입 (끄고/켜기 blacklist, spec 038). 이 라벨을 가진 노드·그 관계를 안 그린다. */
+  hiddenNodeTypes?: string[]
   /**
    * 캔버스 오른쪽이 패널(노드 상세/통계)에 가려지는 폭(px). fitView 가 이 영역을 빼고 프레임해
    * 우측에 놓인 클러스터가 패널 뒤로 숨지 않게 한다(spec 022). 0이면 풀폭.
@@ -121,6 +123,7 @@ const props = withDefaults(defineProps<Props>(), {
   clusterLabelOf: null,
   colorMode: 'label',
   hiddenRelTypes: () => [],
+  hiddenNodeTypes: () => [],
   rightInset: 0
 })
 
@@ -173,7 +176,7 @@ let needsFit = false   // 라이브 물리 정착(onLayoutDone) 시 1회 프레�
 const groupHulls = useGroupHulls(
   containerRef,
   nvlInstance,
-  () => props.graphData.nodes,
+  () => props.graphData.nodes.filter(matchesNodeFilter),
   () => ({ levels: props.hullLevels ?? [] }),
   // 클러스터 보기는 실엣지를 NVL force 에서 빼고 오버레이로 그린다(군집 분리 유지). 비클러스터는 NVL 이.
   () => props.clusterKeyOf ? props.graphData.links.filter(matchesRelFilter) : [],
@@ -250,6 +253,13 @@ function matchesRelFilter(link: GraphLink): boolean {
   return true
 }
 
+/** 노드 타입 필터 — 끈 라벨을 하나라도 가진 노드는 안 그린다(끝점 잃은 관계는 visibleIds 로 자동 제외). */
+function matchesNodeFilter(node: GraphNode): boolean {
+  const hidden = props.hiddenNodeTypes
+  if (hidden && hidden.length && (node.labels || []).some(l => hidden.includes(l))) return false
+  return true
+}
+
 // ============================================================================
 // 통계 (현재 캔버스 기준)
 // ============================================================================
@@ -291,6 +301,7 @@ async function initNvl(): Promise<void> {
   const rels: NvlRelationship[] = []
 
   for (const node of props.graphData.nodes) {
+    if (!matchesNodeFilter(node)) continue
     const n = toNvlNode(node, props.selectedNodeId === node.id)
     nodeMap.set(node.id, n)
     nodes.push(n)
@@ -492,8 +503,9 @@ function syncGraph(): void {
     return
   }
 
-  // 1) 현재 표시해야 할 노드 결정 (라벨 표시필터 폐지 — 캔버스에 있는 모든 노드를 표시)
-  const visibleNodes = props.graphData.nodes
+  // 1) 표시할 노드 = 캔버스 노드 중 노드필터(끄고/켜기, spec 038) 통과분. 끈 타입은 targetIds 에서
+  //    빠져 아래 제거 단계가 캔버스서 떼고, 끝점 잃은 관계도 함께 정리된다.
+  const visibleNodes = props.graphData.nodes.filter(matchesNodeFilter)
   const targetIds = new Set(visibleNodes.map(n => n.id))
 
   // 2) 제거할 노드
@@ -792,8 +804,9 @@ watch(() => props.graphData, () => {
   syncGraph()
 }, { deep: false })
 
-// 관계 숨김(blacklist)은 엣지 기준이라 노드중심 syncGraph 로 못 지움 → 재빌드.
-watch(() => props.hiddenRelTypes, () => {
+// 노드·관계 끄고/켜기(blacklist) 변경 → 재빌드(initNvl 이 matchesNode/RelFilter 적용). 엣지/노드
+// 기준 필터라 부분갱신보다 재빌드가 단순·정확(spec 020/038).
+watch([() => props.hiddenRelTypes, () => props.hiddenNodeTypes], () => {
   if (nvlInstance.value) { destroyNvl(); initNvl() }
 }, { deep: true })
 

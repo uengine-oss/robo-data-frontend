@@ -4,7 +4,7 @@
  * 그래프 및 UML 다이어그램 탭 - 개선된 플로팅 UI
  */
 
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { useCanvasStore } from '@/features/code-analysis/graphCanvas'
 import { useNavigatorStore } from '@/shared/stores/navigator'
@@ -160,26 +160,32 @@ const clusterLabelOf = computed<((key: string) => string) | null>(() => {
 const colorMode = computed<'label' | 'health'>(() => (viewMode.value === 'health' ? 'health' : 'label'))
 
 /**
- * 필터 ▾ (spec 020) — 관계 종류 끄고/켜기(blacklist). 보기모드와 직교(동시 적용).
- * 빈 집합 = 전체 표시. 종류를 끄면 그 관계만 화면에서 사라진다(데이터는 유지).
+ * 필터 ▾ (spec 020/038) — 타입 끄고/켜기(blacklist). 보기모드와 직교(동시 적용).
+ * 빈 집합 = 전체 표시. 끄면 그 타입만 렌더서 사라진다(데이터는 유지).
+ * 노드·관계 두 축이 **같은 토글 기계**를 공유 — 공통 팩토리(중복 0, spec 038).
  */
-const hiddenRelTypes = ref<string[]>([])
+function createTypeFilter() {
+  const hidden = ref<string[]>([])
+  function toggle(type: string): void {
+    const set = new Set(hidden.value)
+    if (set.has(type)) set.delete(type)
+    else set.add(type)
+    hidden.value = [...set]
+  }
+  const isShown = (type: string): boolean => !hidden.value.includes(type)
+  const count = computed(() => hidden.value.length)
+  // reactive 로 반환 — 템플릿에서 relFilter.hidden 이 ref 그대로 안 새고 배열로 언랩된다.
+  return reactive({ hidden, toggle, isShown, count })
+}
+const relFilter = createTypeFilter()    // 관계 타입 끄고/켜기
+const nodeFilter = createTypeFilter()   // 노드 타입 끄고/켜기
+/** 활성 필터 총 개수(노드+관계) — 필터 ▾ 버튼 배지. */
+const hiddenFilterCount = computed(() => relFilter.count + nodeFilter.count)
 const showFilterMenu = ref(false)
-function toggleRelTypeHidden(type: string): void {
-  const set = new Set(hiddenRelTypes.value)
-  if (set.has(type)) set.delete(type)
-  else set.add(type)
-  hiddenRelTypes.value = [...set]
-}
-function isRelTypeShown(type: string): boolean {
-  return !hiddenRelTypes.value.includes(type)
-}
-/** 활성 필터 개수(숨긴 관계 수) — 필터 ▾ 버튼 배지. */
-const hiddenRelCount = computed(() => hiddenRelTypes.value.length)
 
 /**
  * "숨김 요소 표시" — 기본 숨김(변수·INIT_BY·REFERENCES·메타노드)을 통째로 드러냄.
- * 관계 끄고/켜기(hiddenRelTypes)와 **독립 축**: 서로 상태를 안 건드린다.
+ * 노드·관계 끄고/켜기(nodeFilter·relFilter)와 **독립 축**: 서로 상태를 안 건드린다.
  * 그래프(graphData)·네비게이터(isExcluded)·필터 목록이 한 토글로 동시 반영.
  */
 function toggleShowHidden(): void {
@@ -452,6 +458,18 @@ const relTypeList = computed(() => {
   const counts = new Map<string, number>()
   for (const link of canvasGraphData.value?.links ?? []) {
     counts.set(link.type, (counts.get(link.type) ?? 0) + 1)
+  }
+  return Array.from(counts, ([type, count]) => ({ type, count }))
+})
+
+/** 필터 ▾ 노드 토글 목록 — 현재 캔버스 노드 라벨 기준(관계 목록과 동형). 멀티라벨은 각 라벨로 집계. */
+const nodeTypeList = computed(() => {
+  const counts = new Map<string, number>()
+  for (const node of canvasGraphData.value?.nodes ?? []) {
+    for (const label of node.labels ?? []) {
+      if (label === '_Placeholder') continue
+      counts.set(label, (counts.get(label) ?? 0) + 1)
+    }
   }
   return Array.from(counts, ([type, count]) => ({ type, count }))
 })
@@ -733,7 +751,8 @@ watch(hasGraph, (has, prev) => {
           :clusterKeyOf="clusterKeyOf"
           :clusterLabelOf="clusterLabelOf"
           :colorMode="colorMode"
-          :hiddenRelTypes="hiddenRelTypes"
+          :hiddenRelTypes="relFilter.hidden"
+          :hiddenNodeTypes="nodeFilter.hidden"
           :rightInset="showNodePanel ? panelWidth : 0"
           @node-select="handleNodeSelect"
           @relationship-select="handleRelationshipSelect"
@@ -834,14 +853,14 @@ watch(hasGraph, (has, prev) => {
       <div class="view-menu-wrap">
         <button
           class="view-menu-btn"
-          :class="{ active: hiddenRelCount > 0 }"
-          title="필터 — 관계 종류 끄고/켜기"
+          :class="{ active: hiddenFilterCount > 0 }"
+          title="필터 — 노드·관계 종류 끄고/켜기"
           @click="showFilterMenu = !showFilterMenu; showViewMenu = false"
         >
           <svg class="vm-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M3 4h18l-7 8v6l-4 2v-8L3 4Z"/>
           </svg>
-          <span class="vm-btn-label">필터<strong v-if="hiddenRelCount > 0"> {{ hiddenRelCount }}</strong></span>
+          <span class="vm-btn-label">필터<strong v-if="hiddenFilterCount > 0"> {{ hiddenFilterCount }}</strong></span>
           <span class="vm-caret">▾</span>
         </button>
         <Transition name="fade">
@@ -859,22 +878,39 @@ watch(hasGraph, (has, prev) => {
 
             <div class="vm-divider" />
 
-            <!-- 섹션 A: 화면 관계 끄고/켜기 (기존 — 지금 캔버스에 있는 것 중 선택) -->
+            <!-- 노드 영역: 노드 종류 끄고/켜기 — 종류 많아도 칩이 감싸져 콤팩트(spec 038) -->
+            <div class="vm-section-label">노드 끄고/켜기 <span class="vm-section-hint">현재 캔버스 기준</span></div>
+            <div v-if="nodeTypeList.length === 0" class="vm-empty-hint">
+              지금 캔버스에 그려진 노드가 없어요.<br>네비게이터에서 노드를 올리면 종류가 여기 나타납니다.
+            </div>
+            <div v-else class="vm-chips">
+              <button
+                v-for="nt in nodeTypeList"
+                :key="'n-' + nt.type"
+                class="vm-chip"
+                :class="{ off: !nodeFilter.isShown(nt.type) }"
+                :title="(nodeFilter.isShown(nt.type) ? '끄기: ' : '켜기: ') + nt.type"
+                @click="nodeFilter.toggle(nt.type)"
+              >{{ nt.type }}<span class="vm-chip-n">{{ nt.count }}</span></button>
+            </div>
+
+            <div class="vm-divider" />
+
+            <!-- 관계 영역: 관계 종류 끄고/켜기 -->
             <div class="vm-section-label">관계 끄고/켜기 <span class="vm-section-hint">현재 캔버스 기준</span></div>
-            <!-- 빈 캔버스면 토글할 관계가 없다 — 침묵 대신 사유 안내(조용한 빈 화면 금지). -->
             <div v-if="relTypeList.length === 0" class="vm-empty-hint">
               지금 캔버스에 그려진 관계가 없어요.<br>위 <b>보기</b>를 고르거나 노드를 올리면 관계 종류가 여기 나타납니다.
             </div>
-            <button
-              v-for="rt in relTypeList"
-              :key="rt.type"
-              class="view-menu-item"
-              :class="{ active: !isRelTypeShown(rt.type) }"
-              @click="toggleRelTypeHidden(rt.type)"
-            >
-              <span class="vm-icon">{{ isRelTypeShown(rt.type) ? '☑' : '☐' }}</span>
-              <span class="vm-text"><b>{{ rt.type }}</b><small>{{ rt.count }}개</small></span>
-            </button>
+            <div v-else class="vm-chips">
+              <button
+                v-for="rt in relTypeList"
+                :key="'r-' + rt.type"
+                class="vm-chip"
+                :class="{ off: !relFilter.isShown(rt.type) }"
+                :title="(relFilter.isShown(rt.type) ? '끄기: ' : '켜기: ') + rt.type"
+                @click="relFilter.toggle(rt.type)"
+              >{{ rt.type }}<span class="vm-chip-n">{{ rt.count }}</span></button>
+            </div>
           </div>
         </Transition>
       </div>
@@ -1181,9 +1217,12 @@ watch(hasGraph, (has, prev) => {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
-  min-width: 0;
+  min-width: 220px;
   width: max-content;
-  max-width: 248px;
+  max-width: 320px;
+  // 종류·관계 수가 많아도 — 칩이 감싸지고, 그래도 길면 메뉴 자체가 스크롤(화면 안 넘침).
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -1193,6 +1232,34 @@ watch(hasGraph, (has, prev) => {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg, var(--shadow-md));
   z-index: 10;
+}
+
+/* 필터 칩 — 노드/관계 종류 토글. 많아도 flex-wrap 으로 감싸져 콤팩트. 끈 것은 흐리게+취소선. */
+.vm-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+.vm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  border-radius: 11px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.12s ease, border-color 0.12s ease;
+
+  .vm-chip-n { font-size: 10px; font-weight: 500; opacity: 0.55; }
+  &:hover { border-color: var(--color-text-muted); }
+  &.off { opacity: 0.4; text-decoration: line-through; }
 }
 
 .view-menu-item {
