@@ -1,5 +1,5 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-specs/033-scan-tool-event-console/plan.md
+specs/034-graph-style-live-apply/plan.md
 <!-- SPECKIT END -->

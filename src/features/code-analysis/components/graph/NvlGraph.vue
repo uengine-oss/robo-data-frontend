@@ -22,6 +22,7 @@ import {
 import type { GraphData, GraphNode, GraphLink, NvlNode, NvlRelationship } from '@/shared/types'
 import type { PartialNode, PartialRelationship } from '@neo4j-nvl/base'
 import { getNodeColor, getRelationshipColor, getRelationshipWidth, getNodeSize } from '@/shared/config/graphStyles'
+import { storageVersion } from '@/shared/utils/graphStyleStorage'
 import { useNavigatorStore } from '@/shared/stores/navigator'
 import { storeToRefs } from 'pinia'
 import { useGroupHulls, type HullLevel } from './useGroupHulls'
@@ -829,6 +830,13 @@ watch(() => props.rightInset, (n, o) => {
 // 색 기준(라벨↔건강) 전환 시 이미 그려진 노드 색을 즉시 갱신
 watch(() => props.colorMode, () => {
   updateNodeStyles()
+})
+
+// 사용자 스타일(색/크기/두께) 변경(GraphStylePanel → graphStyleStorage) → 이미 그려진 노드·관계의
+// 색·크기만 부분 갱신(updateElementsInGraph, 위치·레이아웃 보존). storageVersion 구독이 끊겨
+// 캔버스에 반영 안 되던 회귀 복원(spec 034). 함수는 색만 바뀐 요소만 갱신(불변시 no-op).
+watch(storageVersion, () => {
+  updateAllStyles()
 })
 
 watch(showLogicalNames, () => {
