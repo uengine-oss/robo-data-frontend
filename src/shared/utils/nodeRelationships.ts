@@ -19,6 +19,7 @@
  */
 
 import type { GraphLink, GraphNode } from '@/shared/types'
+import { HIDDEN_LINK_TYPES } from '@/shared/utils/graphVisibility'
 
 // ─────────────────────────────────────────────────────────────────────────
 // 의미 그룹 정의 — 백엔드 `report.py` 의 ENTITY_*_REL_TYPES 와 일치
@@ -65,17 +66,13 @@ export const UML_RELS: ReadonlySet<string> = new Set([
 ])
 
 /**
- * UI 에서 제외할 관계 타입.
- * - 트리/그룹화 내부용 (PARENT_OF, BELONGS_TO*)
- * - 정렬·추적용으로 그래프를 어지럽게 만드는 흐름 메타 (NEXT, BRANCH)
- * - 메타 문서/규칙성 (HAS_RULE/EXAMPLE/QUESTION) — 대응 노드도 숨김.
- * - 의미가 모호하거나 양이 많아 시각화 노이즈인 보조 링크 (REFERENCES, INIT_BY, AFFECTS_TABLE)
+ * 노드패널 "연결" 목록에서 제외할 관계 타입 =
+ *   그래프 기본 숨김(HIDDEN_LINK_TYPES, 단일출처) + 트리/그룹 구조용(PARENT_OF, BELONGS_TO).
+ * 숨김 링크 정의가 늘면 자동 반영(손복붙 드리프트 제거).
  */
 export const EXCLUDED_RELS: ReadonlySet<string> = new Set([
+  ...HIDDEN_LINK_TYPES,
   'PARENT_OF', 'BELONGS_TO',
-  'NEXT', 'BRANCH',
-  'REFERENCES', 'INIT_BY', 'AFFECTS_TABLE',
-  'HAS_RULE', 'HAS_EXAMPLE', 'HAS_QUESTION',
 ])
 
 // ─────────────────────────────────────────────────────────────────────────

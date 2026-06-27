@@ -27,11 +27,6 @@ export const HIDDEN_LINK_TYPES: ReadonlySet<string> = new Set([
   'AFFECTS_TABLE', 'BRANCH',
 ])
 
-/** 의미데이터 링크 — 노드패널 보고서(getSemanticReport)가 골라 쓴다. HIDDEN_LINK_TYPES 의 부분집합. */
-export const SEMANTIC_LINK_TYPES: ReadonlySet<string> = new Set([
-  'HAS_RULE', 'HAS_EXAMPLE', 'HAS_QUESTION',
-])
-
 export function isNodeHidden(node: GraphNode): boolean {
   return (node.labels || []).some(l => HIDDEN_NODE_LABELS.has(l))
 }
