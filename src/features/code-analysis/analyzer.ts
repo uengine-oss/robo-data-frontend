@@ -285,22 +285,29 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
    */
   const semanticLinkMap = ref<Map<string, GraphLink>>(new Map())
 
+  // 숨김 요소(변수·INIT_BY·REFERENCES·메타노드 등)를 전부 드러낼지 — 필터 메뉴의 "숨김 요소 표시"
+  // 토글. 기본 false(기본 숨김 적용). 관계 끄고/켜기(hiddenRelTypes)와는 독립 축.
+  const showHidden = ref(false)
+
   /**
    * 임시: 비즈니스 로직 메타 라벨은 화면에 표시하지 않음.
    * 풀려면 이 set 을 비우고 재인제스션하면 됨.
    */
-  const HIDDEN_NODE_LABELS = new Set(['RULE', 'EXAMPLE', 'QUESTION'])
+  // 화면에 노출하지 않는 노드 라벨 — 메타 노드(RULE/EXAMPLE/QUESTION) + 시각 노이즈 노드.
+  // GLOBAL_VARIABLE 은 양이 많고 설계 흐름과 무관해 그래프에서 숨김(데이터는 보존).
+  const HIDDEN_NODE_LABELS = new Set(['RULE', 'EXAMPLE', 'QUESTION', 'GLOBAL_VARIABLE'])
 
   /**
    * 화면에 노출하지 않는 관계 타입.
    * - 메타·문서성 링크 (HAS_RULE/EXAMPLE/QUESTION) : 대응 노드 자체도 숨김.
    * - 정렬/추적용 링크 (NEXT, BRANCH) : 호출 흐름이 아니라서 그래프를 어지럽게 함.
-   * - 코드 참조 보조 링크 (REFERENCES, AFFECTS_TABLE) : 의미가 모호하고 양이 많음.
+   * - 코드 참조 보조 링크 (REFERENCES, INIT_BY, AFFECTS_TABLE) : 의미가 모호하고 양이 많음.
    * 풀려면 이 set 만 비우면 됨. 데이터는 그대로 두고 표시만 차단.
    */
   const HIDDEN_LINK_TYPES = new Set([
     'NEXT',
     'REFERENCES',
+    'INIT_BY',
     'HAS_RULE',
     'HAS_EXAMPLE',
     'HAS_QUESTION',
@@ -318,21 +325,16 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     return (node.labels || []).some(l => HIDDEN_NODE_LABELS.has(l))
   }
 
-  function isHiddenLink(link: GraphLink, nodes: Map<string, GraphNode>): boolean {
-    if (HIDDEN_LINK_TYPES.has(link.type)) return true
-    const src = nodes.get(link.source)
-    if (src && isHiddenNode(src)) return true
-    const tgt = nodes.get(link.target)
-    if (tgt && isHiddenNode(tgt)) return true
-    return false
-  }
-
   const graphData = computed<GraphData>(() => {
-    const nodes = Array.from(nodeMap.value.values()).filter(n => !isHiddenNode(n))
+    // 적재는 전부 보존(linkMap/semanticLinkMap) — 표시 필터는 여기서. showHidden 이면 기본 숨김
+    // (노드 라벨·링크 종류)을 적용하지 않고 의미링크(메타노드 연결)까지 포함해 전부 노출.
+    const showAll = showHidden.value
+    const nodes = Array.from(nodeMap.value.values()).filter(n => showAll || !isHiddenNode(n))
     const visibleIds = new Set(nodes.map(n => n.id))
-    const links = Array.from(linkMap.value.values()).filter(
-      l => !HIDDEN_LINK_TYPES.has(l.type) && visibleIds.has(l.source) && visibleIds.has(l.target)
-    )
+    const base = showAll
+      ? [...linkMap.value.values(), ...semanticLinkMap.value.values()]
+      : Array.from(linkMap.value.values()).filter(l => !HIDDEN_LINK_TYPES.has(l.type))
+    const links = base.filter(l => visibleIds.has(l.source) && visibleIds.has(l.target))
     return { nodes, links }
   })
 
@@ -349,16 +351,15 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
       newNodeMap.set(converted.id, converted)
     }
 
-    // 노드보다 관계가 먼저 도착하는 경우 (다른 batch · 다른 phase) 에도
-    // 일단 link 는 등록. 노드는 이후 batch 에서 들어오면 자동으로 연결됨.
-    // 의미데이터 링크는 semanticLinkMap 으로 분리, hidden 타입/끝점은 적재 안 함.
+    // 노드보다 관계가 먼저 도착하는 경우 (다른 batch · 다른 phase) 에도 일단 link 는 등록.
+    // 의미데이터 링크만 semanticLinkMap 으로 분리. 그 외는 hidden 타입이어도 **전부 적재**(데이터
+    // 보존) — 숨김 표시 여부는 graphData 표시 단계에서 결정(showHidden 토글로 복원 가능).
     for (const rel of relationships) {
       const converted = convertNeo4jRelationship(rel, elemToLogical)
       if (SEMANTIC_LINK_TYPES.has(converted.type)) {
         newSemanticMap.set(converted.id, converted)
         continue
       }
-      if (isHiddenLink(converted, newNodeMap)) continue
       newLinkMap.set(converted.id, converted)
     }
 
@@ -477,7 +478,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   /**
    * 스트림 단건 그래프 엣지 병합 (relationship_event). Table 끝점은 id 대신 name 으로 온다.
-   * hidden 타입/끝점이면 적재하지 않는다(graphData 표시 정책과 동일).
+   * 의미링크만 패널 채널로 분리, 그 외는 hidden 이어도 전부 적재 — 표시는 graphData(showHidden)에서.
    */
   function mergeStreamRelationship(
     relType: string,
@@ -501,7 +502,6 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
       semanticLinkMap.value = nextSem
       return
     }
-    if (isHiddenLink(link, nodeMap.value)) return
     const next = new Map(linkMap.value)
     next.set(link.id, link)
     linkMap.value = next
@@ -1116,6 +1116,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     linkMap,
     semanticLinkMap,
     graphData,
+    showHidden,
     isProcessing,
     currentStep,
     PHASES,

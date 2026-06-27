@@ -114,6 +114,8 @@ function blSequenceKey(node: GraphNode): [number, ...number[]] {
 }
 
 function isExcluded(node: GraphNode): boolean {
+  // "숨김 요소 표시"(필터 메뉴) 켜지면 변수류도 트리에 노출 — 그래프/필터와 동일 토글.
+  if (useAnalyzerStore().showHidden) return false
   return node.labels.some(l => EXCLUDED_LABELS.has(l))
 }
 
@@ -186,6 +188,8 @@ function buildChildIndexes(
   const childIndex = new Map<string, string[]>()
   const relIndex = new Map<string, Map<string, string>>()
   const FLAT_CONTAINER_RELS = new Set(['HAS_MEMBER', 'HAS_METHOD'])
+  // "숨김 요소 표시" 켜지면 데이터 멤버(변수/상수)도 트리에 — 기본은 루틴만(노이즈 방지).
+  const showHidden = useAnalyzerStore().showHidden
 
   // 1) PARENT_OF 부모를 가진 노드(=DBMS 구문) 집합 — 평면 컨테이너 자식에서 제외 대상.
   const hasParent = new Set<string>()
@@ -205,8 +209,8 @@ function buildChildIndexes(
   for (const link of linkMap.values()) {
     if (link.type === 'PARENT_OF') { add(link.source, link.target, 'PARENT_OF'); continue }
     if (!CHILD_REL_TYPES.has(link.type)) continue
-    // HAS_MEMBER 는 루틴만 트리에 — 데이터 멤버(변수/상수)는 카드에서 표시(트리 노이즈 방지).
-    if (link.type === 'HAS_MEMBER') {
+    // HAS_MEMBER 는 기본 루틴만 트리에(데이터 멤버는 노이즈) — 숨김 표시 켜지면 변수/상수도 포함.
+    if (link.type === 'HAS_MEMBER' && !showHidden) {
       const tgt = nodeMap.get(link.target)
       if (!tgt || !tgt.labels.some(l => ROUTINE_LABELS.has(l))) continue
     }

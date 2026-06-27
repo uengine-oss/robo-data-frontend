@@ -483,12 +483,12 @@ function getNodeSubInfo(node: GraphNode): string {
               검색 결과가 없습니다
             </div>
           </div>
-          <!-- 캔버스 비우기 버튼 (캔버스에 노드 있을 때만 표시. 필터는 건드리지 않음) -->
+          <!-- 캔버스 비우기 버튼 (캔버스에 노드 있을 때만 표시. 선택·활성 필터도 함께 해제) -->
           <button
             v-if="hasGraph"
             class="reset-graph-btn"
             @click="emit('reset-graph')"
-            title="캔버스의 노드만 비웁니다 (필터는 유지)"
+            title="캔버스를 비우고 선택·활성 필터를 모두 해제합니다"
           >
             🔄 캔버스 비우기
           </button>

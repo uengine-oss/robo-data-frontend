@@ -26,6 +26,7 @@ const canvasStore = useCanvasStore()
 const navigatorStore = useNavigatorStore()
 const {
   graphData,
+  showHidden,
   isProcessing,
   currentStep,
   consoleMessages,
@@ -175,6 +176,15 @@ function isRelTypeShown(type: string): boolean {
 }
 /** 활성 필터 개수(숨긴 관계 수) — 필터 ▾ 버튼 배지. */
 const hiddenRelCount = computed(() => hiddenRelTypes.value.length)
+
+/**
+ * "숨김 요소 표시" — 기본 숨김(변수·INIT_BY·REFERENCES·메타노드)을 통째로 드러냄.
+ * 관계 끄고/켜기(hiddenRelTypes)와 **독립 축**: 서로 상태를 안 건드린다.
+ * 그래프(graphData)·네비게이터(isExcluded)·필터 목록이 한 토글로 동시 반영.
+ */
+function toggleShowHidden(): void {
+  showHidden.value = !showHidden.value
+}
 
 /**
  * 보기 ▾ 드롭다운 (spec 018) — 보기 모드(모듈간/영역/건강)를 상단 일렬 버튼 대신 한 곳에서 고른다.
@@ -551,12 +561,13 @@ function handleClearFilters(): void {
 }
 
 /**
- * 캔버스 비우기 — 표시된 노드만 제거. 필터는 유지.
- * (필터 해제는 별도 동작: '*' 뱃지 또는 0건 오버레이의 '필터 해제' 버튼)
+ * 캔버스 비우기 — 표시된 노드 제거 + 선택/활성 필터(칩 active) 모두 해제.
+ * 캔버스가 비면 "로드됨" 표시도 남으면 안 되므로 loadedLabels/loadedRelTypes 도 함께 비운다.
  */
 function handleResetGraph(): void {
   selectedNode.value = null
   selectedRelationship.value = null
+  canvasStore.clearPanelLoad()
   canvasStore.clearCanvas()
 }
 
@@ -786,7 +797,9 @@ watch(hasGraph, (has, prev) => {
           title="보기 — 그래프를 보는 방식 (하나만 선택)"
           @click="showViewMenu = !showViewMenu; showFilterMenu = false"
         >
-          <span class="vm-eye">👁</span>
+          <svg class="vm-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>
+          </svg>
           <span class="vm-btn-label">보기: <strong>{{ activeViewLabel }}</strong></span>
           <span class="vm-caret">▾</span>
         </button>
@@ -825,12 +838,28 @@ watch(hasGraph, (has, prev) => {
           title="필터 — 관계 종류 끄고/켜기"
           @click="showFilterMenu = !showFilterMenu; showViewMenu = false"
         >
-          <span class="vm-eye">⛛</span>
+          <svg class="vm-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 4h18l-7 8v6l-4 2v-8L3 4Z"/>
+          </svg>
           <span class="vm-btn-label">필터<strong v-if="hiddenRelCount > 0"> {{ hiddenRelCount }}</strong></span>
           <span class="vm-caret">▾</span>
         </button>
         <Transition name="fade">
           <div v-if="showFilterMenu" class="view-menu-pop">
+            <!-- 섹션 B: 숨김 요소 표시 (기본 숨김 해제 — 관계 끄고/켜기와 독립 축) -->
+            <div class="vm-section-label">숨김 요소 <span class="vm-section-hint">기본 숨김 해제</span></div>
+            <button
+              class="view-menu-item"
+              :class="{ active: showHidden }"
+              @click="toggleShowHidden"
+            >
+              <span class="vm-icon">{{ showHidden ? '☑' : '☐' }}</span>
+              <span class="vm-text"><b>모든 숨김 요소 표시</b><small>변수·INIT_BY·REFERENCES·메타노드</small></span>
+            </button>
+
+            <div class="vm-divider" />
+
+            <!-- 섹션 A: 화면 관계 끄고/켜기 (기존 — 지금 캔버스에 있는 것 중 선택) -->
             <div class="vm-section-label">관계 끄고/켜기 <span class="vm-section-hint">현재 캔버스 기준</span></div>
             <!-- 빈 캔버스면 토글할 관계가 없다 — 침묵 대신 사유 안내(조용한 빈 화면 금지). -->
             <div v-if="relTypeList.length === 0" class="vm-empty-hint">
@@ -1138,7 +1167,8 @@ watch(hasGraph, (has, prev) => {
 
   // 이모지/라벨/캐럿을 각각 flex item 으로 만들어 중앙선에 정렬(익명 텍스트노드의
   // 들쭉날쭉한 baseline 대신 명시적 inline-flex item 으로 통일).
-  .vm-eye { display: inline-flex; align-items: center; font-size: 13px; line-height: 1; }
+  // SVG 아이콘 — viewBox 대칭이라 align-items:center 로 글자 중앙선에 정확히 정렬(이모지 baseline 편차 제거).
+  .vm-eye { display: inline-flex; align-items: center; width: 14px; height: 14px; }
   .vm-btn-label { display: inline-flex; align-items: center; line-height: 1; }
   strong { font-weight: 700; }
   .vm-caret { display: inline-flex; align-items: center; font-size: 10px; line-height: 1; opacity: 0.7; }
