@@ -395,6 +395,10 @@ export const useCanvasStore = defineStore('canvas', () => {
       return buildHealthGraph()
     }
 
+    // "숨김 요소까지 모두 보기"면 캔버스도 neo4j DB 그대로 — 전체 그래프(graphData=날것 전부)를
+    // 렌더. 평소엔 사용자가 캔버스에 올린 부분집합(canvasNodeIds)만.
+    if (projectStore.showHidden) return projectStore.graphData
+
     const ids = canvasNodeIds.value
     if (ids.size === 0) return { nodes: [], links: [] }
     const nodes: GraphNode[] = []
