@@ -32,15 +32,15 @@ export function isStubMarker(label: string): boolean {
 /**
  * 색을 칠할 기준 라벨 — "활성 렌즈"(spec 040). 노드의 역할(labels[1:]) 중 지금 isolate 된 게
  * 있으면 그 역할로 색칠(역할 칩과 일치), 없으면 종류(labels[0]). 역할 우선.
- * @param isolatedUpper 현재 isolate 된 라벨 집합(대문자) — loadedLabels.
+ * @param isolated 현재 isolate 된 라벨 집합 — loadedLabels(라벨 원본 케이스).
  */
 export function colorLabelOf(
   labels: readonly string[] | undefined,
-  isolatedUpper?: ReadonlySet<string>,
+  isolated?: ReadonlySet<string>,
 ): string {
-  if (isolatedUpper && isolatedUpper.size) {
+  if (isolated && isolated.size) {
     for (const role of rolesOf(labels)) {
-      if (isolatedUpper.has(role.toUpperCase())) return role
+      if (isolated.has(role)) return role
     }
   }
   return kindOf(labels)

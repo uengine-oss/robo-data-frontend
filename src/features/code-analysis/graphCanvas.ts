@@ -532,7 +532,7 @@ export const useCanvasStore = defineStore('canvas', () => {
   function rebuildPanelLoad(): void {
     const ids = new Set<string>()
     for (const node of projectStore.nodeMap.values()) {
-      if ((node.labels || []).some(l => loadedLabels.value.has(l.toUpperCase()))) ids.add(node.id)
+      if ((node.labels || []).some(l => loadedLabels.value.has(l))) ids.add(node.id)
     }
     for (const link of visibleLinks()) {
       if (loadedRelTypes.value.has(link.type)) { ids.add(link.source); ids.add(link.target) }
@@ -541,9 +541,8 @@ export const useCanvasStore = defineStore('canvas', () => {
   }
   function toggleLabelLoad(label: string): void {
     presetMode.value = null
-    const up = label.toUpperCase()
     const s = new Set(loadedLabels.value)
-    s.has(up) ? s.delete(up) : s.add(up)
+    s.has(label) ? s.delete(label) : s.add(label)
     loadedLabels.value = s
     rebuildPanelLoad()
   }

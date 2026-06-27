@@ -62,7 +62,7 @@ interface Props {
   hiddenRelTypes?: string[]
   /** 숨길 노드 타입 (끄고/켜기 blacklist, spec 038). 이 라벨을 가진 노드·그 관계를 안 그린다. */
   hiddenNodeTypes?: string[]
-  /** 지금 isolate 된 라벨(대문자, loadedLabels). 역할이 isolate되면 그 노드를 역할색으로(spec 040). */
+  /** 지금 isolate 된 라벨(loadedLabels, 라벨 원본 케이스). 역할이 isolate되면 그 노드를 역할색으로(spec 040). */
   isolatedLabels?: string[]
   /**
    * 캔버스 오른쪽이 패널(노드 상세/통계)에 가려지는 폭(px). fitView 가 이 영역을 빼고 프레임해
