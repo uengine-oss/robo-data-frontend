@@ -213,8 +213,8 @@ export type AnalyzeEventType =
   | 'node_event'          // 그래프 노드 (op:merge)
   | 'relationship_event'  // 그래프 엣지 (op:merge)
   | 'processing_event'    // step 안 처리 단위 진행 (코드노드/모듈/테이블) — 콘솔 라이브감
-// 백엔드가 더 보내지만(tool_event·todo_update) 프론트 미렌더.
-// stream_end 는 스트림 종료로 대체되어 불필요.
+  | 'tool_event'          // LLM 에이전트(스캔 등) 도구 활동 — 스캔 단계 콘솔 라이브감 (spec 033)
+// 백엔드가 더 보내지만(todo_update) 프론트 미렌더. stream_end 는 스트림 종료로 대체되어 불필요.
 
 /** relationship_event 의 끝점. Table 끝점은 id 대신 name 으로 온다. */
 export interface AnalyzeGraphRef {
@@ -229,9 +229,15 @@ export interface AnalyzeEvent {
   type: AnalyzeEventType
   content?: string                              // message·error·detected(JSON 문자열)
   // phase_event — 백엔드 실제 wire(executor.py·pause_controller.py): event + node(완료 step) + run_id.
+  // tool_event 는 같은 event 필드에 tool_start|tool_end|tool_error 를 싣는다(spec 033).
   event?: 'start' | 'node_done' | 'stopped' | 'complete' | 'paused' | 'resumed'
+        | 'tool_start' | 'tool_end' | 'tool_error'
   node?: string                                 // node_done 시 방금 완료된 step 함수명
   run_id?: string
+  // tool_event — LLM 에이전트 도구 활동(스캔 등). message=친절 문구, agent=에이전트명.
+  agent?: string
+  tool?: string
+  message?: string
   // node_event
   op?: 'merge'
   label?: string

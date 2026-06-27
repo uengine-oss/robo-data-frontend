@@ -638,6 +638,16 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   }
 
   /**
+   * tool_event → LLM 에이전트(특히 코드베이스 스캔)의 도구 활동을 콘솔에 라이브로 (spec 033).
+   * 스캔 단계는 per-item(processing_event)이 없어 콘솔이 비었었음 — 에이전트가 보내는 친절 문구
+   * (예: "… 디렉토리 보는 중", "… 패턴 검색 중")를 시작 시점에만 표시(결과/종료는 생략, 가독성).
+   */
+  function logToolEvent(event: AnalyzeEvent): void {
+    if (event.event !== 'tool_start' || !event.message) return
+    addMessage('message', `🔎 ${event.message}`)
+  }
+
+  /**
    * phase_event(analyzer 진행) → 진행 상태 refs 갱신.
    * 백엔드 wire 는 `event`(start/node_done/stopped/complete/paused/resumed) + 완료 step `node` 다.
    * node_done 한 건 = leaf 완료 → 그 leaf 의 단계로 currentPhaseIndex 를 올리고(7단계 파생),
@@ -796,7 +806,8 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
           case 'message':
           case 'error':
           case 'warning': logToConsole(event); break
-          // system_log·tool_event·todo_update 등 미렌더 타입은 무시
+          case 'tool_event': logToolEvent(event); break
+          // system_log·todo_update 등 미렌더 타입은 무시
         }
       }
     )
