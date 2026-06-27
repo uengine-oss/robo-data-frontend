@@ -464,8 +464,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
    * 스트림 단건 그래프 노드 병합 (node_event). nodeMap 갱신 + 이벤트 피드 추가.
    * 백엔드가 함수 단위로 node_event 를 누적 emit → 라이브 렌더.
    */
-  function mergeStreamNode(label: string, id: string, props: Record<string, unknown>): void {
-    const labels = label ? [label] : []
+  function mergeStreamNode(labels: string[], id: string, props: Record<string, unknown>): void {
     const node: GraphNode = { id, labels, properties: props }
     const next = new Map(nodeMap.value)
     next.set(id, node)
@@ -765,7 +764,9 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   /** node_event/relationship_event(라이브 그래프) → 그래프 병합. */
   function applyGraphEvent(event: AnalyzeEvent): void {
     if (event.type === 'node_event' && event.id) {
-      mergeStreamNode(event.label ?? '', event.id, event.props ?? {})
+      // labels(타입+stereotype) 우선 — 없으면 단일 label 폴백(구 백엔드 호환, spec 036).
+      const labels = event.labels?.length ? event.labels : (event.label ? [event.label] : [])
+      mergeStreamNode(labels, event.id, event.props ?? {})
     } else if (event.type === 'relationship_event' && event.from?.id && event.to && event.rel_type) {
       mergeStreamRelationship(
         event.rel_type,

@@ -240,7 +240,8 @@ export interface AnalyzeEvent {
   message?: string
   // node_event
   op?: 'merge'
-  label?: string
+  label?: string                                // 단일 종류 라벨(labels[0], back-compat)
+  labels?: string[]                             // 전체 라벨(타입+stereotype) — 역할 라이브(spec 034/036)
   id?: string
   props?: Record<string, unknown>
   // relationship_event
