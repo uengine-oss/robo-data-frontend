@@ -7,6 +7,7 @@
  */
 
 import type { GraphNode } from '@/shared/types'
+import { rolesOf } from '@/shared/utils/nodeLabels'
 
 export interface IdentityRow {
   /** 행 라벨(예: '논리명', '경로') */
@@ -15,17 +16,39 @@ export interface IdentityRow {
   v: string
 }
 
-// stereotype(설계 분류) 영문 → 한글 곁들임. 매핑 없으면 원문 그대로.
+// stereotype(역할) 영문 → 한글 곁들임. 매핑 없으면 원문 그대로.
 const STEREOTYPE_KO: Record<string, string> = {
-  Aggregation: '집계',
+  ApplicationService: '응용 서비스',
+  DomainService: '도메인 서비스',
+  Repository: '저장소',
+  Factory: '팩토리',
+  Command: '명령',
+  Query: '조회',
+  Validator: '검증',
+  Translator: '변환',
+  Adapter: '어댑터',
+  Strategy: '전략',
+  EventHandler: '이벤트 처리',
+  Scheduler: '스케줄러',
+  Helper: '보조',
+  Controller: '컨트롤러',
+  Initializer: '초기화',
+  Service: '서비스',
+  DataMutator: '데이터 변경',
+  DataQuery: '데이터 조회',
   BatchProcessor: '배치 처리',
   MetadataLookup: '메타 조회',
-  Validator: '검증',
-  Transformer: '변환',
-  Calculator: '계산',
-  Loader: '적재',
-  Reader: '조회',
-  Writer: '기록',
+  EventTrigger: '이벤트 트리거',
+  Aggregator: '집계',
+  ReportGenerator: '리포트 생성',
+  DataMigrator: '데이터 이관',
+  CursorLooper: '커서 순회',
+  PackageInitializer: '패키지 초기화',
+}
+
+/** 역할(stereotype) 라벨 → 한글 곁들임 표시. */
+function roleDisplay(role: string): string {
+  return STEREOTYPE_KO[role] ? `${STEREOTYPE_KO[role]} (${role})` : role
 }
 
 /**
@@ -60,10 +83,10 @@ export function buildIdentityRows(node: GraphNode): IdentityRow[] {
   push('경로', relativeSourcePath(p.file_path))
   const sl = Number(p.start_line), el = Number(p.end_line)
   if (sl || el) push('라인', sl === el ? `${sl}` : `${sl} ~ ${el}`)
-  if (p.stereotype) {
-    const st = String(p.stereotype)
-    push('분류', STEREOTYPE_KO[st] ? `${STEREOTYPE_KO[st]} (${st})` : st)
-  }
+  // 역할(stereotype) = labels[1:] (위치 계약 spec 033, EXTERNAL stub 제외). 속성 p.stereotype 폴백.
+  const roles = rolesOf(node.labels)
+  if (roles.length) push('역할', roles.map(roleDisplay).join(', '))
+  else if (p.stereotype) push('역할', roleDisplay(String(p.stereotype)))
 
   // ── 루틴(함수/프로시저/트리거) ───────────────────────
   if (has('FUNCTION', 'PROCEDURE', 'TRIGGER')) {

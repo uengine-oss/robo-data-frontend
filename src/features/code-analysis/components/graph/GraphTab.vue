@@ -17,6 +17,7 @@ import type { GraphNode, GraphLink } from '@/shared/types'
 import { useResize } from '@/shared/composables/useResize'
 import { useDrag } from '@/shared/composables/useDrag'
 import { getNodeColor, getRelationshipColor } from '@/shared/config/graphStyles'
+import { isStubMarker } from '@/shared/utils/nodeLabels'
 import { storageVersion } from '@/shared/utils/graphStyleStorage'
 import { CALLABLE_LABELS } from '@/shared/utils/nodeClassify'
 
@@ -400,13 +401,21 @@ const graphStats = computed(() => ({
  */
 const overallNodeStats = computed(() => {
   void storageVersion.value
-  const stats = new Map<string, { count: number; color: string }>()
+  // 종류 = 어떤 노드든 labels[0] 로 등장한 라벨(+EXTERNAL stub 마커). 그 외 = 역할(stereotype).
+  // 위치 파생이라 하드코딩 역할집합 0(spec 035). 라벨별 group 태그를 붙여 필터가 섹션 분리.
+  const kindLabels = new Set<string>()
+  for (const node of graphData.value?.nodes ?? []) {
+    const first = node.labels?.[0]
+    if (first && first !== '_Placeholder') kindLabels.add(first)
+  }
+  const stats = new Map<string, { count: number; color: string; group: 'kind' | 'role' }>()
   for (const node of graphData.value?.nodes ?? []) {
     for (const label of node.labels || ['Unknown']) {
       if (label === '_Placeholder') continue
       const existing = stats.get(label)
-      if (existing) existing.count++
-      else stats.set(label, { count: 1, color: getNodeColor([label]) })
+      if (existing) { existing.count++; continue }
+      const group = kindLabels.has(label) || isStubMarker(label) ? 'kind' : 'role'
+      stats.set(label, { count: 1, color: getNodeColor([label]), group })
     }
   }
   return stats

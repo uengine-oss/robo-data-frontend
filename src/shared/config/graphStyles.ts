@@ -80,14 +80,7 @@ export const NODE_SIZES: Record<string, number> = {
 // ============================================================================
 
 import { getNodeStyle, getRelationshipStyle } from '@/shared/utils/graphStyleStorage'
-
-/**
- * 노드 라벨에 따른 색상 반환
- * 사용자 설정 > Table 우선 > 라벨 매칭 > 기본값 순서로 반환
- */
-// 역할 라벨 (Primary) — 노드 색의 기준이 되는 큰 카테고리.
-// 같은 역할 (FUNCTION 등) 이면 stereotype/서브라벨 무관하게 동일 색 — 사용자 가독성 우선.
-const PRIMARY_LABELS = new Set(['FILE', 'CLASS', 'INTERFACE', 'MODULE', 'FUNCTION', 'TABLE', 'VARIABLE', 'CONSTANT', 'FIELD'])
+import { kindOf } from '@/shared/utils/nodeLabels'
 
 /**
  * 라벨별 결정적 distinct 색 (spec 018) — golden-angle(137.508°) hue 분산으로
@@ -126,16 +119,13 @@ function hslToHex(h: number, s: number, l: number): string {
 }
 
 export function getNodeColor(labels: string[]): string {
-  // 색은 노드의 대표 타입 기준 — Primary(역할) 라벨을 앞으로 정렬해 그걸 쓴다.
-  const sorted = [...labels].sort((a, b) => {
-    const aIsPrimary = PRIMARY_LABELS.has(a.toUpperCase()) ? 0 : 1
-    const bIsPrimary = PRIMARY_LABELS.has(b.toUpperCase()) ? 0 : 1
-    return aIsPrimary - bIsPrimary
-  })
+  // 색 기준 = 노드의 종류(labels[0], spec 033 위치 계약). stereotype 라벨(labels[1:])은
+  // 색에 영향 없음 — "노드 1개 = 종류색 1개". 사용자가 종류/역할 어느 라벨에 색을 줬으면 그걸 우선.
+  const kind = kindOf(labels)
 
-  // 1. 사용자 커스텀 설정 우선 (그래프 스타일 패널에서 지정한 색).
+  // 1. 사용자 커스텀 설정 우선 (그래프 스타일 패널에서 지정한 색). 종류 먼저, 그다음 나머지 라벨.
   try {
-    for (const label of sorted) {
+    for (const label of [kind, ...labels]) {
       const style = getNodeStyle(label)
       if (style?.color) return style.color
       const upperStyle = getNodeStyle(label.toUpperCase())
@@ -145,8 +135,8 @@ export function getNodeColor(labels: string[]): string {
     // graphStyleStorage 없으면 기본 로직
   }
 
-  // 라벨별 고유색 — 모든 라벨이 서로 다른 색(기본값). 캔버스·노드패널 배지 동일 소스.
-  return distinctColorForLabel(sorted[0] ?? 'DEFAULT')
+  // 종류별 고유색(기본값). 캔버스·노드패널 배지 동일 소스.
+  return distinctColorForLabel(kind === 'Unknown' ? 'DEFAULT' : kind)
 }
 
 /**
@@ -182,14 +172,9 @@ export function getRelationshipWidth(type: string): number {
  * 사용자 설정 > 라벨 매칭 > 기본값 순서로 반환
  */
 export function getNodeSize(labels: string[]): number {
-  // 1. 사용자 커스텀 설정 확인 (서브라벨 우선)
+  // 1. 사용자 커스텀 설정 확인 (종류 먼저, 그다음 나머지 라벨)
   try {
-    const sorted = [...labels].sort((a, b) => {
-      const aIsPrimary = PRIMARY_LABELS.has(a.toUpperCase()) ? 0 : 1
-      const bIsPrimary = PRIMARY_LABELS.has(b.toUpperCase()) ? 0 : 1
-      return aIsPrimary - bIsPrimary
-    })
-    for (const label of sorted) {
+    for (const label of [kindOf(labels), ...labels]) {
       const style = getNodeStyle(label)
       if (style?.size) return style.size
       const upperStyle = getNodeStyle(label.toUpperCase())
@@ -199,7 +184,7 @@ export function getNodeSize(labels: string[]): number {
     // graphStyleStorage 없으면 기본 로직
   }
 
-  // 2. 명시 크기 매핑 — 라벨 = antlr type 이라 NODE_SIZES 에 정의된 종류는 그 크기 사용.
+  // 2. 명시 크기 매핑 — labels[0]=antlr type 이라 NODE_SIZES 에 정의된 종류는 그 크기 사용.
   for (const label of labels) {
     const up = label.toUpperCase()
     if (NODE_SIZES[label]) return NODE_SIZES[label]

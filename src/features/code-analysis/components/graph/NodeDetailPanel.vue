@@ -24,6 +24,8 @@ const MAX_SEARCH_RESULTS = 10
 interface Stats {
   count: number
   color: string
+  /** 'kind'=종류(labels[0]) / 'role'=역할(stereotype). 위치 파생(spec 035). */
+  group?: 'kind' | 'role'
 }
 
 interface Props {
@@ -155,11 +157,17 @@ function endpointLabel(n: GraphNode | undefined, fallbackId: string): string {
 /** 노드 통계 (개수 많은 순 정렬) */
 const sortedNodeStats = computed(() => {
   if (!props.nodeStats) return []
-  
+
   return Array.from(props.nodeStats.entries())
     .map(([label, stat]) => ({ label, ...stat }))
     .sort((a, b) => b.count - a.count)
 })
+
+/** 종류(labels[0]) 라벨 통계 — 필터 '종류' 섹션. */
+const kindNodeStats = computed(() => sortedNodeStats.value.filter(s => s.group !== 'role'))
+
+/** 역할(stereotype) 라벨 통계 — 필터 '역할' 섹션. */
+const roleNodeStats = computed(() => sortedNodeStats.value.filter(s => s.group === 'role'))
 
 /** 관계 통계 (개수 많은 순 정렬) */
 const sortedRelStats = computed(() => {
@@ -486,7 +494,7 @@ function getNodeSubInfo(node: GraphNode): string {
           </button>
         </div>
 
-        <!-- Node labels 섹션 -->
+        <!-- Node labels 섹션 — 종류(labels[0]) / 역할(stereotype) 위치기반 분리 (spec 035) -->
         <div class="stats-section">
           <div class="section-header">
             <span class="section-title">
@@ -497,9 +505,11 @@ function getNodeSubInfo(node: GraphNode): string {
             </span>
             <span
               class="help-hint"
-              title="클릭: 이것만 보기 (그 종류만 캔버스에 로드) · 우클릭: 색상 변경"
+              title="클릭: 이것만 보기 (그 라벨만 캔버스에 로드) · 우클릭: 색상 변경"
             >?</span>
           </div>
+          <!-- 종류 -->
+          <div class="label-group-title">종류</div>
           <div class="badge-container">
             <span
               class="stat-badge total"
@@ -508,7 +518,7 @@ function getNodeSubInfo(node: GraphNode): string {
               :title="hasActiveFilters() ? `모든 필터 해제 (현재 ${activeFilters.length}개 활성)` : '필터 없음'"
             >* ({{ totalNodes }})</span>
             <span
-              v-for="stat in sortedNodeStats"
+              v-for="stat in kindNodeStats"
               :key="stat.label"
               class="stat-badge clickable"
               :class="{ active: isFilterActive(stat.label), dimmed: hasActiveFilters() && !isFilterActive(stat.label) }"
@@ -519,6 +529,23 @@ function getNodeSubInfo(node: GraphNode): string {
               {{ stat.label }} ({{ stat.count }})
             </span>
           </div>
+          <!-- 역할(stereotype) — 있을 때만 -->
+          <template v-if="roleNodeStats.length">
+            <div class="label-group-title">역할</div>
+            <div class="badge-container">
+              <span
+                v-for="stat in roleNodeStats"
+                :key="stat.label"
+                class="stat-badge clickable"
+                :class="{ active: isFilterActive(stat.label), dimmed: hasActiveFilters() && !isFilterActive(stat.label) }"
+                :style="{ background: stat.color }"
+                @click="handleLabelFilter(stat.label)"
+                @contextmenu="handleNodeTypeContextMenu($event, stat.label)"
+              >
+                {{ stat.label }} ({{ stat.count }})
+              </span>
+            </div>
+          </template>
         </div>
         
         <!-- Relationship types 섹션 -->
@@ -1032,6 +1059,18 @@ function getNodeSubInfo(node: GraphNode): string {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+
+  & + .label-group-title { margin-top: 10px; }
+}
+
+/** 종류 / 역할 소제목 — 라벨 칩 그룹 구분. */
+.label-group-title {
+  margin-bottom: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
 }
 
 .stat-badge {

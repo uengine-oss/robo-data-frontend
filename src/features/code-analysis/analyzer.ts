@@ -34,20 +34,11 @@ import type {
 } from '@/shared/types'
 import { useSessionStore } from '@/shared/stores/session'
 import { antlrApi, roboApi } from '@/features/code-analysis/api'
+import { kindOf } from '@/shared/utils/nodeLabels'
 
-// ============================================================================
-// 라벨 분류 — 멀티라벨에서 sub-label 우선 (역할 라벨은 후순위)
-// ============================================================================
-
-// 부가 역할 라벨(외부 stub + stereotype) — 이걸 제외한 첫 라벨이 실제 종류(antlr type).
-const PRIMARY_LABELS = new Set([
-  'INTERNAL', 'EXTERNAL',
-  'Endpoint', 'Query', 'Command', 'Getter', 'Setter', 'Lifecycle',
-  'Scheduled', 'EventHandler', 'Init', 'Transactional', 'Validation', 'BusinessLogic',
-])
-
+// 노드 종류 = labels[0] (위치 계약 spec 033) — stereotype/EXTERNAL 라벨은 후순위.
 function extractSubLabel(labels: readonly string[]): string {
-  return labels.find(l => !PRIMARY_LABELS.has(l)) ?? labels[0] ?? 'Unknown'
+  return kindOf(labels)
 }
 
 // ============================================================================
