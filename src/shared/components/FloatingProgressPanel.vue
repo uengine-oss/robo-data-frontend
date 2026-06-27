@@ -55,8 +55,8 @@ const isCollapsed = ref(false)
 const isMinimized = ref(false)
 const activeTab = ref<'phases' | 'progress' | 'console'>('phases')
 
-// 진행률 계산 — Phase별 독립 0-100%
-const progress = computed(() => currentPhaseProgress.value)
+// 진행률 계산 — Phase별 독립 0-100%. 표시는 정수로(보간이 float 라 소수점 길어짐 방지).
+const progress = computed(() => Math.round(currentPhaseProgress.value))
 
 const isCompleted = computed(() =>
   currentPhaseIndex.value >= PHASES.length - 1 && currentPhaseProgress.value >= 100

@@ -139,6 +139,39 @@ const STEP_TO_PHASE: Record<string, number> = {
   embed_step: 6,
 }
 
+/** 분석 파이프라인 leaf 실행 순서(전략별) — 단계 진행 표시의 단일 진실.
+ *  "가장 최근 완료 leaf 의 *다음* leaf" 가 곧 지금 진행 중 단계 → 완료된 단계가 active 로 안 남고
+ *  다음 단계가 진행중으로 표시됨. 다중 leaf 단계(관계연결/후처리)에서 overshoot 없음. */
+const ORDERED_LEAVES_FRAMEWORK = [
+  'parse_ddl_step', 'load_ast_step', 'scan_codebase_step',
+  'link_deterministic_step', 'link_calls_by_name_step', 'link_residual_patterns_step',
+  'build_context_step', 'fetch_table_samples_step', 'analyze_code_step',
+  'summarize_module_step', 'enrich_table_description_step', 'build_components_step',
+  'health_metrics_step', 'embed_step',
+] as const
+const ORDERED_LEAVES_DBMS = [
+  'parse_ddl_step', 'load_ast_step',
+  'link_dbms_tables_step', 'link_calls_by_ast_step',
+  'build_context_step', 'fetch_table_samples_step', 'analyze_code_step',
+  'summarize_module_step', 'enrich_table_description_step', 'enrich_lineage_from_catalog_step',
+  'build_components_step', 'health_metrics_step', 'embed_step',
+] as const
+
+/** leaf 실행 순서에서 다음에 실행할(=현재 진행 중) leaf step 이름. 전부 완료면 null. */
+function nextRunningLeaf(doneLeaves: Set<string>, strategy: string | undefined): string | null {
+  const order = strategy === 'dbms' ? ORDERED_LEAVES_DBMS : ORDERED_LEAVES_FRAMEWORK
+  let maxDoneIdx = -1
+  for (let i = 0; i < order.length; i++) if (doneLeaves.has(order[i])) maxDoneIdx = i
+  const nextIdx = maxDoneIdx + 1                    // 미상/스킵에 견고 — 최고 완료 인덱스 다음
+  return nextIdx < order.length ? order[nextIdx] : null
+}
+
+/** 완료 leaf 집합 → 지금 진행 중 단계 인덱스(완료 leaf 다음 leaf 의 단계). 전부 완료면 PHASES.length. */
+function runningPhaseIndex(doneLeaves: Set<string>, strategy: string | undefined): number {
+  const leaf = nextRunningLeaf(doneLeaves, strategy)
+  return leaf === null ? PHASES.length : (STEP_TO_PHASE[leaf] ?? 0)
+}
+
 /** leaf step → 진행 중 단계에 보일 사용자 세부 문구. */
 const STEP_SUBLABEL: Record<string, string> = {
   parse_ddl_step: '테이블 정의 읽는 중',
@@ -382,6 +415,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   function resetProgressTracking(): void {
     processedIds.clear()
     processedBatchCount = 0
+    doneLeaves.clear()
     lastMessageMs = Date.now()
   }
 
@@ -500,6 +534,8 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   // 진행바 % 추정용 leaf 카운트(전략별 예상 개수는 doAnalyze 에서 세팅).
   const expectedLeafCount = ref(0)
   const doneLeafCount = ref(0)
+  /** 완료된 leaf step 이름 집합 — 진행 중 단계 도출(다음 leaf 의 단계)용. */
+  const doneLeaves = new Set<string>()
 
   // ----- 데이터 확인 모달 -----
   const showDataConfirmModal = ref(false)
@@ -610,17 +646,24 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   function applyPhaseEvent(event: AnalyzeEvent): void {
     switch (event.event) {
       case 'start':
-        currentPhaseIndex.value = -1
+        doneLeaves.clear()
+        // 진행 중 단계 = 첫 leaf 의 단계(DDL). leaf 순서 모델 단일 진실.
+        currentPhaseIndex.value = runningPhaseIndex(doneLeaves, analyzeMeta.value.strategy)
         doneLeafCount.value = 0
         currentPhaseProgress.value = 0
         currentStep.value = '분석 시작...'
         break
       case 'node_done': {
         const node = event.node ?? ''
-        const phase = STEP_TO_PHASE[node]
-        // 파이프라인 순차 — 뒤 단계 leaf 가 오면 앞 단계는 자동 완료. 미상 노드는 단계 안 낮춤.
-        if (phase !== undefined && phase > currentPhaseIndex.value) currentPhaseIndex.value = phase
-        currentStep.value = STEP_SUBLABEL[node] ?? currentStep.value
+        if (node) doneLeaves.add(node)
+        const strat = analyzeMeta.value.strategy
+        // ★진행 중 단계 = 방금 완료 leaf 의 *다음* leaf 의 단계 → 완료된 단계가 active 로 안 남고
+        //  다음 단계가 진행중으로 표시됨(단조 증가, 다중 leaf 단계 overshoot 없음).
+        const running = runningPhaseIndex(doneLeaves, strat)
+        if (running > currentPhaseIndex.value) currentPhaseIndex.value = running
+        // 현재 단계 세부문구 = 지금 진행 중(다음) leaf 의 라벨(없으면 방금 완료 leaf).
+        const runningLeaf = nextRunningLeaf(doneLeaves, strat)
+        currentStep.value = (runningLeaf && STEP_SUBLABEL[runningLeaf]) || STEP_SUBLABEL[node] || currentStep.value
         doneLeafCount.value += 1
         const pct = expectedLeafCount.value > 0
           ? Math.round(doneLeafCount.value / expectedLeafCount.value * 100)
@@ -663,14 +706,9 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
    * - throttle 로 도배 방지, 원시 ID 미노출, 완료(done) 신호만 집계.
    */
   function applyProcessingEvent(event: AnalyzeEvent): void {
-    // 단계 라이브 전진(spec 028): node_done(완료)만으론 긴 단계(step6 코드분석)가 직전 단계에 멈춤.
-    // processing_event.step("stepN.*")으로 진행 중 단계를 즉시 반영(단조 증가, 역행 없음). ★보존.
-    const m = /^step(\d+)/.exec(event.step ?? '')
-    if (m) {
-      const phase = parseInt(m[1], 10) - 1   // step1→0 … step6→5(코드분석) … step7→6(후처리)
-      if (phase > currentPhaseIndex.value && phase < PHASES.length) currentPhaseIndex.value = phase
-    }
-
+    // 단계(currentPhaseIndex) 전진은 leaf 순서 모델(applyPhaseEvent node_done)이 단일 진실로 처리.
+    // 긴 analyze_code 단계도 "다음 미완료 leaf=analyze_code" 라 그 단계가 진행중으로 자동 표시됨
+    // → 과거 028 의 processing_event phase 승급 불필요(중복·overshoot 위험 제거). 여기선 바·메시지만.
     if (event.status !== 'done') return
 
     // 진행바 라이브 보간(spec 030): 긴 단계(node_done 공백) 동안에도 처리 신호마다 현재 단계
