@@ -854,7 +854,7 @@ watch(hasGraph, (has, prev) => {
               @click="toggleShowHidden"
             >
               <span class="vm-icon">{{ showHidden ? '☑' : '☐' }}</span>
-              <span class="vm-text"><b>모든 숨김 요소 표시</b><small>변수·INIT_BY·REFERENCES·메타노드</small></span>
+              <span class="vm-text"><b>숨긴 요소까지 모두 보기</b><small>변수·내부 연결·분석 보조 노드 등 기본은 가려둔 것</small></span>
             </button>
 
             <div class="vm-divider" />
@@ -1183,7 +1183,7 @@ watch(hasGraph, (has, prev) => {
   left: 0;
   min-width: 0;
   width: max-content;
-  max-width: 224px;
+  max-width: 248px;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -1209,9 +1209,10 @@ watch(hasGraph, (has, prev) => {
   text-align: left;
 
   .vm-icon { font-size: 16px; width: 20px; text-align: center; flex: none; }
-  .vm-text { display: flex; flex-direction: column; gap: 3px; line-height: 1.4; flex: 1; min-width: 0; }
+  // word-break:keep-all = 한글을 단어 단위로만 줄바꿈(글자 중간 안 쪼갬) → 설명 가독성 근본해결.
+  .vm-text { display: flex; flex-direction: column; gap: 3px; line-height: 1.4; flex: 1; min-width: 0; word-break: keep-all; }
   .vm-text b { font-size: 13px; font-weight: 600; }
-  .vm-text small { font-size: 11.5px; color: var(--color-text-muted); }
+  .vm-text small { font-size: 11.5px; line-height: 1.5; color: var(--color-text-muted); }
   .vm-check { width: 14px; text-align: center; color: var(--color-accent); font-weight: 700; flex: none; }
 
   &:hover { background: var(--color-bg-tertiary); }
