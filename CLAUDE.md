@@ -1,5 +1,5 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-specs/030-progress-bar-live/plan.md
+specs/031-stream-parser-error-robustness/plan.md
 <!-- SPECKIT END -->

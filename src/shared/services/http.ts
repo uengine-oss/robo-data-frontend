@@ -326,7 +326,9 @@ function processBuffer(buffer: string, onEvent: StreamCallback): string {
     const event = parseJsonLine(line)
     if (!event) continue   // 손상 줄 — 이미 기록됨, 다음 줄 계속
     onEvent(event)
-    if (event.type === 'complete' || event.type === 'error') {
+    // ★'error' 는 데이터성 이벤트(콘솔 표시) — 스트림 종결이 아니다(종결=HTTP done/stream_end).
+    //   종결로 오인하면 같은 청크의 뒤 라인(node/relationship 등)이 유실됨(spec 031).
+    if (event.type === 'complete') {
       return ''
     }
   }
