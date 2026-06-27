@@ -375,6 +375,9 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   let processedBatchCount = 0
   /** 진행감 메시지 throttle 간격(종류별 N건마다 1줄). 코드/배치가 대다수라 촘촘히. */
   const PROGRESS_THROTTLE: Record<string, number> = { CodeNode: 5, Batch: 5, Module: 1, Table: 1, Component: 1 }
+  /** 진행바 라이브 보간(spec 030): 점근 계수 K, 경계 직전 여유 ε(%). 총 건수 미지에도 경계로 수렴. */
+  const LIVE_FILL_K = 0.12
+  const BOUNDARY_EPS = 0.5
 
   function resetProgressTracking(): void {
     processedIds.clear()
@@ -669,6 +672,18 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     }
 
     if (event.status !== 'done') return
+
+    // 진행바 라이브 보간(spec 030): 긴 단계(node_done 공백) 동안에도 처리 신호마다 현재 단계
+    // 슬롯의 다음 경계로 점근 수렴(총 건수 미지에도 경계 초과·역행 없이 "멈춤"만 해소).
+    // node_done 베이스라인(applyPhaseEvent)은 그대로 — cap(<경계) 이상이라 단조 유지.
+    const N = expectedLeafCount.value
+    if (N > 0) {
+      const cap = Math.min(99, (doneLeafCount.value + 1) / N * 100 - BOUNDARY_EPS)
+      if (currentPhaseProgress.value < cap) {
+        currentPhaseProgress.value += (cap - currentPhaseProgress.value) * LIVE_FILL_K
+      }
+    }
+
     const rawKind = event.entity_kind ?? ''
     const id = event.entity_id ?? ''
 

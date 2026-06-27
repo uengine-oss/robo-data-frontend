@@ -1,5 +1,5 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan:
-specs/029-progress-message-friendly/plan.md
+specs/030-progress-bar-live/plan.md
 <!-- SPECKIT END -->
