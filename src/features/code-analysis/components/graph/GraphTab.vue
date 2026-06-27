@@ -753,6 +753,7 @@ watch(hasGraph, (has, prev) => {
           :colorMode="colorMode"
           :hiddenRelTypes="relFilter.hidden"
           :hiddenNodeTypes="nodeFilter.hidden"
+          :isolatedLabels="activeNodeLoads"
           :rightInset="showNodePanel ? panelWidth : 0"
           @node-select="handleNodeSelect"
           @relationship-select="handleRelationshipSelect"

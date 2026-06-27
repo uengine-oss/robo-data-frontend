@@ -28,3 +28,20 @@ export function rolesOf(labels: readonly string[] | undefined): string[] {
 export function isStubMarker(label: string): boolean {
   return label === STUB_MARKER
 }
+
+/**
+ * 색을 칠할 기준 라벨 — "활성 렌즈"(spec 040). 노드의 역할(labels[1:]) 중 지금 isolate 된 게
+ * 있으면 그 역할로 색칠(역할 칩과 일치), 없으면 종류(labels[0]). 역할 우선.
+ * @param isolatedUpper 현재 isolate 된 라벨 집합(대문자) — loadedLabels.
+ */
+export function colorLabelOf(
+  labels: readonly string[] | undefined,
+  isolatedUpper?: ReadonlySet<string>,
+): string {
+  if (isolatedUpper && isolatedUpper.size) {
+    for (const role of rolesOf(labels)) {
+      if (isolatedUpper.has(role.toUpperCase())) return role
+    }
+  }
+  return kindOf(labels)
+}

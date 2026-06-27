@@ -11,7 +11,7 @@
 
 import { logger } from '@/shared/utils/logger'
 import { applyLogicalMode } from '@/shared/utils/graphDisplay'
-import { ref, onMounted, onUnmounted, watch, shallowRef, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, shallowRef, nextTick } from 'vue'
 import { NVL } from '@neo4j-nvl/base'
 import {
   ClickInteraction,
@@ -22,6 +22,7 @@ import {
 import type { GraphData, GraphNode, GraphLink, NvlNode, NvlRelationship } from '@/shared/types'
 import type { PartialNode, PartialRelationship } from '@neo4j-nvl/base'
 import { getNodeColor, getRelationshipColor, getRelationshipWidth, getNodeSize } from '@/shared/config/graphStyles'
+import { colorLabelOf } from '@/shared/utils/nodeLabels'
 import { storageVersion } from '@/shared/utils/graphStyleStorage'
 import { useNavigatorStore } from '@/shared/stores/navigator'
 import { storeToRefs } from 'pinia'
@@ -61,6 +62,8 @@ interface Props {
   hiddenRelTypes?: string[]
   /** 숨길 노드 타입 (끄고/켜기 blacklist, spec 038). 이 라벨을 가진 노드·그 관계를 안 그린다. */
   hiddenNodeTypes?: string[]
+  /** 지금 isolate 된 라벨(대문자, loadedLabels). 역할이 isolate되면 그 노드를 역할색으로(spec 040). */
+  isolatedLabels?: string[]
   /**
    * 캔버스 오른쪽이 패널(노드 상세/통계)에 가려지는 폭(px). fitView 가 이 영역을 빼고 프레임해
    * 우측에 놓인 클러스터가 패널 뒤로 숨지 않게 한다(spec 022). 0이면 풀폭.
@@ -124,8 +127,12 @@ const props = withDefaults(defineProps<Props>(), {
   colorMode: 'label',
   hiddenRelTypes: () => [],
   hiddenNodeTypes: () => [],
+  isolatedLabels: () => [],
   rightInset: 0
 })
+
+/** isolate 라벨 집합(대문자) — 역할 렌즈 색 판정용(spec 040). */
+const isolatedSet = computed(() => new Set(props.isolatedLabels))
 
 // 건강지표(risk)별 노드 색 — getNodeColor(공유 유틸)는 건드리지 않고 여기서만 override.
 // 색 의미(사용자 확정): 위험=빨강 / 주의=노랑 / 양호=파랑 (green 대신 blue).
@@ -136,13 +143,13 @@ const HEALTH_COLORS: Record<string, string> = {
 }
 const HEALTH_NEUTRAL = '#868e96' // 위험도 미산정 노드(드물게 risk_level 없는 루틴)
 
-/** colorMode 에 따른 노드 색 — 'health' 면 risk 기반, 아니면 라벨 기반. */
+/** colorMode 에 따른 노드 색 — 'health' 면 risk 기반, 아니면 라벨 기반(활성 렌즈: isolate된 역할 우선). */
 function resolveNodeColor(labels: string[], properties?: Record<string, unknown>): string {
   if (props.colorMode === 'health') {
     const risk = String(properties?.risk_level ?? '')
     return HEALTH_COLORS[risk] ?? HEALTH_NEUTRAL
   }
-  return getNodeColor(labels)
+  return getNodeColor([colorLabelOf(labels, isolatedSet.value)])
 }
 
 const emit = defineEmits<{
@@ -851,6 +858,11 @@ watch(() => props.colorMode, () => {
 watch(storageVersion, () => {
   updateAllStyles()
 })
+
+// isolate 라벨 변경(역할 렌즈, spec 040) → 노드 색만 부분 갱신(위치·선택 보존).
+watch(() => props.isolatedLabels, () => {
+  updateNodeStyles()
+}, { deep: true })
 
 watch(showLogicalNames, () => {
   if (!nvlInstance.value) return

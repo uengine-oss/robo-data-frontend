@@ -18,6 +18,7 @@ import {
   getStyle,
   setColor,
   setSize,
+  removeStyle,
   type StyleCategory,
   type StyleConfig
 } from '@/shared/utils/graphStyleStorage'
@@ -137,6 +138,20 @@ function handleColorSelect(color: string): void {
   savedStyle.value = { ...savedStyle.value, color }
 }
 
+/** "기본값" 스와치 — 커스텀(색·크기)을 지워 기본 복원(setColor 아님, removeStyle). */
+function handleReset(): void {
+  if (!props.elementType) return
+  removeStyle(props.category, props.elementType)
+  loadCurrentStyle()   // 패널을 기본값 상태로 재반영(저장소 saveStyles 가 storageVersion 올려 캔버스 즉시 갱신)
+}
+
+/** 그 요소의 기본색(커스텀 무시) — "기본값" 스와치 표시색. 관계=회색, 노드=종류 자동색. */
+const defaultColor = computed(() =>
+  props.elementType ? resolveDefaultColor(props.elementType) : '#9CA3AB'
+)
+/** 현재 커스텀 색이 없는가(=기본 상태) → "기본값" 스와치 active. */
+const isDefaultColor = computed(() => !savedStyle.value?.color)
+
 function handleSizeSelect(size: number): void {
   if (!props.elementType) return
   selectedSize.value = size
@@ -164,11 +179,19 @@ onMounted(() => loadCurrentStyle())
     <div class="style-section">
       <div class="style-label">Color</div>
       <div class="color-palette">
+        <!-- 맨 앞: 기본값(되돌리기) — 그 요소의 기본색 표시, 누르면 커스텀 제거. -->
+        <button
+          class="color-swatch default-swatch"
+          :class="{ active: isDefaultColor }"
+          :style="{ background: defaultColor }"
+          @click="handleReset"
+          title="기본값으로 되돌리기"
+        >↺</button>
         <button
           v-for="color in COLOR_PALETTE"
           :key="color"
           class="color-swatch"
-          :class="{ active: selectedColor === color }"
+          :class="{ active: selectedColor === color && !isDefaultColor }"
           :style="{ background: color }"
           @click="handleColorSelect(color)"
           :title="color"
@@ -296,6 +319,18 @@ onMounted(() => loadCurrentStyle())
   &.active {
     border-color: #64748b;
     box-shadow: 0 0 0 2px #cbd5e1;
+  }
+
+  &.default-swatch {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.6);
   }
 
   &.custom {

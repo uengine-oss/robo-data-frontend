@@ -9,9 +9,11 @@ import { computed, nextTick, ref, useSlots, watch } from 'vue'
 import type { GraphNode } from '@/shared/types'
 import { getRelationshipGroups } from '@/shared/utils/nodeRelationships'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
+import { useCanvasStore } from '@/features/code-analysis/graphCanvas'
 import TextViewer from '@/shared/components/TextViewer.vue'
 import { relationshipRowParts, technicalNodeName } from '@/shared/utils/graphDisplay'
 import { getNodeColor } from '@/shared/config/graphStyles'
+import { colorLabelOf } from '@/shared/utils/nodeLabels'
 import { buildIdentityRows } from '@/shared/utils/nodeIdentity'
 
 interface Props {
@@ -30,6 +32,7 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const projectStore = useAnalyzerStore()
+const canvasStore = useCanvasStore()
 const slots = useSlots()
 const hasIdentityExtra = computed(() => Boolean(slots['identity-extra']?.()))
 
@@ -38,9 +41,10 @@ const nodeName = computed(() => technicalNodeName(props.node))
 // 식별 정보 행(논리명·경로·라인·분류·종류별) — 단일 생성처(nodeIdentity). 종류 무관 일관 + 빠짐없이.
 const identityRows = computed(() => buildIdentityRows(props.node))
 
-// 식별 배지 색 = 그래프 캔버스와 동일한 노드 색(단일 소스 getNodeColor 재사용=DRY).
-// 같은 라벨 → 같은 색(재현). 어떤 색 포맷(hex/hsl)이든 CSS color-mix 로 틴트 처리.
-const badgeColor = computed(() => getNodeColor(props.node.labels ?? []))
+// 식별 배지 색 = 그래프 캔버스와 동일한 노드 색(단일 소스 getNodeColor·colorLabelOf 재사용=DRY).
+// 활성 렌즈(isolate된 역할) 따라감(spec 040) — 캔버스 노드 색과 일치. 어떤 포맷이든 color-mix 틴트.
+const badgeColor = computed(() =>
+  getNodeColor([colorLabelOf(props.node.labels ?? [], canvasStore.loadedLabels)]))
 
 // 건강지표 — 최종 판정만 저장(spec 020): risk_level(+in_call_cycle). 중간지표(fan/loc/god/table)는 미저장.
 const health = computed(() => {
