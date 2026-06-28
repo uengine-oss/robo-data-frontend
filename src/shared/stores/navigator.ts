@@ -42,14 +42,9 @@ const showLogicalNames = ref(false)
 // 트리 빌드 헬퍼 (순수 함수)
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** 부가 역할 라벨(외부 stub + stereotype 다중라벨) — 이걸 제외한 첫 라벨이 실제 종류(antlr type).
- *  코드 종류 라벨(METHOD/FILE/FIELD…)은 실타입이라 제외하지 않음(그대로 표시). */
-const ROLE_LABELS = new Set([
-  'INTERNAL', 'EXTERNAL',
-  'Endpoint', 'Query', 'Command', 'Getter', 'Setter', 'Lifecycle',
-  'Scheduled', 'EventHandler', 'Init', 'Transactional', 'Validation',
-  'BusinessLogic',
-])
+/** 종류(antlr type)=labels[0]. stereotype 은 위치(labels[1:])로 가르므로 하드코딩 안 함
+ *  (드리프트 0 — nodeClassify.ts 와 동일 계약). 제외 대상은 외부 stub 마커뿐. */
+const ROLE_LABELS = new Set(['INTERNAL', 'EXTERNAL'])
 
 /** 트리에서 제외할 라벨 — 변수/상수(antlr type 전부)·EM 노드는 트리에 안 보인다. */
 const EXCLUDED_LABELS = new Set([

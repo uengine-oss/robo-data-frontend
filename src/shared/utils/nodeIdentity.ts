@@ -83,10 +83,13 @@ export function buildIdentityRows(node: GraphNode): IdentityRow[] {
   push('경로', relativeSourcePath(p.file_path))
   const sl = Number(p.start_line), el = Number(p.end_line)
   if (sl || el) push('라인', sl === el ? `${sl}` : `${sl} ~ ${el}`)
-  // 역할(stereotype) = labels[1:] (위치 계약 spec 033, EXTERNAL stub 제외). 속성 p.stereotype 폴백.
-  const roles = rolesOf(node.labels)
-  if (roles.length) push('역할', roles.map(roleDisplay).join(', '))
-  else if (p.stereotype) push('역할', roleDisplay(String(p.stereotype)))
+  // 역할(stereotype) 표시 = 속성 p.stereotype(PascalCase) 우선 — 라벨은 UPPER_SNAKE(네임스페이스
+  // 분리 spec 036)라 STEREOTYPE_KO 키와 표기가 달라 라벨로는 한글이 안 잡힌다. 라벨은 색·필터용.
+  if (p.stereotype) push('역할', roleDisplay(String(p.stereotype)))
+  else {
+    const roles = rolesOf(node.labels)
+    if (roles.length) push('역할', roles.map(roleDisplay).join(', '))
+  }
 
   // ── 루틴(함수/프로시저/트리거) ───────────────────────
   if (has('FUNCTION', 'PROCEDURE', 'TRIGGER')) {
