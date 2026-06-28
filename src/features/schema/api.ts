@@ -132,7 +132,18 @@ export const roboSchemaApi = {
       statement_type?: string  // SELECT, INSERT, UPDATE 등
       statement_line?: number
       file_name?: string  // 파일명
-      file_directory?: string  // 파일 경로
+      file_directory?: string  // 파일 경로(디렉토리)
+      file_path?: string  // 절대 파일 경로(코드뷰 소스 서빙용, spec 043)
+    }>
+    framework_references?: Array<{
+      source_name: string
+      source_type: string  // FUNCTION | MODULE 등
+      access_type: string  // READS | WRITES | REFER_TO
+      start_line?: number
+      file_name?: string
+      file_path?: string
+      file_directory?: string
+      module_name?: string
     }>
   }> {
     const params = new URLSearchParams()
@@ -146,7 +157,35 @@ export const roboSchemaApi = {
     }
     return response.json()
   },
-  
+
+  /**
+   * 소스 파일 본문 조회 (spec 043) — analyzer 가 디스크 원본을 읽어 반환.
+   * 코드뷰가 브라우저 업로드(uploadedFiles) 없이 동작하게 한다. 기본은 파일 전체.
+   * 400(경로이탈)·404(없음)은 가짜 코드 대신 정직한 found:false 로 정규화한다.
+   */
+  async getSourceContent(
+    filePath: string,
+    options?: { startLine?: number; endLine?: number }
+  ): Promise<{
+    file_path: string
+    content: string
+    line_count: number
+    start_line: number
+    end_line: number
+    found: boolean
+  }> {
+    const params = new URLSearchParams()
+    params.append('file_path', filePath)
+    if (options?.startLine) params.append('start_line', options.startLine.toString())
+    if (options?.endLine) params.append('end_line', options.endLine.toString())
+
+    const response = await fetch(`${ROBO_BASE_URL}/source?${params}`)
+    if (!response.ok) {
+      return { file_path: filePath, content: '', line_count: 0, start_line: 0, end_line: 0, found: false }
+    }
+    return response.json()
+  },
+
   /**
    * 프로시저의 모든 Statement와 AI 설명 조회
    */

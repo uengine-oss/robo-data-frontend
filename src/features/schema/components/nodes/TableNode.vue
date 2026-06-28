@@ -4,9 +4,9 @@ import { Handle, Position } from '@vue-flow/core'
 import { computed, inject, ref, watch } from 'vue'
 import type { Text2SqlColumnInfo } from '@/shared/types'
 import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
-import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { roboSchemaApi } from '@/features/schema/api'
 import { getDescriptionColor, getDescriptionSourceLabel } from '@/shared/utils/descriptionColor'
+import CloseButton from '@/features/schema/components/CloseButton.vue'
 
 interface Behavior {
   name: string
@@ -40,6 +40,7 @@ interface ProcedureReference {
   statement_line?: number
   file_name?: string
   file_directory?: string
+  file_path?: string   // 절대 파일 경로 (catalog p.file_path, 코드뷰 소스 서빙용 spec 043)
 }
 
 // 프레임워크 참조 정보 타입
@@ -66,7 +67,6 @@ const onLoadRelated = inject<(tableName: string) => void>('onLoadRelated')
 
 // 캔버스 스토어 (실시간 업데이트 감지용)
 const canvasStore = useSchemaCanvasStore()
-const projectStore = useAnalyzerStore()
 
 // 노드 업데이트 애니메이션 상태
 const isNodeUpdating = ref(false)
@@ -143,9 +143,6 @@ const procedureReferences = ref<ProcedureReference[]>([])
 const frameworkReferences = ref<FrameworkReference[]>([])
 const showReferencesPopup = ref(false)
 const referencesPopupPosition = ref({ x: 0, y: 0 })
-
-// 방문한 프로시저 참조 추적
-const visitedReferences = ref<Set<string>>(new Set())
 
 // 컬럼 참조 팝업 상태
 const showColumnReferencesPopup = ref(false)
@@ -235,160 +232,41 @@ function handleColumnSourceClick(event: MouseEvent, columnName: string) {
   event.stopPropagation()
 }
 
-// 프로시저 이름 클릭 시 처리 - 우측 소스 코드 패널에 표시
-function handleProcedureClick(procRef: ProcedureReference) {
-  logger.debug('[handleProcedureClick] 클릭됨:', procRef)
-  logger.debug('[handleProcedureClick] procedure_name:', procRef.procedure_name)
-  logger.debug('[handleProcedureClick] file_name:', procRef.file_name)
-  logger.debug('[handleProcedureClick] file_directory:', procRef.file_directory)
-  logger.debug('[handleProcedureClick] statement_line:', procRef.statement_line)
-  
-  const lineNumber = procRef.statement_line || procRef.start_line || 1
-  
-  // 업로드된 파일에서 해당 파일 찾기
-  const allFiles = [...projectStore.uploadedFiles, ...projectStore.uploadedDdlFiles]
-  logger.debug('[handleProcedureClick] 업로드된 파일 수:', allFiles.length)
-  logger.debug('[handleProcedureClick] 파일 목록:', allFiles.map(f => f.fileName))
-  
-  let foundFile = null
-  
-  // 1. file_directory로 매칭
-  if (procRef.file_directory) {
-    const normalizedDir = procRef.file_directory.toLowerCase()
-    logger.debug('[handleProcedureClick] file_directory로 검색:', normalizedDir)
-    foundFile = allFiles.find(f => {
-      const filePath = f.fileName.toLowerCase()
-      const match = filePath === normalizedDir || 
-             filePath.endsWith(normalizedDir) || 
-             normalizedDir.endsWith(filePath) ||
-             filePath.includes(normalizedDir) ||
-             normalizedDir.includes(filePath)
-      if (match) logger.debug('[handleProcedureClick] file_directory 매칭:', f.fileName)
-      return match
-    })
-  }
-  
-  // 2. file_name으로 매칭
-  if (!foundFile && procRef.file_name) {
-    const normalizedFileName = procRef.file_name.toLowerCase()
-    logger.debug('[handleProcedureClick] file_name으로 검색:', normalizedFileName)
-    foundFile = allFiles.find(f => {
-      const fileName = f.fileName.split('/').pop()?.toLowerCase() || ''
-      const match = fileName === normalizedFileName
-      if (match) logger.debug('[handleProcedureClick] file_name 매칭:', f.fileName)
-      return match
-    })
-  }
-  
-  // 3. procedure_name으로 매칭 (fallback)
-  if (!foundFile) {
-    const normalizedProcName = procRef.procedure_name.toLowerCase()
-    logger.debug('[handleProcedureClick] procedure_name으로 검색:', normalizedProcName)
-    foundFile = allFiles.find(f => {
-      const fileName = f.fileName.split('/').pop() || ''
-      const fileNameWithoutExt = fileName.replace(/\.[^.]+$/, '').toLowerCase()
-      const match = fileNameWithoutExt === normalizedProcName || 
-             fileNameWithoutExt.includes(normalizedProcName) ||
-             normalizedProcName.includes(fileNameWithoutExt)
-      if (match) logger.debug('[handleProcedureClick] procedure_name 매칭:', f.fileName)
-      return match
-    })
-  }
-  
-  logger.debug('[handleProcedureClick] 찾은 파일:', foundFile?.fileName)
-  logger.debug('[handleProcedureClick] 파일 내용 존재:', !!foundFile?.fileContent)
-  
-  // 방문 표시 추가
-  const refKey = `${procRef.procedure_name}-${procRef.statement_line}`
-  visitedReferences.value.add(refKey)
-  
-  if (foundFile && foundFile.fileContent) {
-    // 소스 코드 패널 열기
-    logger.debug('[handleProcedureClick] 소스 패널 열기 호출')
-    canvasStore.openSourceCodePanel(
-      procRef.file_name || foundFile.fileName.split('/').pop() || '',
-      procRef.file_directory || foundFile.fileName,
-      foundFile.fileContent,
-      lineNumber,
-      procRef.procedure_name
-    )
-    logger.debug('[handleProcedureClick] 소스 패널 상태:', canvasStore.sourceCodePanel)
-  } else {
-    logger.warn(`[handleProcedureClick] 파일을 찾을 수 없음: ${procRef.file_directory || procRef.file_name || procRef.procedure_name}`)
-    // 파일이 없어도 API 응답 데이터만으로 패널 열기 시도
-    if (procRef.file_name || procRef.procedure_name) {
-      logger.debug('[handleProcedureClick] 파일 없이 패널 열기 시도')
-      canvasStore.openSourceCodePanel(
-        procRef.file_name || procRef.procedure_name || 'Unknown',
-        procRef.file_directory || '',
-        `// 파일 내용을 찾을 수 없습니다.\n// 프로시저: ${procRef.procedure_name}\n// 파일 경로: ${procRef.file_directory || 'N/A'}`,
-        lineNumber,
-        procRef.procedure_name
-      )
-    }
-  }
-  
-  // 팝업은 유지 (closeReferencesPopup() 호출 안함)
+// 참조(프로시저/프레임워크) 클릭 → analyzer 가 디스크에서 읽어 주는 원본 소스를 우측
+// 코드 패널에 표시 (spec 043). 브라우저 업로드(uploadedFiles) 의존 폐기 — 데스크톱(폴더
+// 선택)·영속 그래프에서도 동작. 못 읽으면 가짜 코드 대신 정직한 빈 상태(found=false).
+async function openSourceFromReference(
+  filePath: string | undefined,
+  fileName: string,
+  lineNumber: number,
+  symbolName: string
+) {
+  // 참조 선택 시 팝업 닫음 — 소스 패널과 겹치지 않게(하나만)
+  closeReferencesPopup()
+  closeColumnReferencesPopup()
+  const src = filePath
+    ? await roboSchemaApi.getSourceContent(filePath, { startLine: 1, endLine: 0 })
+    : null
+  const content = src?.found ? src.content : ''
+  canvasStore.openSourceCodePanel(
+    fileName || filePath?.split(/[\\/]/).pop() || symbolName,
+    filePath || '',
+    content,
+    lineNumber,
+    symbolName,
+    !!content
+  )
 }
 
-// 프레임워크 참조 클릭 시 처리 - 우측 소스 코드 패널에 표시
+function handleProcedureClick(procRef: ProcedureReference) {
+  const lineNumber = procRef.statement_line || procRef.start_line || 1
+  // 절대 file_path 우선(catalog p.file_path), 없으면 디렉토리 폴백
+  openSourceFromReference(procRef.file_path || procRef.file_directory, procRef.file_name || '', lineNumber, procRef.procedure_name)
+}
+
 function handleFrameworkClick(fwRef: FrameworkReference) {
   const lineNumber = fwRef.start_line || 1
-  const allFiles = [...projectStore.uploadedFiles, ...projectStore.uploadedDdlFiles]
-
-  let foundFile = null
-
-  // 1. file_path(전체 소스 경로)로 정확 매칭
-  if (fwRef.file_path) {
-    const normalizedPath = fwRef.file_path.toLowerCase()
-    foundFile = allFiles.find(f => {
-      const filePath = f.fileName.toLowerCase()
-      return filePath === normalizedPath ||
-             filePath.endsWith(normalizedPath) ||
-             normalizedPath.endsWith(filePath)
-    })
-  }
-
-  // 2. file_name으로 매칭 (fallback)
-  if (!foundFile && fwRef.file_name) {
-    const normalizedFileName = fwRef.file_name.toLowerCase()
-    foundFile = allFiles.find(f => {
-      const fileName = f.fileName.split('/').pop()?.toLowerCase() || ''
-      return fileName === normalizedFileName
-    })
-  }
-
-  const refKey = `fw-${fwRef.source_name}-${fwRef.start_line}`
-  visitedReferences.value.add(refKey)
-
-  if (foundFile && foundFile.fileContent) {
-    canvasStore.openSourceCodePanel(
-      fwRef.file_name || foundFile.fileName.split('/').pop() || '',
-      fwRef.file_directory || foundFile.fileName,
-      foundFile.fileContent,
-      lineNumber,
-      fwRef.source_name
-    )
-  } else if (fwRef.file_name || fwRef.source_name) {
-    canvasStore.openSourceCodePanel(
-      fwRef.file_name || fwRef.source_name || 'Unknown',
-      fwRef.file_directory || '',
-      `// 파일 내용을 찾을 수 없습니다.\n// 함수: ${fwRef.source_name}\n// 파일 경로: ${fwRef.file_directory || 'N/A'}`,
-      lineNumber,
-      fwRef.source_name
-    )
-  }
-}
-
-// 참조가 방문됐는지 확인
-function isReferenceVisited(ref: ProcedureReference): boolean {
-  const refKey = `${ref.procedure_name}-${ref.statement_line}`
-  return visitedReferences.value.has(refKey)
-}
-
-function isFrameworkReferenceVisited(ref: FrameworkReference): boolean {
-  const refKey = `fw-${ref.source_name}-${ref.start_line}`
-  return visitedReferences.value.has(refKey)
+  openSourceFromReference(fwRef.file_path || fwRef.file_directory, fwRef.file_name || '', lineNumber, fwRef.source_name)
 }
 
 // 접근 유형 레이블
@@ -644,7 +522,7 @@ function onColumnMouseLeave() {
       >
         <div class="references-popup__header references-popup__header--column">
           <span>🔍 {{ activeColumnName }} 컬럼 참조</span>
-          <button class="references-popup__close" @click="closeColumnReferencesPopup">✕</button>
+          <CloseButton light @click="closeColumnReferencesPopup" />
         </div>
         <div class="references-popup__content">
           <div v-if="isLoadingColumnReferences" class="references-popup__loading">
@@ -659,7 +537,6 @@ function onColumnMouseLeave() {
               v-for="ref in columnReferences"
               :key="`col-proc-${ref.procedure_name}-${ref.statement_line}`"
               class="references-popup__item"
-              :class="{ 'visited': isReferenceVisited(ref) }"
               @click="handleProcedureClick(ref)"
             >
               <div class="references-popup__proc-name">
@@ -717,7 +594,7 @@ function onColumnMouseLeave() {
       >
         <div class="references-popup__header">
           <span>📍 테이블 참조</span>
-          <button class="references-popup__close" @click="closeReferencesPopup">✕</button>
+          <CloseButton light @click="closeReferencesPopup" />
         </div>
         <div class="references-popup__content">
           <div v-if="isLoadingReferences" class="references-popup__loading">
@@ -732,7 +609,6 @@ function onColumnMouseLeave() {
               v-for="ref in procedureReferences"
               :key="`proc-${ref.procedure_name}-${ref.statement_line}`"
               class="references-popup__item"
-              :class="{ 'visited': isReferenceVisited(ref) }"
               @click="handleProcedureClick(ref)"
             >
               <div class="references-popup__proc-name">
@@ -759,7 +635,6 @@ function onColumnMouseLeave() {
               v-for="ref in frameworkReferences"
               :key="`fw-${ref.source_name}-${ref.start_line}`"
               class="references-popup__item"
-              :class="{ 'visited': isFrameworkReferenceVisited(ref) }"
               @click="handleFrameworkClick(ref)"
             >
               <div class="references-popup__proc-name">
@@ -1148,21 +1023,6 @@ function onColumnMouseLeave() {
   background: linear-gradient(135deg, #a78bfa, #8b5cf6);
 }
 
-.references-popup__close {
-  background: none;
-  border: none;
-  color: white;
-  cursor: pointer;
-  font-size: 1rem;
-  padding: 0;
-  opacity: 0.8;
-  transition: opacity 0.15s;
-}
-
-.references-popup__close:hover {
-  opacity: 1;
-}
-
 .references-popup__content {
   max-height: 300px;
   overflow-y: auto;
@@ -1190,22 +1050,6 @@ function onColumnMouseLeave() {
 
 .references-popup__item:hover {
   background: var(--color-bg-tertiary, #25262b);
-}
-
-.references-popup__item.visited {
-  background: rgba(56, 189, 248, 0.08);
-  border-left: 3px solid #38bdf8;
-  
-  &::after {
-    content: '✓';
-    position: absolute;
-    right: 10px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #38bdf8;
-    font-size: 0.8rem;
-    font-weight: 600;
-  }
 }
 
 .references-popup__proc-name {

@@ -9,7 +9,8 @@ import { logger } from '@/shared/utils/logger'
 import { objectExplorerApi, relationshipApi } from '@/features/object-explorer/api'
 import { ref, computed, onMounted, watch } from 'vue'
 import { Teleport } from 'vue'
-import { IconX, IconCheck, IconLink, IconTrash, IconAlertTriangle } from '@/shared/icons'
+import { IconCheck, IconLink, IconTrash, IconAlertTriangle } from '@/shared/icons'
+import CloseButton from './CloseButton.vue'
 
 const props = defineProps<{
   visible: boolean
@@ -319,9 +320,7 @@ onMounted(() => {
             <IconLink :size="20" class="header-icon" />
             <h2>{{ mode === 'create' ? '관계 생성' : '관계 편집' }}</h2>
           </div>
-          <button class="close-btn" @click="$emit('close')">
-            <IconX :size="18" />
-          </button>
+          <CloseButton light @click="$emit('close')" />
         </div>
         
         <!-- 본문 -->

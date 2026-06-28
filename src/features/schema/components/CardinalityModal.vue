@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { IconX } from '@/shared/icons'
+import CloseButton from './CloseButton.vue'
 
 export interface ConnectionInfo {
   fromTable: string
@@ -103,9 +103,7 @@ function selectMatchStrategy(value: MatchStrategy) {
               <span class="modal-icon">🔗</span>
               <span>릴레이션 설정</span>
             </div>
-            <button class="modal-close" @click="handleClose">
-              <IconX :size="18" />
-            </button>
+            <CloseButton light @click="handleClose" />
           </div>
           
           <!-- Connection Info -->

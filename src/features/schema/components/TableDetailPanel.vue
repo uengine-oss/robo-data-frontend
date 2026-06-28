@@ -2,7 +2,8 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
 import type { Text2SqlColumnInfo } from '@/shared/types'
-import { IconX, IconEdit, IconTrash, IconPlus } from '@/shared/icons'
+import { IconEdit, IconTrash, IconPlus } from '@/shared/icons'
+import CloseButton from './CloseButton.vue'
 import { getDescriptionColor, getDescriptionSourceLabel } from '@/shared/utils/descriptionColor'
 import TextViewer from '@/shared/components/TextViewer.vue'
 
@@ -293,9 +294,7 @@ function isColumnUpdating(colName: string): boolean {
           </svg>
           <span>{{ table.name }}</span>
         </div>
-        <button class="detail-panel__close" @click="closePanel">
-          <IconX :size="18" />
-        </button>
+        <CloseButton @click="closePanel" />
       </div>
       
       <!-- Content -->

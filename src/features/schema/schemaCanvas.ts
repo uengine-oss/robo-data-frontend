@@ -254,6 +254,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     procedureName: string
     statements: StatementInfo[]  // AI 설명 정보
     isLoadingStatements: boolean
+    notFound: boolean  // 원본 소스를 못 읽음 — 가짜 코드 대신 정직한 빈 상태 (spec 043)
   }
   const sourceCodePanel = ref<SourceCodePanelState>({
     isOpen: false,
@@ -263,7 +264,8 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     highlightedLine: 0,
     procedureName: '',
     statements: [],
-    isLoadingStatements: false
+    isLoadingStatements: false,
+    notFound: false
   })
   
   // 테이블 데이터 조회 패널 상태
@@ -1221,9 +1223,12 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         }
       }
       isDetailPanelOpen.value = true
+      // 하나만 열리게 — 상세 열 때 소스/데이터 패널 닫음
+      closeSourceCodePanel()
+      closeTableDataPanel()
     }
   }
-  
+
   function clearSelection() {
     selectedNodeId.value = null
   }
@@ -1240,18 +1245,23 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     fileDirectory: string,
     fileContent: string,
     highlightedLine: number,
-    procedureName: string
+    procedureName: string,
+    found = true
   ) {
-    // 먼저 패널 열기
+    // 하나만 열리게 — 소스 패널 열 때 다른 우측/데이터 패널 닫음
+    isDetailPanelOpen.value = false
+    closeTableDataPanel()
+    // 패널 열기 — 원본을 못 읽었으면 가짜 코드 대신 정직한 빈 상태 (spec 043)
     sourceCodePanel.value = {
       isOpen: true,
       fileName,
       fileDirectory,
-      fileContent,
+      fileContent: found ? fileContent : '',
       highlightedLine,
       procedureName,
       statements: [],
-      isLoadingStatements: true
+      isLoadingStatements: true,
+      notFound: !found
     }
     
     // Statement 설명 로드
@@ -1280,7 +1290,8 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       highlightedLine: 0,
       procedureName: '',
       statements: [],
-      isLoadingStatements: false
+      isLoadingStatements: false,
+      notFound: false
     }
   }
   
@@ -1336,6 +1347,9 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
    * - 예: SELECT * FROM postgresql.`RWIS`.`RDISAUP_TB` LIMIT 25
    */
   async function queryTableData(tableName: string, schema: string = 'public', limit: number = 25, datasource?: string) {
+    // 하나만 열리게 — 데이터 패널 열 때 소스/상세 패널 닫음
+    isDetailPanelOpen.value = false
+    closeSourceCodePanel()
     const schemaName = schema || 'public'
     const normalizedInputDatasource = (datasource || '').trim()
     const matchedTable = allTables.value.find(
@@ -1554,7 +1568,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         rowCount: 0,
         executionTimeMs: 0,
         isLoading: false,
-        error: '데이터소스를 확인할 수 없습니다. 테이블의 datasource를 먼저 선택/확인해주세요.',
+        error: '연결된 데이터소스가 없어 행 데이터를 조회할 수 없습니다. 분석으로 만들어진 테이블은 스키마·컬럼 설명만 제공되며, 실제 행은 데이터소스가 연결된 경우에만 조회됩니다.',
         limit,
         executedSql: primarySql
       }

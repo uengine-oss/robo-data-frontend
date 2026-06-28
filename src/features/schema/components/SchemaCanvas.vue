@@ -11,6 +11,7 @@ import TableDetailPanel from './TableDetailPanel.vue'
 import TextViewer from '@/shared/components/TextViewer.vue'
 import CardinalityModal, { type ConnectionInfo, type Cardinality, type MatchStrategy } from './CardinalityModal.vue'
 import EditRelationshipDialog from './EditRelationshipDialog.vue'
+import CloseButton from './CloseButton.vue'
 import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
 import { behaviorApi } from '@/features/domain/api'
 import type { Text2SqlTableInfo } from '@/shared/types'
@@ -733,7 +734,14 @@ function onConnectEnd(event: MouseEvent) {
   connectingSource.value = null
 }
 
+// 테이블 보기 컨트롤(상위10개/전체) 단일 드롭다운
+const showTableViewMenu = ref(false)
+
+// 범례 접기(기본 펼침) — 테이블 가림 방지
+const legendCollapsed = ref(false)
+
 async function handleAddTopTables() {
+  showTableViewMenu.value = false
   for (const table of store.tablesNotOnCanvas.slice(0, 10)) {
     await store.addTableToCanvas(table)
   }
@@ -741,6 +749,7 @@ async function handleAddTopTables() {
 }
 
 async function handleAddAllTables() {
+  showTableViewMenu.value = false
   // 전체 테이블 보기 모드 활성화
   store.setFullViewMode(true)
   await store.addAllTablesToCanvas()
@@ -957,24 +966,33 @@ async function handleRefresh() {
         </div>
       </div>
       
-      <!-- Quick Actions -->
-      <div class="panel-footer">
-        <button
-          v-if="store.tablesNotOnCanvas.length > 0"
-          class="btn btn--secondary btn--sm"
-          @click="handleAddTopTables"
-        >
-          상위 10개 테이블 추가
-        </button>
-        <button
-          v-if="store.allTables.length > 0"
-          class="btn btn--primary btn--sm"
-          :disabled="store.loading"
-          @click="handleAddAllTables"
-        >
-          {{ store.loading ? '로딩 중...' : '📊 전체 테이블 보기' }}
-        </button>
+      <!-- 테이블 보기 — 단일 컨트롤(상위10개/전체) -->
+      <div v-if="store.allTables.length > 0" class="panel-footer">
+        <div class="table-view-control">
+          <button
+            class="btn btn--primary btn--sm table-view-control__btn"
+            :disabled="store.loading"
+            @click="showTableViewMenu = !showTableViewMenu"
+          >
+            <span>{{ store.loading ? '로딩 중…' : '📊 테이블 보기' }}</span>
+            <IconChevronRight :size="14" class="table-view-control__chevron" :class="{ 'is-open': showTableViewMenu }" />
+          </button>
+          <div v-if="showTableViewMenu" class="table-view-menu">
+            <button
+              v-if="store.tablesNotOnCanvas.length > 0"
+              class="table-view-menu__item"
+              @click="handleAddTopTables"
+            >상위 10개 추가</button>
+            <button
+              class="table-view-menu__item"
+              :disabled="store.loading"
+              @click="handleAddAllTables"
+            >전체 테이블</button>
+          </div>
+        </div>
       </div>
+      <!-- 메뉴 바깥 클릭 시 닫힘 -->
+      <div v-if="showTableViewMenu" class="table-view-backdrop" @click="showTableViewMenu = false" />
     </aside>
     
     <!-- Main Canvas -->
@@ -1166,9 +1184,13 @@ async function handleRefresh() {
       </div>
       
       <!-- Legend (숨김 가능) -->
-      <div v-if="!props.hideLegend" class="canvas-legend">
-        <div class="legend-title">메타데이터 출처</div>
-        
+      <div v-if="!props.hideLegend" class="canvas-legend" :class="{ 'canvas-legend--collapsed': legendCollapsed }">
+        <button type="button" class="legend-title legend-title--toggle" @click="legendCollapsed = !legendCollapsed" :title="legendCollapsed ? '범례 펼치기' : '범례 접기'">
+          <span>메타데이터 출처</span>
+          <IconChevronRight :size="14" class="legend-chevron" :class="{ 'is-open': !legendCollapsed }" />
+        </button>
+        <div v-show="!legendCollapsed" class="legend-body">
+
         <!-- DDL 기반 FK (실선, 초록색) -->
         <label class="legend-item legend-item--checkbox">
           <input 
@@ -1222,6 +1244,7 @@ async function handleRefresh() {
         <div class="legend-tip">
           🖱️ 테이블 더블클릭으로 상세 편집
         </div>
+        </div>
       </div>
     </main>
     
@@ -1236,13 +1259,20 @@ async function handleRefresh() {
             <span class="source-panel-icon">📄</span>
             <span class="source-panel-filename">{{ store.sourceCodePanel.fileName }}</span>
           </div>
-          <button class="source-panel-close" @click="store.closeSourceCodePanel()">✕</button>
+          <CloseButton @click="store.closeSourceCodePanel()" />
         </div>
         <div class="source-panel-info">
           <span class="source-panel-procedure">{{ store.sourceCodePanel.procedureName }}</span>
           <span class="source-panel-line">Line {{ store.sourceCodePanel.highlightedLine }}</span>
         </div>
         <div class="source-panel-content" ref="sourceCodeContentRef">
+          <!-- 원본 소스 미로드 — 가짜 코드 대신 정직한 빈 상태 (spec 043) -->
+          <div v-if="store.sourceCodePanel.notFound" class="source-empty">
+            <span class="source-empty-icon">📄</span>
+            <p class="source-empty-title">원본 소스를 찾을 수 없습니다</p>
+            <p class="source-empty-desc">이 그래프에는 원본 코드가 로드되어 있지 않습니다.<br>소스 폴더를 다시 분석하면 코드 보기가 활성화됩니다.</p>
+          </div>
+          <template v-else>
           <div v-if="store.sourceCodePanel.isLoadingStatements" class="source-loading">
             AI 설명 로딩 중...
           </div>
@@ -1275,6 +1305,7 @@ async function handleRefresh() {
               <span class="source-line-number">{{ index + 1 }}</span>
               <span class="source-line-content">{{ line || ' ' }}</span>
             </div>
+          </template>
           </template>
         </div>
       </aside>
@@ -1340,7 +1371,7 @@ async function handleRefresh() {
             <button class="refresh-btn" @click="store.queryTableData(store.tableDataPanel.tableName, store.tableDataPanel.schema, store.tableDataPanel.limit, store.tableDataPanel.datasource)" title="새로고침">
               <IconRefresh :size="14" />
             </button>
-            <button class="close-btn" @click="store.closeTableDataPanel" title="닫기">×</button>
+            <CloseButton @click="store.closeTableDataPanel()" />
           </div>
         </div>
         
@@ -1431,7 +1462,7 @@ async function handleRefresh() {
               {{ store.tableDataPanel.activeBehavior?.name }} 실행 결과
               <span v-if="behaviorResultData?.autoFixed" class="auto-fixed-badge">🤖 AI 자동 수정됨</span>
             </h3>
-            <button class="close-btn" @click="closeBehaviorResultPopup">✕</button>
+            <CloseButton light @click="closeBehaviorResultPopup" />
           </div>
           
           <!-- React Agent 시도 타임라인 -->
@@ -2204,44 +2235,92 @@ async function handleRefresh() {
 }
 
 .table-item__remove {
+  margin-left: auto;          /* flex 우측 정렬 — 이름 길이와 무관하게 항상 우측 끝 */
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
   background: none;
   border: none;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  padding: 2px 6px;
   border-radius: var(--radius-sm);
-  opacity: 0;
-  transition: all 0.15s;
+  color: var(--color-text-muted);
   font-size: 1rem;
-  
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+
   .table-item:hover & {
     opacity: 1;
   }
-  
+
   &:hover {
     background: var(--color-error);
-    color: white;
+    color: #fff;
   }
 }
 
 /* Panel Footer */
 .panel-footer {
-  padding: 12px 12px;
+  padding: 12px;
   border-top: 1px solid var(--color-border);
-  display: flex;
-  gap: 6px;
+}
 
-  // 두 버튼이 가로 폭을 균등 분할. 컨테이너 폭(cqw) 기반으로 폰트 자동 축소.
-  .btn {
-    flex: 1;
-    min-width: 0;
-    padding: 6px 6px;
-    font-size: clamp(0.62rem, 2.6cqw, 0.8rem);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    line-height: 1.2;
+// 테이블 보기 — 단일 드롭다운 컨트롤(상위10개/전체)
+.table-view-control {
+  position: relative;
+
+  &__btn {
+    width: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
   }
+
+  &__chevron {
+    transition: transform 0.15s;
+    transform: rotate(90deg);
+
+    &.is-open { transform: rotate(-90deg); }
+  }
+}
+
+.table-view-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  z-index: 20;
+
+  &__item {
+    display: block;
+    width: 100%;
+    padding: 10px 12px;
+    text-align: left;
+    background: transparent;
+    border: none;
+    color: var(--color-text);
+    font-size: 0.8rem;
+    cursor: pointer;
+
+    &:not(:last-child) { border-bottom: 1px solid var(--color-border); }
+    &:hover { background: var(--color-bg-hover); }
+    &:disabled { opacity: 0.5; cursor: default; }
+  }
+}
+
+.table-view-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
 }
 
 // container query 기준점 — 좌측 패널 폭 기준으로 panel-footer 의 폰트 결정
@@ -2389,6 +2468,31 @@ async function handleRefresh() {
   letter-spacing: 0.05em;
   color: var(--color-text-muted);
   margin-bottom: 8px;
+}
+
+// 범례 접기 토글 헤더
+.legend-title--toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.canvas-legend--collapsed .legend-title--toggle {
+  margin-bottom: 0;
+}
+
+.legend-chevron {
+  color: var(--color-text-muted);
+  transition: transform 0.15s;
+  transform: rotate(90deg);
+
+  &.is-open { transform: rotate(-90deg); }
 }
 
 .legend-item {
@@ -2758,6 +2862,22 @@ async function handleRefresh() {
   padding: 2px 8px;
   background: rgba(110, 231, 183, 0.1);
   border-radius: 4px;
+}
+
+.source-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 2rem;
+  text-align: center;
+  color: var(--color-text-secondary, #909296);
+
+  .source-empty-icon { font-size: 2rem; opacity: 0.6; }
+  .source-empty-title { margin: 0; font-weight: 600; color: var(--color-text-primary, #c1c2c5); }
+  .source-empty-desc { margin: 0; font-size: 0.85rem; line-height: 1.5; }
 }
 
 .source-panel-content {

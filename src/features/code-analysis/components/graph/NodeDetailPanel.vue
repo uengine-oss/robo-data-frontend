@@ -456,31 +456,31 @@ function getNodeSubInfo(node: GraphNode): string {
             >
               ✕
             </button>
-          </div>
-          <!-- 검색 결과 드롭다운 -->
-          <div v-if="showSearchResults" class="search-results-dropdown">
-            <div class="search-results-header" v-if="hasSearchResults">
-              검색 결과 ({{ searchResults.length }}개{{ searchResults.length >= MAX_SEARCH_RESULTS ? '+' : '' }})
-            </div>
-            <template v-if="hasSearchResults">
-              <div
-                v-for="resultNode in searchResults"
-                :key="resultNode.id"
-                class="search-result-item"
-                @mousedown.prevent="handleSearchResultSelect(resultNode)"
-              >
-                <span
-                  class="result-label"
-                  :style="{ background: getNodeColor(resultNode.labels || ['Unknown']) }"
-                >{{ resultNode.labels?.join(' / ') || 'Node' }}</span>
-                <div class="result-info">
-                  <span class="result-name">{{ getNodeDisplayName(resultNode) }}</span>
-                  <span class="result-sub" v-if="getNodeSubInfo(resultNode)">{{ getNodeSubInfo(resultNode) }}</span>
-                </div>
+            <!-- 검색 결과 드롭다운 (입력칸 기준 앵커 — 검색 중 '캔버스 비우기' 버튼을 덮어 오조작 방지) -->
+            <div v-if="showSearchResults" class="search-results-dropdown">
+              <div class="search-results-header" v-if="hasSearchResults">
+                검색 결과 ({{ searchResults.length }}개{{ searchResults.length >= MAX_SEARCH_RESULTS ? '+' : '' }})
               </div>
-            </template>
-            <div v-else class="search-no-results">
-              검색 결과가 없습니다
+              <template v-if="hasSearchResults">
+                <div
+                  v-for="resultNode in searchResults"
+                  :key="resultNode.id"
+                  class="search-result-item"
+                  @mousedown.prevent="handleSearchResultSelect(resultNode)"
+                >
+                  <span
+                    class="result-label"
+                    :style="{ background: getNodeColor(resultNode.labels || ['Unknown']) }"
+                  >{{ resultNode.labels?.join(' / ') || 'Node' }}</span>
+                  <div class="result-info">
+                    <span class="result-name">{{ getNodeDisplayName(resultNode) }}</span>
+                    <span class="result-sub" v-if="getNodeSubInfo(resultNode)">{{ getNodeSubInfo(resultNode) }}</span>
+                  </div>
+                </div>
+              </template>
+              <div v-else class="search-no-results">
+                검색 결과가 없습니다
+              </div>
             </div>
           </div>
           <!-- 캔버스 비우기 버튼 (캔버스에 노드 있을 때만 표시. 선택·활성 필터도 함께 해제) -->
@@ -845,7 +845,6 @@ function getNodeSubInfo(node: GraphNode): string {
   margin-bottom: 16px;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--color-border);
-  position: relative;
 }
 
 .search-input-wrapper {
