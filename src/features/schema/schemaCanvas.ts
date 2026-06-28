@@ -250,22 +250,26 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     fileName: string
     fileDirectory: string
     fileContent: string
+    startLine: number  // 슬라이스 콘텐츠 첫 줄 = 실제 파일 줄번호 기준점 (spec 044)
     highlightedLine: number
     procedureName: string
     statements: StatementInfo[]  // AI 설명 정보
     isLoadingStatements: boolean
     notFound: boolean  // 원본 소스를 못 읽음 — 가짜 코드 대신 정직한 빈 상태 (spec 043)
+    loadError: boolean  // 소스 불러오기 실패(≠ 없음) — 재시도 안내 (spec 044)
   }
   const sourceCodePanel = ref<SourceCodePanelState>({
     isOpen: false,
     fileName: '',
     fileDirectory: '',
     fileContent: '',
+    startLine: 1,
     highlightedLine: 0,
     procedureName: '',
     statements: [],
     isLoadingStatements: false,
-    notFound: false
+    notFound: false,
+    loadError: false
   })
   
   // 테이블 데이터 조회 패널 상태
@@ -659,14 +663,11 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     return grouped
   })
   
-  // 3레벨 그룹핑: datasource > schema > tables (캔버스에 없는 테이블만)
+  // 3레벨 그룹핑: datasource > schema > tables (단일 통합 트리 — 캔버스 여부는 is-on-canvas 로 표시)
   const tablesByDatasource = computed(() => {
-    const onCanvas = new Set(tablesOnCanvas.value)
     const grouped: Record<string, Record<string, Text2SqlTableInfo[]>> = {}
-    
+
     filteredTables.value.forEach(table => {
-      if (onCanvas.has(table.name)) return
-      
       const ds = table.datasource || 'default'
       const schema = table.schema || 'public'
       
@@ -705,6 +706,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
             name: t.name,
             schema: t.table_schema,  // Backend returns table_schema
             datasource: t.datasource || '',  // 데이터소스명 추가
+            logical_name: t.logical_name,  // 논리명(spec 025) — 카드 제목용
             description: t.description || '',
             description_source: (rawSource && (rawSource === 'ddl' || rawSource === 'procedure' || rawSource === 'code' || rawSource === 'user' || rawSource === ''))
               ? rawSource
@@ -826,6 +828,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
             table_name: c.table_name,
             dtype: c.dtype,
             nullable: c.nullable,
+            logical_name: (c as any).logical_name || undefined,  // 논리명(있으면 카드 우선)
             description: c.description || '',
             description_source: (rawSource && (rawSource === 'ddl' || rawSource === 'procedure' || rawSource === 'code' || rawSource === 'user' || rawSource === ''))
               ? rawSource
@@ -931,7 +934,9 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         tableName: table.name,
         schema: table.schema || 'public',
         datasource: table.datasource || '',  // 데이터소스명 (멀티 데이터소스 지원)
+        logical_name: (table as any).logical_name || undefined,  // 논리명(있으면 카드 제목)
         description: table.description || undefined,
+        analyzed_description: (table as any).analyzed_description || undefined,  // 카드 부제(깔끔한 의미)
         description_source: table.description_source || undefined,
         columns: columns,
         columnCount: table.column_count || columns.length,
@@ -1246,22 +1251,26 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     fileContent: string,
     highlightedLine: number,
     procedureName: string,
-    found = true
+    startLine = 1,
+    found = true,
+    loadError = false
   ) {
     // 하나만 열리게 — 소스 패널 열 때 다른 우측/데이터 패널 닫음
     isDetailPanelOpen.value = false
     closeTableDataPanel()
-    // 패널 열기 — 원본을 못 읽었으면 가짜 코드 대신 정직한 빈 상태 (spec 043)
+    // 패널 열기 — 원본을 못 읽었으면 가짜 코드 대신 정직한 빈 상태 (spec 043/044)
     sourceCodePanel.value = {
       isOpen: true,
       fileName,
       fileDirectory,
       fileContent: found ? fileContent : '',
+      startLine,
       highlightedLine,
       procedureName,
       statements: [],
       isLoadingStatements: true,
-      notFound: !found
+      notFound: !found && !loadError,
+      loadError
     }
     
     // Statement 설명 로드
@@ -1287,11 +1296,13 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       fileName: '',
       fileDirectory: '',
       fileContent: '',
+      startLine: 1,
       highlightedLine: 0,
       procedureName: '',
       statements: [],
       isLoadingStatements: false,
-      notFound: false
+      notFound: false,
+      loadError: false
     }
   }
   

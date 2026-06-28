@@ -4,9 +4,11 @@
  * 상단 헤더 - 로고, 검색바, 사용자 정보
  */
 
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useSessionStore } from '@/shared/stores/session'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
+import { useNavigatorStore } from '@/shared/stores/navigator'
+import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
 import { storeToRefs } from 'pinia'
 import SettingsModal from './SettingsModal.vue'
 import { IconSearch, IconBell, IconSettings } from '@/shared/icons'
@@ -14,12 +16,24 @@ import { getAppTitle } from '@/shared/config/appSettings'
 
 const sessionStore = useSessionStore()
 const projectStore = useAnalyzerStore()
+const navigatorStore = useNavigatorStore()
+const schemaCanvasStore = useSchemaCanvasStore()
 
 const { isProcessing, currentStep } = storeToRefs(projectStore)
 
 const showSettings = ref(false)
 const searchQuery = ref('')
+const searchInput = ref<HTMLInputElement | null>(null)
 const appTitle = ref(getAppTitle())
+
+// 검색 placeholder = 현재 탭에 맞게 정직하게(거짓 표기 금지, spec 045 US6)
+const searchPlaceholder = computed(() => {
+  switch (sessionStore.activeTab) {
+    case 'schema': return '테이블 검색…'
+    case 'graph': return '노드 검색…'
+    default: return '테이블·노드 검색…'
+  }
+})
 
 // 타이틀 변경 이벤트 핸들러
 const handleAppTitleChange = (event: Event) => {
@@ -29,10 +43,12 @@ const handleAppTitleChange = (event: Event) => {
 
 onMounted(() => {
   window.addEventListener('appTitleChange', handleAppTitleChange)
+  window.addEventListener('keydown', onGlobalKey)
 })
 
 onUnmounted(() => {
   window.removeEventListener('appTitleChange', handleAppTitleChange)
+  window.removeEventListener('keydown', onGlobalKey)
 })
 
 const handleUmlDepthChange = (value: number) => {
@@ -84,19 +100,31 @@ const isNaturalLanguageQuery = (query: string): boolean => {
 }
 
 const handleSearch = () => {
-  if (!searchQuery.value.trim()) return
-  
   const query = searchQuery.value.trim()
-  
-  if (isNaturalLanguageQuery(query)) {
-    // 자연어 질문 → Text2SQL 탭으로 이동
-    sessionStore.navigateToNLSearch(query)
+  if (!query) return
+
+  // 현재 탭 맥락 검색 (spec 045 US6): 그래프 탭=노드검색, 스키마 탭=테이블검색.
+  // 각 탭 검색의 단일 출처 store에 직접 설정 → 같은 탭에서도 즉시 반영
+  const tab = sessionStore.activeTab
+  if (tab === 'graph') {
+    navigatorStore.searchQuery = query
+  } else if (tab === 'schema') {
+    schemaCanvasStore.searchQuery = query
   } else {
-    // 단순 키워드 → 스키마 탭으로 이동
-    sessionStore.navigateToSchemaSearch(query)
+    // 그 외 탭: 자연어→Text2SQL, 키워드→스키마 탭으로 이동(합리적 폴백)
+    if (isNaturalLanguageQuery(query)) sessionStore.navigateToNLSearch(query)
+    else sessionStore.navigateToSchemaSearch(query)
   }
-  
-  searchQuery.value = '' // 검색창 초기화
+
+  searchQuery.value = ''
+}
+
+// ⌘K / Ctrl+K → 검색창 포커스 (빈 장식 아니라 실제 단축키, FR-017)
+const onGlobalKey = (e: KeyboardEvent) => {
+  if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault()
+    searchInput.value?.focus()
+  }
 }
 </script>
 
@@ -117,24 +145,18 @@ const handleSearch = () => {
     <!-- 검색바 영역 -->
     <div class="header-center">
       <div class="search-container">
-        <div class="search-type">
-          All
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="m6 9 6 6 6-6"/>
-          </svg>
-        </div>
-        <div class="search-divider"></div>
         <input
+          ref="searchInput"
           type="text"
           v-model="searchQuery"
           class="search-input"
-          placeholder="Search for Classes, Methods, Tables, Packages..."
+          :placeholder="searchPlaceholder"
           @keyup.enter="handleSearch"
         />
-        <div class="search-shortcut">
+        <div class="search-shortcut" title="단축키: ⌘/Ctrl + K 로 검색창 포커스">
           <kbd>⌘</kbd><kbd>K</kbd>
         </div>
-        <button class="search-btn" @click="handleSearch">
+        <button class="search-btn" @click="handleSearch" title="검색">
           <IconSearch :size="16" />
         </button>
       </div>
@@ -271,28 +293,6 @@ const handleSearch = () => {
     box-shadow: 0 0 0 3px rgba(34, 139, 230, 0.15);
     background: var(--color-bg-secondary);
   }
-}
-
-.search-type {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 12px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-text-light);
-  cursor: pointer;
-  white-space: nowrap;
-  
-  &:hover {
-    color: var(--color-text);
-  }
-}
-
-.search-divider {
-  width: 1px;
-  height: 20px;
-  background: var(--color-border);
 }
 
 .search-input {

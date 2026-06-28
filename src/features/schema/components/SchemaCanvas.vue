@@ -12,6 +12,7 @@ import TextViewer from '@/shared/components/TextViewer.vue'
 import CardinalityModal, { type ConnectionInfo, type Cardinality, type MatchStrategy } from './CardinalityModal.vue'
 import EditRelationshipDialog from './EditRelationshipDialog.vue'
 import CloseButton from './CloseButton.vue'
+import NameModeSwitch from './NameModeSwitch.vue'
 import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
 import { behaviorApi } from '@/features/domain/api'
 import type { Text2SqlTableInfo } from '@/shared/types'
@@ -44,7 +45,7 @@ const emit = defineEmits<{
 
 const store = useSchemaCanvasStore()
 const isDragOver = ref(false)
-const searchQuery = ref('')
+// 검색어 단일 출처 = store.searchQuery (로컬 ref 폐기 — 상단 전체검색 등 외부 설정도 즉시 반영)
 const isConnecting = ref(false)
 
 // 소스 코드 패널 refs
@@ -217,12 +218,19 @@ const expandedSchemas = ref<Record<string, boolean>>({
 // SQL 쿼리 표시 토글
 const showSqlQuery = ref(false)
 
+// 기본 펼침 — 명시적으로 false 일 때만 접힘(undefined=펼침)
+function isDsExpanded(ds: string): boolean {
+  return expandedDatasources.value[ds] !== false
+}
+function isSchemaExpanded(schema: string): boolean {
+  return expandedSchemas.value[schema] !== false
+}
 function toggleDatasource(ds: string) {
-  expandedDatasources.value[ds] = !expandedDatasources.value[ds]
+  expandedDatasources.value[ds] = expandedDatasources.value[ds] === false
 }
 
 function toggleSchema(schema: string) {
-  expandedSchemas.value[schema] = !expandedSchemas.value[schema]
+  expandedSchemas.value[schema] = expandedSchemas.value[schema] === false
 }
 
 // 데이터소스 내 스키마 수 계산
@@ -236,6 +244,19 @@ function getTableCountInDatasource(ds: string): number {
   const schemas = store.tablesByDatasource[ds]
   if (!schemas) return 0
   return Object.values(schemas).reduce((sum, tables) => sum + tables.length, 0)
+}
+
+// 트리에서 캔버스에 올라간 테이블 표시용 (단일 목록 통합 spec 044)
+function isOnCanvas(tableName: string): boolean {
+  return store.tablesOnCanvas.includes(tableName)
+}
+
+// 검색결과 소속줄 — (논리명을 1차로 썼으면) 물리명 · 스키마. 그래프 노드검색과 같은 톤(spec 045)
+function tableSearchSub(t: { name: string; logical_name?: string; table_schema?: string }): string {
+  const parts: string[] = []
+  if (t.logical_name && t.logical_name !== t.name) parts.push(t.name)
+  if (t.table_schema) parts.push(t.table_schema)
+  return parts.join(' · ')
 }
 
 // Cardinality Modal State
@@ -317,30 +338,21 @@ onMounted(async () => {
 // Handlers
 let semanticSearchTimeout: ReturnType<typeof setTimeout> | null = null
 
-function handleSearch() {
-  store.searchQuery = searchQuery.value
-  
-  // 시멘틱 검색 디바운스 (500ms 후 실행)
-  if (semanticSearchTimeout) {
-    clearTimeout(semanticSearchTimeout)
-  }
-  
-  if (searchQuery.value.trim().length >= 2) {
-    semanticSearchTimeout = setTimeout(() => {
-      store.performSemanticSearch(searchQuery.value)
-    }, 500)
+// 검색어(store.searchQuery) 변경 감시 — 입력이든 외부(상단 전체검색)든 의미검색 디바운스 트리거
+watch(() => store.searchQuery, (q) => {
+  if (semanticSearchTimeout) clearTimeout(semanticSearchTimeout)
+  const v = (q || '').trim()
+  if (v.length >= 2) {
+    semanticSearchTimeout = setTimeout(() => store.performSemanticSearch(v), 500)
   } else {
     store.clearSemanticSearch()
   }
-}
+})
 
 function clearSearch() {
-  searchQuery.value = ''
   store.searchQuery = ''
   store.clearSemanticSearch()
-  if (semanticSearchTimeout) {
-    clearTimeout(semanticSearchTimeout)
-  }
+  if (semanticSearchTimeout) clearTimeout(semanticSearchTimeout)
 }
 
 async function handleDrop(event: DragEvent) {
@@ -783,116 +795,78 @@ async function handleRefresh() {
         </button>
       </div>
       
-      <!-- Search -->
+      <!-- Search (입력 단일 출처 = store.searchQuery) -->
       <div class="search-box">
         <IconSearch :size="14" />
-        <input 
-          v-model="searchQuery"
-          @input="handleSearch"
-          type="text" 
+        <input
+          v-model="store.searchQuery"
+          type="text"
           placeholder="테이블 검색..."
         />
-        <button v-if="searchQuery" class="search-clear" @click="clearSearch">×</button>
+        <button v-if="store.searchQuery" class="search-clear" @click="clearSearch">×</button>
       </div>
-      
-      <!-- 시멘틱 검색 결과 섹션 -->
-      <div v-if="searchQuery" class="semantic-search-section">
-        <!-- 시멘틱 검색 중 표시 -->
-        <div v-if="store.isSemanticSearching" class="semantic-loading">
-          <span class="semantic-spinner"></span>
-          <span>의미 기반 검색 중...</span>
+
+      <!-- 검색 결과 — 이름·논리명 검색. 검색어 있을 때 -->
+      <div v-if="store.searchQuery" class="table-section table-section--scrollable">
+        <div v-if="store.filteredTables.length === 0" class="search-empty">
+          '{{ store.searchQuery }}' 와 일치하는 테이블이 없습니다
         </div>
-        
-        <!-- 시멘틱 검색 결과 -->
-        <template v-else-if="store.semanticSearchResults.length > 0">
-          <div class="section-header semantic-header">
-            <span>🔮 의미 기반 추천</span>
-            <span class="section-count">{{ store.semanticSearchResults.length }}</span>
-          </div>
-          <div class="semantic-results">
-            <div 
-              v-for="result in store.semanticSearchResults" 
-              :key="`semantic-${result.name}`"
-              class="semantic-result-item"
-              draggable="true"
-              @dragstart="(e) => startDragSemanticResult(e, result)"
-              @dblclick="addSemanticResultToCanvas(result)"
-            >
-              <div class="semantic-result-header">
-                <IconTable :size="14" class="table-icon" />
-                <span class="semantic-result-name">{{ result.name }}</span>
-                <span class="similarity-badge">{{ Math.round(result.similarity * 100) }}%</span>
-              </div>
-              <div v-if="result.description" class="semantic-result-desc">
-                {{ result.description.substring(0, 80) }}...
-              </div>
-            </div>
-          </div>
-        </template>
-        
-        <!-- 시멘틱 검색 에러 -->
-        <div v-else-if="store.semanticSearchError" class="semantic-error">
-          ⚠️ {{ store.semanticSearchError }}
-        </div>
-      </div>
-      
-      <!-- Tables on Canvas -->
-      <div v-if="store.tablesOnCanvas.length > 0" class="table-section">
-        <div class="section-header">
-          <span>캔버스에 있는 테이블</span>
-          <span class="section-count">{{ store.tablesOnCanvas.length }}</span>
-        </div>
-        <div class="table-list">
-          <div 
-            v-for="tableName in store.tablesOnCanvas" 
-            :key="tableName"
-            class="table-item table-item--on-canvas"
-            @click="store.selectNode(`table-${tableName}`)"
-          >
-            <IconTable :size="14" class="table-item__icon" />
-            <span class="table-item__name">{{ tableName }}</span>
-            <button 
-              class="table-item__remove"
-              @click.stop="store.removeTableFromCanvas(tableName)"
-              title="캔버스에서 제거"
-            >×</button>
-          </div>
-        </div>
-      </div>
-      
-      <!-- 텍스트 검색 결과 (searchQuery가 있을 때만 표시) -->
-      <div v-if="searchQuery && store.filteredTables.length > 0" class="table-section text-search-results">
-        <div class="section-header search-results-header">
-          <span>🔍 검색 결과</span>
-          <span class="section-count">{{ store.tablesNotOnCanvas.length }}</span>
-        </div>
-        <div class="table-list">
-          <div 
-            v-for="table in store.tablesNotOnCanvas" 
+        <!-- 검색결과 = 그래프 노드검색과 같은 톤(논리명 우선·소속). 트리 아니므로 가이드선 없는 깔끔한 리스트 -->
+        <div v-else class="search-results">
+          <div
+            v-for="table in store.filteredTables"
             :key="`search-${table.name}`"
-            class="table-item table-item--search-result"
+            class="search-row"
+            :class="{ 'is-on-canvas': isOnCanvas(table.name), 'is-selected': store.selectedTable?.name === table.name }"
             draggable="true"
+            :title="isOnCanvas(table.name) ? '캔버스에 있음 — 클릭하면 포커스' : '더블클릭 또는 드래그로 캔버스에 추가'"
             @dragstart="(e) => startDragTable(e, table)"
+            @click="isOnCanvas(table.name) && store.selectNode(`table-${table.name}`)"
             @dblclick="handleTableDoubleClick(table)"
           >
-            <IconTable :size="14" class="table-item__icon" />
-            <div class="table-item__info">
-              <span class="table-item__name">{{ table.name }}</span>
-              <span class="table-item__schema">{{ table.schema }}</span>
+            <IconTable :size="16" class="search-row__icon" />
+            <div class="search-row__info">
+              <span class="search-row__name" :title="table.logical_name || table.name">{{ table.logical_name || table.name }}</span>
+              <span class="search-row__sub" v-if="tableSearchSub(table)" :title="tableSearchSub(table)">{{ tableSearchSub(table) }}</span>
             </div>
-            <div v-if="table.description" class="table-item__desc" :title="table.description">
-              {{ table.description.slice(0, 50) }}{{ table.description.length > 50 ? '...' : '' }}
+            <span v-if="isOnCanvas(table.name)" class="search-row__dot" title="캔버스에 있음">●</span>
+            <button
+              v-if="isOnCanvas(table.name)"
+              class="search-row__remove"
+              @click.stop="store.removeTableFromCanvas(table.name)"
+              title="캔버스에서 제거"
+            >×</button>
+            <span v-else class="search-row__hint">＋</span>
+          </div>
+        </div>
+
+        <!-- 의미 기반 추천(semantic) — 이름검색과 별개, 컴팩트 표시 -->
+        <div v-if="store.isSemanticSearching || store.semanticSearchResults.length > 0 || store.semanticSearchError" class="semantic-section">
+          <div class="semantic-section__head">의미 기반 추천</div>
+          <div v-if="store.isSemanticSearching" class="semantic-section__msg">검색 중…</div>
+          <div v-else-if="store.semanticSearchError" class="semantic-section__msg">{{ store.semanticSearchError }}</div>
+          <div
+            v-for="result in store.semanticSearchResults"
+            :key="`sem-${result.name}`"
+            class="search-row"
+            :class="{ 'is-on-canvas': isOnCanvas(result.name) }"
+            draggable="true"
+            :title="result.description || result.name"
+            @dragstart="(e) => startDragSemanticResult(e, result)"
+            @dblclick="addSemanticResultToCanvas(result)"
+          >
+            <IconTable :size="16" class="search-row__icon" />
+            <div class="search-row__info">
+              <span class="search-row__name" :title="result.name">{{ result.name }}</span>
+              <span class="search-row__sub" v-if="result.schema" :title="result.schema">{{ result.schema }}</span>
             </div>
+            <span class="search-row__pct" :title="`의미 유사도 ${Math.round(result.similarity * 100)}%`">{{ Math.round(result.similarity * 100) }}%</span>
           </div>
         </div>
       </div>
-      
-      <!-- Available Tables (Schema Tree) - 검색어가 없을 때만 표시 -->
+
+      <!-- 테이블 트리 (단일 목록) - 캔버스에 올라간 건 ● 로 표시. 검색어 없을 때만 -->
       <div v-else class="table-section table-section--scrollable">
-        <div class="section-header">
-          <span>사용 가능한 테이블</span>
-          <span class="section-count">{{ store.tablesNotOnCanvas.length }}</span>
-        </div>
         <div class="schema-tree">
           <!-- 3레벨: 데이터소스 > 스키마 > 테이블 -->
           <div 
@@ -901,63 +875,68 @@ async function handleRefresh() {
             class="datasource-folder"
           >
             <!-- 데이터소스 헤더 (1레벨) -->
-            <div 
+            <div
               class="datasource-header"
-              :class="{ 'datasource-header--expanded': expandedDatasources[ds] }"
+              :class="{ 'datasource-header--expanded': isDsExpanded(ds) }"
               @click="toggleDatasource(ds)"
             >
-              <IconChevronRight 
-                :size="12" 
+              <IconChevronRight
+                :size="12"
                 class="datasource-chevron"
-                :class="{ 'datasource-chevron--expanded': expandedDatasources[ds] }"
+                :class="{ 'datasource-chevron--expanded': isDsExpanded(ds) }"
               />
               <IconDatabase :size="14" class="datasource-icon" />
               <span class="datasource-name">{{ ds }}</span>
               <span class="datasource-count">{{ getTableCountInDatasource(ds) }}</span>
             </div>
-            
+
             <!-- 데이터소스 내 스키마들 (2레벨) -->
-            <div v-if="expandedDatasources[ds]" class="datasource-schemas">
+            <div v-if="isDsExpanded(ds)" class="datasource-schemas">
               <div 
                 v-for="schema in getSchemasInDatasource(ds)" 
                 :key="`${ds}-${schema}`"
                 class="schema-folder"
               >
                 <!-- 스키마 헤더 (클릭 시 토글) -->
-                <div 
+                <div
                   class="schema-header"
-                  :class="{ 'schema-header--expanded': expandedSchemas[schema] }"
+                  :class="{ 'schema-header--expanded': isSchemaExpanded(schema) }"
                   @click="toggleSchema(schema)"
                 >
-                  <IconChevronRight 
-                    :size="12" 
+                  <IconChevronRight
+                    :size="12"
                     class="schema-chevron"
-                    :class="{ 'schema-chevron--expanded': expandedSchemas[schema] }"
+                    :class="{ 'schema-chevron--expanded': isSchemaExpanded(schema) }"
                   />
                   <IconFolder :size="14" class="schema-icon" />
                   <span class="schema-name">{{ schema }}</span>
                   <span class="schema-count">{{ store.tablesByDatasource[ds]?.[schema]?.length || 0 }}</span>
                 </div>
-                
+
                 <!-- 스키마 내 테이블 목록 (3레벨) -->
-                <div v-if="expandedSchemas[schema]" class="schema-tables">
-                  <div 
-                    v-for="table in store.tablesByDatasource[ds]?.[schema] || []" 
+                <div v-if="isSchemaExpanded(schema)" class="schema-tables">
+                  <div
+                    v-for="table in store.tablesByDatasource[ds]?.[schema] || []"
                     :key="table.name"
                     class="table-item"
+                    :class="{ 'is-on-canvas': isOnCanvas(table.name), 'is-selected': store.selectedTable?.name === table.name }"
                     draggable="true"
+                    :title="isOnCanvas(table.name) ? '캔버스에 있음 — 클릭하면 포커스' : '더블클릭 또는 드래그로 캔버스에 추가'"
                     @dragstart="(e) => startDragTable(e, table)"
+                    @click="isOnCanvas(table.name) && store.selectNode(`table-${table.name}`)"
                     @dblclick="handleTableDoubleClick(table)"
                   >
                     <IconTable :size="14" class="table-item__icon" />
-                    <div class="table-item__info">
-                      <span class="table-item__name">{{ table.name }}</span>
-                      <span class="table-item__cols">{{ table.column_count }} cols</span>
-                      <span v-if="table.description" class="table-item__desc" :title="table.description">
-                        {{ table.description.slice(0, 30) }}{{ table.description.length > 30 ? '...' : '' }}
-                      </span>
-                    </div>
-                    <div class="table-item__drag-hint">⋮⋮</div>
+                    <span class="table-item__name" :title="table.description || table.name">{{ table.name }}</span>
+                    <!-- 캔버스에 있으면 초록 점(그래프 네비게이터와 동일), 없으면 추가 힌트(＋) -->
+                    <span v-if="isOnCanvas(table.name)" class="table-item__on-dot" title="캔버스에 있음">●</span>
+                    <button
+                      v-if="isOnCanvas(table.name)"
+                      class="table-item__remove"
+                      @click.stop="store.removeTableFromCanvas(table.name)"
+                      title="캔버스에서 제거"
+                    >×</button>
+                    <span v-else class="table-item__add-hint">＋</span>
                   </div>
                 </div>
               </div>
@@ -966,33 +945,6 @@ async function handleRefresh() {
         </div>
       </div>
       
-      <!-- 테이블 보기 — 단일 컨트롤(상위10개/전체) -->
-      <div v-if="store.allTables.length > 0" class="panel-footer">
-        <div class="table-view-control">
-          <button
-            class="btn btn--primary btn--sm table-view-control__btn"
-            :disabled="store.loading"
-            @click="showTableViewMenu = !showTableViewMenu"
-          >
-            <span>{{ store.loading ? '로딩 중…' : '📊 테이블 보기' }}</span>
-            <IconChevronRight :size="14" class="table-view-control__chevron" :class="{ 'is-open': showTableViewMenu }" />
-          </button>
-          <div v-if="showTableViewMenu" class="table-view-menu">
-            <button
-              v-if="store.tablesNotOnCanvas.length > 0"
-              class="table-view-menu__item"
-              @click="handleAddTopTables"
-            >상위 10개 추가</button>
-            <button
-              class="table-view-menu__item"
-              :disabled="store.loading"
-              @click="handleAddAllTables"
-            >전체 테이블</button>
-          </div>
-        </div>
-      </div>
-      <!-- 메뉴 바깥 클릭 시 닫힘 -->
-      <div v-if="showTableViewMenu" class="table-view-backdrop" @click="showTableViewMenu = false" />
     </aside>
     
     <!-- Main Canvas -->
@@ -1152,7 +1104,48 @@ async function handleRefresh() {
       <div v-if="isConnecting" class="connection-indicator">
         🔗 릴레이션 연결 중...
       </div>
-      
+
+      <!-- 캔버스 위 컨트롤 그룹 — 그래프 탭과 일관(좌상단 floating). 테이블 보기 + 논리/물리 토글 (spec 044) -->
+      <div v-if="store.allTables.length > 0" class="floating-controls left-top">
+        <!-- 논리/물리 토글 — 캔버스 노드 유무와 무관하게 상시 표시 -->
+        <NameModeSwitch />
+        <div class="table-view-control">
+          <button
+            class="tv-btn"
+            :class="{ active: showTableViewMenu }"
+            :disabled="store.loading"
+            @click="showTableViewMenu = !showTableViewMenu"
+          >
+            <span class="tv-btn__label">{{ store.loading ? '로딩 중…' : '테이블 추가' }}</span>
+            <span class="tv-btn__caret">▾</span>
+          </button>
+          <div v-if="showTableViewMenu" class="table-view-menu">
+            <button
+              v-if="store.tablesNotOnCanvas.length > 0"
+              class="table-view-menu__item"
+              @click="handleAddTopTables"
+            >상위 10개</button>
+            <button
+              class="table-view-menu__item"
+              :disabled="store.loading"
+              @click="handleAddAllTables"
+            >전체</button>
+          </div>
+        </div>
+        <div class="floating-divider"></div>
+        <!-- 비우기 — 상시 표시(캔버스 의존 X), 빈 캔버스에선 비활성 -->
+        <button
+          class="tv-btn tv-btn--danger"
+          title="캔버스의 모든 테이블 비우기"
+          :disabled="store.nodes.length === 0"
+          @click="handleClearCanvas"
+        >
+          <IconTrash :size="13" />
+          <span>비우기</span>
+        </button>
+      </div>
+      <div v-if="showTableViewMenu" class="table-view-backdrop" @click="showTableViewMenu = false" />
+
       <!-- Canvas Toolbar -->
       <div v-if="store.nodes.length > 0" class="canvas-toolbar">
         <button class="canvas-toolbar__btn" @click="zoomIn()" title="Zoom In">
@@ -1168,19 +1161,6 @@ async function handleRefresh() {
         <button class="canvas-toolbar__btn" @click="store.updateEdgesFromRelationships()" title="릴레이션 새로고침">
           <IconLink :size="18" />
         </button>
-        <button class="canvas-toolbar__btn canvas-toolbar__btn--danger" @click="handleClearCanvas" title="캔버스 비우기">
-          <IconTrash :size="18" />
-        </button>
-      </div>
-      
-      <!-- 논리명/물리명 전환 스위치 (범례 숨김 시 독립 표시) -->
-      <div v-if="props.hideLegend && store.nodes.length > 0" class="name-mode-switch">
-        <label class="legend-switch" @click.prevent="store.toggleLogicalNames()">
-          <span class="legend-switch__label">{{ store.showLogicalNames ? '논리명' : '물리명' }}</span>
-          <span class="legend-switch__toggle" :class="{ active: store.showLogicalNames }">
-            <span class="legend-switch__knob"></span>
-          </span>
-        </label>
       </div>
       
       <!-- Legend (숨김 가능) -->
@@ -1226,17 +1206,15 @@ async function handleRefresh() {
           <span class="legend-line legend-line--user"></span>
           <span class="legend-label">사용자 입력</span>
         </label>
-        
+
         <div class="legend-divider"></div>
-        
-        <!-- 논리명/물리명 전환 스위치 (범례 내부) -->
-        <label class="legend-switch" @click.prevent="store.toggleLogicalNames()">
-          <span class="legend-switch__label">{{ store.showLogicalNames ? '논리명' : '물리명' }}</span>
-          <span class="legend-switch__toggle" :class="{ active: store.showLogicalNames }">
-            <span class="legend-switch__knob"></span>
-          </span>
-        </label>
-        
+        <!-- 카드 컬럼 표기 의미 (작은 카드는 마커로 표시 → 여기서 설명) -->
+        <div class="legend-subtitle">카드 표기</div>
+        <div class="legend-item legend-item--sym">
+          <span class="legend-nn-star">*</span>
+          <span class="legend-label">NOT NULL (필수 입력)</span>
+        </div>
+
         <div class="legend-divider"></div>
         <div class="legend-tip">
           💡 컬럼 핸들을 드래그하여 릴레이션 연결
@@ -1266,8 +1244,14 @@ async function handleRefresh() {
           <span class="source-panel-line">Line {{ store.sourceCodePanel.highlightedLine }}</span>
         </div>
         <div class="source-panel-content" ref="sourceCodeContentRef">
+          <!-- 불러오기 실패(≠ 없음) — 재시도 안내 (spec 044) -->
+          <div v-if="store.sourceCodePanel.loadError" class="source-empty">
+            <span class="source-empty-icon">⚠️</span>
+            <p class="source-empty-title">코드를 불러오지 못했습니다</p>
+            <p class="source-empty-desc">일시적인 문제일 수 있습니다. 참조를 다시 선택해 주세요.</p>
+          </div>
           <!-- 원본 소스 미로드 — 가짜 코드 대신 정직한 빈 상태 (spec 043) -->
-          <div v-if="store.sourceCodePanel.notFound" class="source-empty">
+          <div v-else-if="store.sourceCodePanel.notFound" class="source-empty">
             <span class="source-empty-icon">📄</span>
             <p class="source-empty-title">원본 소스를 찾을 수 없습니다</p>
             <p class="source-empty-desc">이 그래프에는 원본 코드가 로드되어 있지 않습니다.<br>소스 폴더를 다시 분석하면 코드 보기가 활성화됩니다.</p>
@@ -1276,33 +1260,34 @@ async function handleRefresh() {
           <div v-if="store.sourceCodePanel.isLoadingStatements" class="source-loading">
             AI 설명 로딩 중...
           </div>
+          <!-- 슬라이스된 노드 코드 — 표시 줄번호는 실제 파일 줄(startLine 오프셋) (spec 044) -->
           <template v-for="(line, index) in store.sourceCodePanel.fileContent.split('\n')" :key="index">
-            <!-- Statement 시작 라인에 AI 설명 표시 -->
+            <!-- Statement 시작 라인에 AI 설명 표시 (실제 줄 기준) -->
             <div
-              v-if="getStatementForLine(index + 1)"
+              v-if="getStatementForLine(store.sourceCodePanel.startLine + index)"
               class="source-ai-comment"
             >
               <div class="ai-comment-header">
                 <span class="ai-comment-icon">🤖</span>
-                <span class="ai-comment-type">{{ getStatementForLine(index + 1)?.statement_type }}</span>
+                <span class="ai-comment-type">{{ getStatementForLine(store.sourceCodePanel.startLine + index)?.statement_type }}</span>
               </div>
               <TextViewer
                 class="ai-comment-text"
-                :content="getStatementForLine(index + 1)?.summary || getStatementForLine(index + 1)?.ai_description || ''"
+                :content="getStatementForLine(store.sourceCodePanel.startLine + index)?.summary || getStatementForLine(store.sourceCodePanel.startLine + index)?.ai_description || ''"
                 :max-height="240"
                 compact
               />
             </div>
             <!-- 코드 라인 -->
-            <div 
+            <div
               class="source-line"
-              :class="{ 
-                'highlighted': store.sourceCodePanel.highlightedLine === index + 1,
-                'has-statement': !!getStatementForLine(index + 1)
+              :class="{
+                'highlighted': store.sourceCodePanel.highlightedLine === store.sourceCodePanel.startLine + index,
+                'has-statement': !!getStatementForLine(store.sourceCodePanel.startLine + index)
               }"
-              :data-line="index + 1"
+              :data-line="store.sourceCodePanel.startLine + index"
             >
-              <span class="source-line-number">{{ index + 1 }}</span>
+              <span class="source-line-number">{{ store.sourceCodePanel.startLine + index }}</span>
               <span class="source-line-content">{{ line || ' ' }}</span>
             </div>
           </template>
@@ -1963,47 +1948,205 @@ async function handleRefresh() {
   gap: 2px;
 }
 
+/* 검색 결과 없음 */
+.search-empty {
+  padding: 16px 12px;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+/* 의미 기반 추천(semantic) — 컴팩트 */
+.semantic-section {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-border);
+}
+
+.semantic-section__head {
+  padding: 4px 8px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  letter-spacing: 0.2px;
+}
+
+.semantic-section__msg {
+  padding: 6px 8px;
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+
+/* 검색결과 리스트 — 트리 아니므로 가이드선 없는 깔끔한 세로 리스트 */
+.search-results {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 0;
+}
+
+/* 검색결과 행 — 그래프 노드검색과 같은 톤(논리명 우선·소속·컴팩트). spec 045 */
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  cursor: grab;
+  transition: background 0.12s, opacity 0.12s;
+
+  &:hover { background: var(--color-bg-tertiary); }
+  &:active { cursor: grabbing; }
+
+  &.is-on-canvas { opacity: 0.6; cursor: pointer; &:hover { opacity: 1; } }
+  &.is-selected {
+    background: rgba(34, 139, 230, 0.18);
+    opacity: 1;
+    .search-row__name { color: var(--color-text-bright); }
+  }
+}
+
+/* 스키마 검색 = 전부 테이블 → 종류 배지 대신 테이블 아이콘(맥락별 형태) */
+.search-row__icon {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.search-row__info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.search-row__name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-row__sub {
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 캔버스에 있음 점(맨 오른쪽, 사이드바와 동일) → hover 시 × */
+.search-row__dot {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--color-success, #40c057);
+  font-size: 7px;
+  line-height: 1;
+}
+.search-row:hover .search-row__dot { display: none; }
+
+.search-row__remove {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+
+  .search-row:hover & { display: inline-flex; }
+  &:hover { background: var(--color-error); color: #fff; }
+}
+
+.search-row__hint {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.search-row:hover .search-row__hint { opacity: 0.8; }
+
+/* 의미검색 유사도 % (보존) */
+.search-row__pct {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #5eead4;
+  background: rgba(20, 184, 166, 0.16);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* 컴팩트 리스트 행 — 그래프 네비게이터와 동일 패턴 */
 .table-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  background: var(--color-bg-tertiary);
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  gap: 6px;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
   cursor: grab;
-  transition: all 0.15s;
-  
-  &:hover {
-    background: var(--color-bg);
-    border-color: var(--color-accent-light);
-  }
-  
-  &:active {
-    cursor: grabbing;
-  }
-  
-  &--on-canvas {
-    background: rgba(34, 139, 230, 0.15);
-    border-color: rgba(34, 139, 230, 0.3);
+  transition: background 0.12s, opacity 0.12s;
+
+  &:hover { background: var(--color-bg-tertiary); }
+  &:active { cursor: grabbing; }
+
+  .table-item__name { flex: 1; min-width: 0; }
+
+  /* 캔버스에 있음 — 흐리게 + 초록 점(그래프와 동일). 클릭=포커스 */
+  &.is-on-canvas {
+    opacity: 0.6;
     cursor: pointer;
-    
-    &:hover {
-      background: rgba(34, 139, 230, 0.25);
-    }
+    &:hover { opacity: 1; }
   }
+
+  /* 선택됨(상세 패널에 열린 테이블) — 배경 하이라이트 */
+  &.is-selected {
+    background: rgba(34, 139, 230, 0.18);
+    opacity: 1;
+    .table-item__name { color: var(--color-text-bright); }
+  }
+}
+
+/* 캔버스에 있음 표시 점 — 그래프 navigator 동일(맨 오른쪽 끝, hover 시 ×로 교체) */
+.table-item__on-dot {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--color-success, #40c057);
+  font-size: 7px;
+  line-height: 1;
+}
+
+.table-item:hover .table-item__on-dot { display: none; }
+
+/* 추가 힌트(＋) — 캔버스에 없을 때 hover 시 */
+.table-item__add-hint {
+  flex-shrink: 0;
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.table-item:hover .table-item__add-hint {
+  opacity: 0.8;
 }
 
 .table-item__icon {
-  color: var(--color-accent);
-}
-
-.table-item__info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
 }
 
 .table-item__name {
@@ -2012,70 +2155,6 @@ async function handleRefresh() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.table-item__cols {
-  font-size: 0.7rem;
-  color: var(--color-text-muted);
-}
-
-.table-item__desc {
-  font-size: 0.65rem;
-  color: var(--color-text-light);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-style: italic;
-}
-
-.table-item__schema {
-  font-size: 0.65rem;
-  color: var(--color-text-muted);
-  margin-left: 6px;
-  opacity: 0.7;
-}
-
-/* 텍스트 검색 결과 스타일 */
-.text-search-results {
-  max-height: 300px;
-  overflow-y: auto;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.search-results-header {
-  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-hover));
-  color: white;
-  
-  span:first-child {
-    font-weight: 600;
-  }
-}
-
-.table-item--search-result {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  padding: 10px 12px;
-  background: var(--color-bg-tertiary);
-  border-left: 3px solid var(--color-accent);
-  
-  &:hover {
-    background: var(--color-bg-hover);
-    border-left-color: var(--color-success);
-  }
-  
-  .table-item__info {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-  }
-  
-  .table-item__desc {
-    width: 100%;
-    font-size: 0.7rem;
-    opacity: 0.8;
-  }
 }
 
 .table-item__drag-hint {
@@ -2249,11 +2328,11 @@ async function handleRefresh() {
   font-size: 1rem;
   line-height: 1;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  display: none;              /* 평소 숨김(공간 차지 X) → 초록점이 진짜 맨 오른쪽 */
+  transition: background 0.15s, color 0.15s;
 
   .table-item:hover & {
-    opacity: 1;
+    display: inline-flex;     /* hover 시 초록점 대신 × 노출 */
   }
 
   &:hover {
@@ -2262,37 +2341,62 @@ async function handleRefresh() {
   }
 }
 
-/* Panel Footer */
-.panel-footer {
-  padding: 12px;
-  border-top: 1px solid var(--color-border);
+/* 캔버스 위 컨트롤 그룹 — 그래프 탭과 일관(좌상단 floating) (spec 044) */
+.floating-controls {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 100;
 }
 
-// 테이블 보기 — 단일 드롭다운 컨트롤(상위10개/전체)
+/* 테이블 추가 — 그래프 탭 .view-menu-btn 과 동일 톤(이모지·primary 버튼 제거) */
 .table-view-control {
   position: relative;
-
-  &__btn {
-    width: 100%;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-  }
-
-  &__chevron {
-    transition: transform 0.15s;
-    transform: rotate(90deg);
-
-    &.is-open { transform: rotate(-90deg); }
-  }
 }
+
+.tv-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--color-text);
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: var(--shadow-md);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.tv-btn:hover { background: var(--color-bg-tertiary); border-color: var(--color-text-muted); }
+.tv-btn.active { border-color: var(--color-accent); color: var(--color-accent); }
+.tv-btn:disabled { opacity: 0.6; cursor: default; }
+.tv-btn--danger { color: var(--color-text-muted); }
+.tv-btn--danger:hover { color: #ff6b6b; border-color: rgba(255, 107, 107, 0.6); background: rgba(255, 107, 107, 0.08); }
+
+/* floating 컨트롤 구분선 — 추가(콘텐츠) vs 비우기(파괴) 분리 */
+.floating-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--color-border);
+  margin: 0 2px;
+}
+.tv-btn__label { display: inline-flex; align-items: center; line-height: 1; }
+.tv-btn__caret { display: inline-flex; align-items: center; font-size: 10px; line-height: 1; opacity: 0.7; }
 
 .table-view-menu {
   position: absolute;
-  bottom: calc(100% + 6px);
+  top: calc(100% + 6px);
   left: 0;
-  right: 0;
+  min-width: 160px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -2323,7 +2427,7 @@ async function handleRefresh() {
   z-index: 10;
 }
 
-// container query 기준점 — 좌측 패널 폭 기준으로 panel-footer 의 폰트 결정
+// container query 기준점 — 좌측 패널 폭 기준 반응형
 .left-panel {
   container-type: inline-size;
 }
@@ -2569,6 +2673,32 @@ async function handleRefresh() {
   }
 }
 
+/* 카드 표기 범례 — NOT NULL(*) 의미 설명 */
+.legend-subtitle {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--color-text-muted);
+  margin-bottom: 6px;
+}
+
+.legend-item--sym {
+  gap: 6px;
+  margin-bottom: 5px;
+}
+
+.legend-nn-star {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.8rem;
+  font-size: 0.95rem;
+  line-height: 0;
+  color: #f59e0b;
+  flex-shrink: 0;
+}
+
 .legend-divider {
   height: 1px;
   background: var(--color-border);
@@ -2576,69 +2706,6 @@ async function handleRefresh() {
 }
 
 /* 논리명/물리명 전환 스위치 컨테이너 (항상 표시) */
-.name-mode-switch {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  background: var(--color-bg-secondary);
-  padding: 8px 12px;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 10;
-}
-
-/* 범례가 있으면 스위치를 범례 위에 배치 */
-.canvas-legend + .name-mode-switch,
-.canvas-legend ~ .name-mode-switch {
-  /* 범례와 겹치지 않게 */
-}
-
-.legend-switch {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  cursor: pointer;
-  padding: 4px 0;
-  
-  &__label {
-    font-size: 0.75rem;
-    color: var(--color-text-light);
-    font-weight: 500;
-  }
-  
-  &__toggle {
-    position: relative;
-    width: 32px;
-    height: 18px;
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: 9px;
-    transition: all 0.2s ease;
-    
-    &.active {
-      background: rgba(0, 212, 170, 0.3);
-      border-color: #00d4aa;
-    }
-  }
-  
-  &__knob {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 12px;
-    height: 12px;
-    background: var(--color-text-muted);
-    border-radius: 50%;
-    transition: all 0.2s ease;
-    
-    .active & {
-      left: 16px;
-      background: #00d4aa;
-    }
-  }
-}
 
 .legend-tip {
   font-size: 0.7rem;

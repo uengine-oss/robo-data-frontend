@@ -5,7 +5,6 @@ import { computed, inject, ref, watch } from 'vue'
 import type { Text2SqlColumnInfo } from '@/shared/types'
 import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
 import { roboSchemaApi } from '@/features/schema/api'
-import { getDescriptionColor, getDescriptionSourceLabel } from '@/shared/utils/descriptionColor'
 import CloseButton from '@/features/schema/components/CloseButton.vue'
 
 interface Behavior {
@@ -21,7 +20,9 @@ interface TableNodeData {
   tableName: string
   schema: string
   datasource?: string  // 데이터소스명 (예: robo_postgres)
+  logical_name?: string  // 짧은 논리명 (논리명 모드 제목) — analyzer spec 025
   description?: string
+  analyzed_description?: string  // AI 도출 깔끔한 의미 (카드 부제용)
   description_source?: 'ddl' | 'procedure' | 'code' | 'user' | ''  // 설명 출처
   columns: Text2SqlColumnInfo[]
   columnCount: number
@@ -34,10 +35,12 @@ interface TableNodeData {
 interface ProcedureReference {
   procedure_name: string
   procedure_type: string
-  start_line: number
+  start_line: number     // 오너 루틴 시작 줄 = 슬라이스 시작 (spec 044)
+  end_line?: number      // 오너 루틴 끝 줄 = 슬라이스 끝 (spec 044)
   access_type: string
   statement_type?: string
   statement_line?: number
+  evidence_line?: number // 테이블 접근 정확한 줄 = 강조 (spec 044)
   file_name?: string
   file_directory?: string
   file_path?: string   // 절대 파일 경로 (catalog p.file_path, 코드뷰 소스 서빙용 spec 043)
@@ -48,7 +51,9 @@ interface FrameworkReference {
   source_name: string
   source_type: string  // "FUNCTION" | "MODULE"
   access_type: string  // "READS" | "WRITES" | "REFER_TO"
-  start_line?: number  // 함수/모듈 시작 라인
+  start_line?: number  // 함수/모듈 시작 라인 = 슬라이스 시작
+  end_line?: number    // 함수/모듈 끝 라인 = 슬라이스 끝 (spec 044)
+  evidence_line?: number // 테이블 접근 정확한 줄 = 강조 (spec 044)
   file_name?: string
   file_path?: string   // 전체 소스 경로 (예: "swing_system/src/core/db_engine.c")
   file_directory?: string
@@ -130,15 +135,32 @@ function truncateDescription(desc: string, maxLen = 20): string {
   return desc.length > maxLen ? desc.substring(0, maxLen) + '...' : desc
 }
 
+// 카드 제목 — 논리명 모드면 logical_name(analyzer spec 025, 짧은 도메인명), 없으면 물리명.
+// 물리명 모드면 항상 물리명. (요약 analyzed_description 은 제목으로 쓰지 않음 = 부제/상세용)
+const tableMeaning = computed(() => (props.data.analyzed_description || '').trim())
+const cardTitle = computed(() =>
+  canvasStore.showLogicalNames && props.data.logical_name
+    ? props.data.logical_name
+    : props.data.tableName
+)
+
+// 컬럼 1차/2차 라벨 — 논리명 모드면 description(컬럼 논리명), 물리명 모드면 name.
+function colPrimary(col: Text2SqlColumnInfo): string {
+  return canvasStore.showLogicalNames && col.description ? col.description : col.name
+}
+function colSecondary(col: Text2SqlColumnInfo): string {
+  if (canvasStore.showLogicalNames) return col.name
+  return col.description || ''
+}
+
 // 코드 분석 출처 여부 판별 (procedure와 code는 동일 취급)
 function isCodeSource(source?: string): boolean {
   return source === 'procedure' || source === 'code'
 }
 // 설명 출처별 색/라벨은 @/shared/utils/descriptionColor 에서 import
 
-// 호버 시 출처 칩 표시 상태
-const isDescriptionHovered = ref(false)
 const isLoadingReferences = ref(false)
+const referencesError = ref(false)  // 로드 실패(≠ 참조 없음) — 정직 구분 (spec 044)
 const procedureReferences = ref<ProcedureReference[]>([])
 const frameworkReferences = ref<FrameworkReference[]>([])
 const showReferencesPopup = ref(false)
@@ -146,6 +168,7 @@ const referencesPopupPosition = ref({ x: 0, y: 0 })
 
 // 컬럼 참조 팝업 상태
 const showColumnReferencesPopup = ref(false)
+const columnReferencesError = ref(false)  // 로드 실패(≠ 없음) (spec 044)
 const columnReferencesPopupPosition = ref({ x: 0, y: 0 })
 const isLoadingColumnReferences = ref(false)
 const columnReferences = ref<ProcedureReference[]>([])
@@ -155,6 +178,7 @@ const activeColumnName = ref<string>('')
 // 참조 정보 로드 (프로시저 + 프레임워크)
 async function loadProcedureReferences() {
   isLoadingReferences.value = true
+  referencesError.value = false
   try {
     const result = await roboSchemaApi.getTableReferences(
       props.data.tableName,
@@ -163,24 +187,25 @@ async function loadProcedureReferences() {
     procedureReferences.value = result.references || []
     frameworkReferences.value = result.framework_references || []
   } catch (error) {
+    // 조용한 실패 금지 — "참조 없음"과 구분되게 에러 상태 표면화 (spec 044)
     logger.error('Failed to load procedure references:', error)
     procedureReferences.value = []
     frameworkReferences.value = []
+    referencesError.value = true
   } finally {
     isLoadingReferences.value = false
   }
 }
 
-// 출처 칩 클릭 시 팝업 표시
-function handleSourceChipClick(event: MouseEvent) {
-  
-  // 팝업 위치 설정
-  referencesPopupPosition.value = {
-    x: event.clientX,
-    y: event.clientY
-  }
-  
-  // 참조 정보 로드 및 팝업 표시
+// 팝업이 뷰포트 밖으로 잘리지 않게 클릭 위치를 안전 영역으로 보정 (spec 044)
+function clampPopupY(clientY: number): number {
+  const margin = 360  // 팝업 헤더+내용 대략 높이
+  return Math.max(12, Math.min(clientY, window.innerHeight - margin))
+}
+
+// 참조 트리거(항상 보이는 푸터 버튼) 클릭 → 참조 팝업 (spec 044, 모드 무관)
+function openReferences(event: MouseEvent) {
+  referencesPopupPosition.value = { x: event.clientX, y: clampPopupY(event.clientY) }
   loadProcedureReferences()
   showReferencesPopup.value = true
   event.stopPropagation()
@@ -200,6 +225,7 @@ function closeColumnReferencesPopup() {
 // 컬럼 참조 정보 로드
 async function loadColumnReferences(columnName: string) {
   isLoadingColumnReferences.value = true
+  columnReferencesError.value = false
   try {
     const result = await roboSchemaApi.getTableReferences(
       props.data.tableName,
@@ -208,9 +234,11 @@ async function loadColumnReferences(columnName: string) {
     columnReferences.value = result.references || []
     columnFrameworkReferences.value = result.framework_references || []
   } catch (error) {
+    // 조용한 실패 금지 (spec 044)
     logger.error('Failed to load column references:', error)
     columnReferences.value = []
     columnFrameworkReferences.value = []
+    columnReferencesError.value = true
   } finally {
     isLoadingColumnReferences.value = false
   }
@@ -218,12 +246,12 @@ async function loadColumnReferences(columnName: string) {
 
 // 컬럼 설명 (procedure 출처) 클릭 시 팝업 표시
 function handleColumnSourceClick(event: MouseEvent, columnName: string) {
-  // 팝업 위치 설정
+  // 팝업 위치 설정 (뷰포트 안으로 보정)
   columnReferencesPopupPosition.value = {
     x: event.clientX,
-    y: event.clientY
+    y: clampPopupY(event.clientY)
   }
-  
+
   activeColumnName.value = columnName
   
   // 참조 정보 로드 및 팝업 표시
@@ -235,38 +263,49 @@ function handleColumnSourceClick(event: MouseEvent, columnName: string) {
 // 참조(프로시저/프레임워크) 클릭 → analyzer 가 디스크에서 읽어 주는 원본 소스를 우측
 // 코드 패널에 표시 (spec 043). 브라우저 업로드(uploadedFiles) 의존 폐기 — 데스크톱(폴더
 // 선택)·영속 그래프에서도 동작. 못 읽으면 가짜 코드 대신 정직한 빈 상태(found=false).
+// 참조(프로시저/프레임워크) 클릭 → 그 노드의 코드 범위[start,end]만 슬라이스해 코드패널에
+// 표시하고 테이블 접근 줄(evidence)을 강조 (spec 044). 파일 전체 덤프 폐기.
+// 못 읽으면 가짜 코드 대신 정직한 상태: 디스크 없음=notFound / 불러오기 실패=loadError.
 async function openSourceFromReference(
   filePath: string | undefined,
   fileName: string,
-  lineNumber: number,
+  startLine: number,
+  endLine: number,
+  evidenceLine: number,
   symbolName: string
 ) {
   // 참조 선택 시 팝업 닫음 — 소스 패널과 겹치지 않게(하나만)
   closeReferencesPopup()
   closeColumnReferencesPopup()
-  const src = filePath
-    ? await roboSchemaApi.getSourceContent(filePath, { startLine: 1, endLine: 0 })
-    : null
-  const content = src?.found ? src.content : ''
-  canvasStore.openSourceCodePanel(
-    fileName || filePath?.split(/[\\/]/).pop() || symbolName,
-    filePath || '',
-    content,
-    lineNumber,
-    symbolName,
-    !!content
-  )
+  const panelName = fileName || filePath?.split(/[\\/]/).pop() || symbolName
+  if (!filePath) {
+    canvasStore.openSourceCodePanel(panelName, '', '', evidenceLine, symbolName, startLine, false)
+    return
+  }
+  try {
+    const src = await roboSchemaApi.getSourceContent(filePath, { startLine, endLine })
+    // 슬라이스 시작 줄은 서버가 echo 한 start_line 기준(없으면 요청값)
+    const offset = src.found ? (src.start_line || startLine) : startLine
+    canvasStore.openSourceCodePanel(panelName, filePath, src.found ? src.content : '', evidenceLine, symbolName, offset, src.found)
+  } catch (error) {
+    logger.error('Failed to load source slice:', error)
+    canvasStore.openSourceCodePanel(panelName, filePath, '', evidenceLine, symbolName, startLine, false, true)
+  }
 }
 
 function handleProcedureClick(procRef: ProcedureReference) {
-  const lineNumber = procRef.statement_line || procRef.start_line || 1
+  const startLine = procRef.start_line || 1                       // 오너 루틴 시작
+  const endLine = procRef.end_line || 0                           // 0 → 서버가 끝까지(폴백)
+  const evidenceLine = procRef.evidence_line || procRef.statement_line || startLine
   // 절대 file_path 우선(catalog p.file_path), 없으면 디렉토리 폴백
-  openSourceFromReference(procRef.file_path || procRef.file_directory, procRef.file_name || '', lineNumber, procRef.procedure_name)
+  openSourceFromReference(procRef.file_path || procRef.file_directory, procRef.file_name || '', startLine, endLine, evidenceLine, procRef.procedure_name)
 }
 
 function handleFrameworkClick(fwRef: FrameworkReference) {
-  const lineNumber = fwRef.start_line || 1
-  openSourceFromReference(fwRef.file_path || fwRef.file_directory, fwRef.file_name || '', lineNumber, fwRef.source_name)
+  const startLine = fwRef.start_line || 1                         // 함수 시작
+  const endLine = fwRef.end_line || 0
+  const evidenceLine = fwRef.evidence_line || startLine
+  openSourceFromReference(fwRef.file_path || fwRef.file_directory, fwRef.file_name || '', startLine, endLine, evidenceLine, fwRef.source_name)
 }
 
 // 접근 유형 레이블
@@ -332,18 +371,9 @@ function isForeignKey(colName: string): boolean {
   return colName.endsWith('_id') && colName.toLowerCase() !== 'id'
 }
 
-function getColumnTypeShort(dtype: string): string {
-  const type = dtype.toLowerCase()
-  if (type.includes('varchar') || type.includes('text') || type.includes('char')) return 'str'
-  if (type.includes('int') || type.includes('serial')) return 'int'
-  if (type.includes('decimal') || type.includes('numeric') || type.includes('float') || type.includes('double')) return 'num'
-  if (type.includes('bool')) return 'bool'
-  if (type.includes('timestamp') || type.includes('datetime')) return 'ts'
-  if (type.includes('date')) return 'date'
-  if (type.includes('time')) return 'time'
-  if (type.includes('json')) return 'json'
-  if (type.includes('uuid')) return 'uuid'
-  return type.substring(0, 4)
+// 카드용 간단 타입 — 길이/정밀도 괄호 제거, 소문자(상세 길이는 상세패널에서). 예: VARCHAR(20)→varchar
+function simpleType(dtype: string): string {
+  return (dtype || '').replace(/\s*\(.*\)\s*/, '').toLowerCase()
 }
 
 function handleRemove(e: Event) {
@@ -430,13 +460,11 @@ function onColumnMouseLeave() {
           <line x1="9" y1="21" x2="9" y2="9"></line>
         </svg>
       </div>
-      <!-- 논리명 모드: description을 타이틀로, 물리명 모드: tableName을 타이틀로 -->
-      <span 
-        class="table-node__name"
-        :title="canvasStore.showLogicalNames && data.description ? `테이블명: ${data.tableName}` : (data.description || data.tableName)"
-      >
-        {{ canvasStore.showLogicalNames && data.description ? truncateDescription(data.description, 30) : data.tableName }}
-      </span>
+      <div class="table-node__titles">
+        <span class="table-node__name" :title="tableMeaning ? `${data.tableName} — ${tableMeaning}` : data.tableName">{{ cardTitle }}</span>
+        <span class="table-node__meta-dim">{{ data.schema }} · {{ data.columnCount }}열</span>
+      </div>
+      <!-- 액션(hover 시 표시 — 평소엔 공간 차지 안 함) -->
       <div class="table-node__actions">
         <button 
           class="table-node__action-btn table-node__action-btn--query" 
@@ -472,7 +500,18 @@ function onColumnMouseLeave() {
           </svg>
         </button>
       </div>
-      
+      <!-- 코드 참조 — 맨 오른쪽 끝(항상 보임, 아이콘+글자로 명료) -->
+      <button
+        class="table-node__ref-btn"
+        title="이 테이블을 읽고/쓰는 코드 참조"
+        @click="openReferences"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/>
+        </svg>
+        <span>참조</span>
+      </button>
+
       <!-- PK Target Handle Right -->
       <Handle 
         v-if="pkColumn"
@@ -481,36 +520,6 @@ function onColumnMouseLeave() {
         :position="Position.Right"
         class="table-node__pk-handle table-node__pk-handle--right"
       />
-    </div>
-    
-    <!-- Description / 테이블명 서브라인 - 스위치에 따라 전환 -->
-    <div 
-      v-if="data.description" 
-      class="table-node__description"
-      :style="{ color: canvasStore.showLogicalNames ? 'var(--color-text-muted, #5c5f66)' : getDescriptionColor(data.description_source) }"
-      :title="canvasStore.showLogicalNames 
-        ? `테이블명: ${data.tableName}` 
-        : `${data.description} ${data.description_source ? `[출처: ${getDescriptionSourceLabel(data.description_source)}]` : ''}`"
-      @mouseenter="isDescriptionHovered = true"
-      @mouseleave="isDescriptionHovered = false"
-    >
-      <!-- 출처 배지 (물리명 모드에서만) -->
-      <span 
-        v-if="!canvasStore.showLogicalNames && data.description_source" 
-        class="table-node__description-badge"
-        :class="{ 
-          'is-clickable': isCodeSource(data.description_source),
-          'is-hovered': isDescriptionHovered && isCodeSource(data.description_source)
-        }"
-        :style="{ background: getDescriptionColor(data.description_source) }"
-        @click="handleSourceChipClick"
-      >
-        {{ getDescriptionSourceLabel(data.description_source) }}
-        <span v-if="isCodeSource(data.description_source) && isDescriptionHovered" class="table-node__source-hint">
-          📍
-        </span>
-      </span>
-      {{ canvasStore.showLogicalNames ? data.tableName : data.description }}
     </div>
     
     <!-- 컬럼 참조 팝업 (프로시저 + 프레임워크) -->
@@ -528,8 +537,12 @@ function onColumnMouseLeave() {
           <div v-if="isLoadingColumnReferences" class="references-popup__loading">
             로딩 중...
           </div>
+          <div v-else-if="columnReferencesError" class="references-popup__empty">
+            <p>참조를 불러오지 못했습니다.</p>
+            <button class="references-popup__retry" @click="loadColumnReferences(activeColumnName)">다시 시도</button>
+          </div>
           <div v-else-if="columnReferences.length === 0 && columnFrameworkReferences.length === 0" class="references-popup__empty">
-            참조 정보를 찾을 수 없습니다.
+            참조 없음 — 이 컬럼을 읽고/쓰는 코드가 없습니다.
           </div>
           <template v-else>
             <!-- 프로시저 참조 -->
@@ -537,7 +550,11 @@ function onColumnMouseLeave() {
               v-for="ref in columnReferences"
               :key="`col-proc-${ref.procedure_name}-${ref.statement_line}`"
               class="references-popup__item"
+              role="button"
+              tabindex="0"
               @click="handleProcedureClick(ref)"
+              @keydown.enter="handleProcedureClick(ref)"
+              @keydown.space.prevent="handleProcedureClick(ref)"
             >
               <div class="references-popup__proc-name">
                 <span class="references-popup__proc-type">{{ ref.procedure_type }}</span>
@@ -563,6 +580,11 @@ function onColumnMouseLeave() {
               v-for="ref in columnFrameworkReferences"
               :key="`col-fw-${ref.source_name}-${ref.start_line}`"
               class="references-popup__item"
+              role="button"
+              tabindex="0"
+              @click="handleFrameworkClick(ref)"
+              @keydown.enter="handleFrameworkClick(ref)"
+              @keydown.space.prevent="handleFrameworkClick(ref)"
             >
               <div class="references-popup__proc-name">
                 <span class="references-popup__proc-type references-popup__proc-type--fw">{{ ref.source_type }}</span>
@@ -600,8 +622,12 @@ function onColumnMouseLeave() {
           <div v-if="isLoadingReferences" class="references-popup__loading">
             로딩 중...
           </div>
+          <div v-else-if="referencesError" class="references-popup__empty">
+            <p>참조를 불러오지 못했습니다.</p>
+            <button class="references-popup__retry" @click="openReferences($event)">다시 시도</button>
+          </div>
           <div v-else-if="procedureReferences.length === 0 && frameworkReferences.length === 0" class="references-popup__empty">
-            참조 정보를 찾을 수 없습니다.
+            참조 없음 — 이 테이블을 읽고/쓰는 코드가 없습니다.
           </div>
           <template v-else>
             <!-- 프로시저 참조 -->
@@ -609,7 +635,11 @@ function onColumnMouseLeave() {
               v-for="ref in procedureReferences"
               :key="`proc-${ref.procedure_name}-${ref.statement_line}`"
               class="references-popup__item"
+              role="button"
+              tabindex="0"
               @click="handleProcedureClick(ref)"
+              @keydown.enter="handleProcedureClick(ref)"
+              @keydown.space.prevent="handleProcedureClick(ref)"
             >
               <div class="references-popup__proc-name">
                 <span class="references-popup__proc-type">{{ ref.procedure_type }}</span>
@@ -635,7 +665,11 @@ function onColumnMouseLeave() {
               v-for="ref in frameworkReferences"
               :key="`fw-${ref.source_name}-${ref.start_line}`"
               class="references-popup__item"
+              role="button"
+              tabindex="0"
               @click="handleFrameworkClick(ref)"
+              @keydown.enter="handleFrameworkClick(ref)"
+              @keydown.space.prevent="handleFrameworkClick(ref)"
             >
               <div class="references-popup__proc-name">
                 <span class="references-popup__proc-type references-popup__proc-type--fw">{{ ref.source_type }}</span>
@@ -651,8 +685,8 @@ function onColumnMouseLeave() {
                 >
                   {{ getAccessTypeLabel(ref.access_type) }}
                 </span>
-                <span v-if="ref.start_line" class="references-popup__line">
-                  Line {{ ref.start_line }}
+                <span v-if="ref.evidence_line || ref.start_line" class="references-popup__line">
+                  Line {{ ref.evidence_line || ref.start_line }}
                 </span>
               </div>
             </div>
@@ -706,42 +740,17 @@ function onColumnMouseLeave() {
           :class="{ 'is-fk': isForeignKey(col.name), 'is-hovered': hoveredColumn === col.name }"
         />
         
+        <!-- 이름 | [PK·FK · *] 마커(타입 앞 딱붙임, 빈칸 없음) | 타입(맨 오른쪽). *가 타입 바로 앞 -->
         <div class="table-node__column-info">
-          <span class="table-node__column-icon">
-            <template v-if="isPrimaryKey(col.name)">🔑</template>
-            <template v-else-if="isForeignKey(col.name)">🔗</template>
-            <template v-else>•</template>
+          <span class="table-node__column-name" :title="colSecondary(col) || colPrimary(col)">{{ colPrimary(col) }}</span>
+          <span class="table-node__col-markers">
+            <span v-if="isPrimaryKey(col.name)" class="table-node__col-tag table-node__col-tag--pk">PK</span>
+            <span v-else-if="isForeignKey(col.name)" class="table-node__col-tag table-node__col-tag--fk">FK</span>
+            <span v-if="!col.nullable" class="table-node__nn-star" title="NOT NULL — 필수 입력(비울 수 없음)">*</span>
           </span>
-          <!-- 논리명 모드: description 우선 표시, 물리명 모드: name 표시 -->
-          <span 
-            class="table-node__column-name"
-            :title="canvasStore.showLogicalNames && col.description ? `컬럼명: ${col.name}` : (col.description || col.name)"
-          >
-            {{ canvasStore.showLogicalNames && col.description ? truncateDescription(col.description, 28) : col.name }}
-          </span>
-          <span class="table-node__column-type">{{ getColumnTypeShort(col.dtype) }}</span>
-          <span v-if="!col.nullable" class="table-node__column-required">*</span>
+          <span class="table-node__column-type" :title="col.dtype">{{ simpleType(col.dtype) }}</span>
         </div>
-        
-        <!-- 논리명 모드: 실제 컬럼명을 서브라인으로 / 물리명 모드: description을 서브라인으로 -->
-        <div 
-          v-if="col.description" 
-          class="table-node__column-desc"
-          :class="{ 
-            'is-updating': isColumnUpdating(col.name),
-            'is-clickable': isCodeSource(col.description_source)
-          }"
-          :style="{ color: getDescriptionColor(col.description_source) }"
-          :title="canvasStore.showLogicalNames 
-            ? `${col.name} ${col.description_source ? `[출처: ${getDescriptionSourceLabel(col.description_source)}]` : ''}`
-            : `${col.description} ${col.description_source ? `[출처: ${getDescriptionSourceLabel(col.description_source)}]` : ''}`"
-          @click="isCodeSource(col.description_source) ? handleColumnSourceClick($event, col.name) : null"
-        >
-          <span v-if="col.description_source" class="table-node__desc-source-dot" :style="{ background: getDescriptionColor(col.description_source) }"></span>
-          {{ canvasStore.showLogicalNames ? col.name : truncateDescription(col.description) }}
-          <span v-if="isCodeSource(col.description_source)" class="table-node__column-link-icon">🔍</span>
-        </div>
-        
+
         <!-- Drag hint for FK columns -->
         <span 
           v-if="isForeignKey(col.name)" 
@@ -802,11 +811,6 @@ function onColumnMouseLeave() {
       </div>
     </div>
     
-    <!-- Footer -->
-    <div class="table-node__footer">
-      <span class="table-node__schema">{{ data.schema }}</span>
-      <span class="table-node__count">{{ data.columnCount }} cols</span>
-    </div>
   </div>
 </template>
 
@@ -815,8 +819,8 @@ function onColumnMouseLeave() {
   background: var(--color-bg-secondary, #2c2e33);
   border: 2px solid var(--color-border, #373a40);
   border-radius: 10px;
-  min-width: 240px;
-  max-width: 300px;
+  /* 고정 폭 — 긴 이름은 ellipsis(…), vue-flow 내용맞춤 확장 방지(카드 균일폭) */
+  width: 300px;
   font-family: var(--font-main, 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   transition: all 0.2s ease;
@@ -833,33 +837,21 @@ function onColumnMouseLeave() {
   box-shadow: 0 0 0 3px rgba(34, 139, 230, 0.3), 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
-/* Primary table (직접 선택/드래그한 테이블) - 노란색 테두리 */
+/* Primary table (직접 선택/드래그한 테이블) - 헤더는 그대로, 골드 링으로만 표시(과한 노랑 제거) */
 .table-node.is-primary {
-  border-color: #fbbf24;
-  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.35), 0 8px 24px rgba(0, 0, 0, 0.5);
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.45), 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
-.table-node.is-primary .table-node__header {
-  background: linear-gradient(135deg, #fbbf24, #f59e0b);
-  border-bottom-color: #d97706;
-}
-
-.table-node.is-primary .table-node__header .table-node__name {
-  color: #1a1b1e;
-}
-
-.table-node.is-primary .table-node__header .table-node__icon {
-  color: #1a1b1e;
-}
-
-/* Header */
+/* Header — 차분한 다크 + accent (모던, 톡 튀는 파랑 제거) */
 .table-node__header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
-  background: linear-gradient(135deg, #339af0 0%, #228be6 100%);
-  color: white;
+  padding: 9px 12px;
+  background: var(--color-bg-tertiary, #25262b);
+  color: var(--color-text-bright, #e9ecef);
+  border-bottom: 1px solid var(--color-border, #373a40);
   border-radius: 8px 8px 0 0;
   position: relative;
 }
@@ -868,27 +860,42 @@ function onColumnMouseLeave() {
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.9;
+  color: var(--color-accent, #4dabf7);
+}
+
+.table-node__titles {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 
 .table-node__name {
-  flex: 1;
   font-size: 0.9rem;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: 0.1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table-node__meta-dim {
+  font-size: 0.62rem;
+  font-weight: 400;
+  color: var(--color-text-muted, #868e96);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .table-node__actions {
-  display: flex;
+  display: none;
   gap: 4px;
-  opacity: 0;
-  transition: opacity 0.15s ease;
 }
 
 .table-node:hover .table-node__actions {
-  opacity: 1;
+  display: flex;
 }
 
 .table-node__action-btn {
@@ -897,16 +904,17 @@ function onColumnMouseLeave() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.06);
   border: none;
   border-radius: 4px;
-  color: white;
+  color: var(--color-text-light, #909296);
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .table-node__action-btn:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--color-text-bright, #e9ecef);
 }
 
 .table-node__action-btn--remove:hover {
@@ -914,7 +922,29 @@ function onColumnMouseLeave() {
 }
 
 .table-node__action-btn--query:hover {
-  background: rgba(56, 189, 248, 0.8);
+  background: rgba(56, 189, 248, 0.25);
+}
+
+/* 코드 참조 — 우상단 끝, 아이콘+글자 pill(항상 보임·명료) */
+.table-node__ref-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  height: 21px;
+  padding: 0 8px;
+  font-size: 0.64rem;
+  font-weight: 600;
+  color: var(--color-accent, #4dabf7);
+  background: rgba(77, 171, 247, 0.14);
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.table-node__ref-btn:hover {
+  background: rgba(77, 171, 247, 0.26);
 }
 
 /* PK Handle in Header - 받기용 */
@@ -941,57 +971,6 @@ function onColumnMouseLeave() {
 
 .table-node__pk-handle--right {
   right: -7px !important;
-}
-
-/* Description - 한 줄로 제한, 넘치면 ... */
-.table-node__description {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  font-size: 0.75rem;
-  /* color는 인라인 스타일로 출처에 따라 동적 적용 */
-  border-bottom: 1px solid var(--color-border, #373a40);
-  background: var(--color-bg-tertiary, #25262b);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* 설명 출처 배지 */
-.table-node__description-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  font-size: 0.55rem;
-  font-weight: 600;
-  color: #1a1b1e;
-  padding: 1px 5px;
-  border-radius: 3px;
-  flex-shrink: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  transition: all 0.2s ease;
-}
-
-.table-node__description-badge.is-clickable {
-  cursor: pointer;
-}
-
-.table-node__description-badge.is-clickable:hover,
-.table-node__description-badge.is-hovered {
-  transform: scale(1.1);
-  box-shadow: 0 2px 8px rgba(56, 189, 248, 0.5);
-}
-
-.table-node__source-hint {
-  font-size: 0.7rem;
-  animation: hint-pulse 1s ease-in-out infinite;
-}
-
-@keyframes hint-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
 }
 
 /* 프로시저 참조 팝업 */
@@ -1036,6 +1015,21 @@ function onColumnMouseLeave() {
   font-size: 0.8rem;
 }
 
+.references-popup__retry {
+  margin-top: 8px;
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  color: var(--color-accent, #4dabf7);
+  background: rgba(77, 171, 247, 0.12);
+  border: 1px solid rgba(77, 171, 247, 0.35);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.references-popup__retry:hover {
+  background: rgba(77, 171, 247, 0.25);
+}
+
 .references-popup__item {
   padding: 10px 12px;
   border-bottom: 1px solid var(--color-border, #373a40);
@@ -1049,6 +1043,12 @@ function onColumnMouseLeave() {
 }
 
 .references-popup__item:hover {
+  background: var(--color-bg-tertiary, #25262b);
+}
+
+.references-popup__item:focus-visible {
+  outline: 2px solid var(--color-accent, #4dabf7);
+  outline-offset: -2px;
   background: var(--color-bg-tertiary, #25262b);
 }
 
@@ -1105,64 +1105,44 @@ function onColumnMouseLeave() {
   color: var(--color-text-muted, #5c5f66);
 }
 
-/* Columns */
+/* Columns — 칸형(행마다 가로 구분선) */
 .table-node__columns {
-  padding: 6px 0;
+  padding: 0;
   background: var(--color-bg-secondary, #2c2e33);
 }
 
 .table-node__column {
   display: flex;
   align-items: center;
-  padding: 6px 12px;
+  padding: 7px 12px;
   position: relative;
-  transition: all 0.15s ease;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+  transition: background 0.15s ease;
   cursor: default;
 }
 
+/* PK/FK는 우측 태그로만 표시 — 왼쪽 색띠·배경틴트(조잡·선택혼동) 제거 */
 .table-node__column:hover,
 .table-node__column.is-hovered {
-  background: var(--color-bg-tertiary, #373a40);
-}
-
-.table-node__column.is-pk {
-  background: rgba(255, 212, 59, 0.15);
-  border-left: 3px solid #ffd43b;
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .table-node__column.is-fk {
-  background: rgba(34, 139, 230, 0.12);
-  border-left: 3px solid #228be6;
   cursor: grab;
 }
 
-.table-node__column.is-fk:hover {
-  background: rgba(34, 139, 230, 0.25);
-}
-
+/* 이름(flex) | 마커(타입 앞 딱붙임) | 타입(맨 오른쪽 고정). 빈칸 없이 요소만 오른쪽에 모음 */
 .table-node__column-info {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 0.4rem;
   flex: 1;
-}
-
-.table-node__column-icon {
-  font-size: 0.7rem;
-  width: 16px;
-  text-align: center;
-}
-
-.table-node__column.is-pk .table-node__column-icon {
-  color: #ffd43b;
-}
-
-.table-node__column.is-fk .table-node__column-icon {
-  color: #228be6;
+  min-width: 0;
 }
 
 .table-node__column-name {
   flex: 1;
+  min-width: 0;
   font-size: 0.8rem;
   color: var(--color-text, #c1c2c5);
   overflow: hidden;
@@ -1170,73 +1150,54 @@ function onColumnMouseLeave() {
   white-space: nowrap;
 }
 
-.table-node__column-type {
-  font-size: 0.7rem;
-  color: var(--color-text-muted, #5c5f66);
-  background: var(--color-bg-tertiary, #25262b);
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-}
-
-.table-node__column-required {
-  color: #ff6b6b;
-  font-weight: bold;
-  font-size: 0.75rem;
-}
-
-/* 컬럼 설명 표시 */
-.table-node__column-desc {
+/* 마커 묶음 — PK/FK · NOT NULL(*)을 타입 바로 앞에 딱 붙임. 없으면 공간 차지 안 함 */
+.table-node__col-markers {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 2px;
-  margin-left: 22px;
-  font-size: 0.65rem;
-  /* color는 인라인 스타일로 출처에 따라 동적 적용 */
-  background: rgba(255, 255, 255, 0.05);
-  padding: 2px 6px;
-  border-radius: 3px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 200px;
-  transition: all 0.3s ease;
-}
-
-/* 컬럼 설명 출처 점 */
-.table-node__desc-source-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+  gap: 0.35rem;
   flex-shrink: 0;
 }
 
-.table-node__column-desc.is-updating {
-  background: rgba(81, 207, 102, 0.25);
-  color: #51cf66;
-  animation: desc-highlight 0.5s ease-in-out 3;
+.table-node__col-tag {
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  white-space: nowrap;
 }
 
-.table-node__column-desc.is-clickable {
-  cursor: pointer;
-  
-  &:hover {
-    background: rgba(56, 189, 248, 0.2);
-    transform: scale(1.02);
-  }
+.table-node__col-tag--pk { color: #ffd43b; background: rgba(255, 212, 59, 0.14); }
+.table-node__col-tag--fk { color: #4dabf7; background: rgba(77, 171, 247, 0.14); }
+
+/* NOT NULL — 주황 별표(타입 바로 앞). '*' 글리프는 위로 떠 보이므로 시각 중심을 행 가운데로 내림 */
+.table-node__nn-star {
+  display: block;
+  font-size: 0.95rem;
+  line-height: 1;
+  color: #f59e0b;
+  /* '*' 글리프는 상단 치우침 → 시각 중심을 행 가운데로 내림 */
+  transform: translateY(0.22em);
 }
 
-.table-node__column-link-icon {
-  font-size: 0.6rem;
-  margin-left: 2px;
-  opacity: 0.7;
+/* type — 간단타입(상세 길이는 상세패널), 맨 오른쪽 끝 고정폭. 세로 구분선 뒤 우측정렬·칸 전체높이 구분선 */
+.table-node__column-type {
+  flex-shrink: 0;
+  width: 4.4rem;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-left: 0.55rem;
+  border-left: 1px solid var(--color-border, #373a40);
+  font-size: 0.64rem;
+  color: var(--color-text-muted, #868e96);
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-@keyframes desc-highlight {
-  0%, 100% { background: rgba(81, 207, 102, 0.25); }
-  50% { background: rgba(81, 207, 102, 0.5); }
-}
 
 /* Target Handle (left) - 각 컬럼에서 연결을 받음 */
 .table-node__target-handle {
@@ -1305,13 +1266,15 @@ function onColumnMouseLeave() {
   left: -5px !important;
 }
 
-/* Drag hint */
+/* Drag hint — 절대배치(세로 스택 행에 영향 X) */
 .table-node__drag-hint {
-  font-size: 0.85rem;
+  position: absolute;
+  right: 14px;
+  top: 6px;
+  font-size: 0.8rem;
   color: var(--color-accent, #228be6);
   opacity: 0;
   transition: opacity 0.2s ease;
-  margin-left: 4px;
 }
 
 .table-node__drag-hint.is-visible {
@@ -1530,13 +1493,6 @@ function onColumnMouseLeave() {
     transform: translateY(0) scale(1);
     opacity: 1;
   }
-}
-
-/* Description 업데이트 효과 */
-.table-node.is-updating .table-node__description {
-  background: rgba(81, 207, 102, 0.2);
-  border-left: 3px solid #51cf66;
-  animation: desc-pulse 0.8s ease-in-out 3;
 }
 
 @keyframes desc-pulse {

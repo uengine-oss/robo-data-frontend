@@ -9,6 +9,7 @@ export interface RoboSchemaTableInfo {
   name: string
   table_schema: string  // Renamed from 'schema' in backend
   datasource: string  // 데이터소스명 (예: robo_postgres, ontology)
+  logical_name?: string  // 짧은 도메인 표시명(논리명) — analyzer spec 025, 물리명과 별개
   description: string
   description_source?: string  // 설명 출처: ddl, procedure, user
   analyzed_description?: string  // 프로시저 분석에서 도출된 설명
@@ -20,6 +21,7 @@ export interface RoboSchemaColumnInfo {
   table_name: string
   dtype: string
   nullable: boolean
+  logical_name?: string  // 짧은 논리명(있으면 우선) — 물리명과 별개
   description: string
   description_source?: string  // 설명 출처: ddl, procedure, user
   analyzed_description?: string  // 프로시저 분석에서 도출된 설명
@@ -127,10 +129,12 @@ export const roboSchemaApi = {
     references: Array<{
       procedure_name: string
       procedure_type: string  // PROCEDURE, FUNCTION 등
-      start_line: number
+      start_line: number      // 오너 루틴 시작 줄 = 슬라이스 시작 (spec 044)
+      end_line?: number       // 오너 루틴 끝 줄 = 슬라이스 끝 (spec 044)
       access_type: string  // FROM (읽기), WRITES (쓰기)
       statement_type?: string  // SELECT, INSERT, UPDATE 등
       statement_line?: number
+      evidence_line?: number  // 테이블 접근 정확한 줄 = 강조 기준 (spec 044)
       file_name?: string  // 파일명
       file_directory?: string  // 파일 경로(디렉토리)
       file_path?: string  // 절대 파일 경로(코드뷰 소스 서빙용, spec 043)
@@ -139,7 +143,9 @@ export const roboSchemaApi = {
       source_name: string
       source_type: string  // FUNCTION | MODULE 등
       access_type: string  // READS | WRITES | REFER_TO
-      start_line?: number
+      start_line?: number   // 함수 시작 줄 = 슬라이스 시작 (spec 044)
+      end_line?: number     // 함수 끝 줄 = 슬라이스 끝 (spec 044)
+      evidence_line?: number  // 테이블 접근 정확한 줄 = 강조 기준 (spec 044)
       file_name?: string
       file_path?: string
       file_directory?: string

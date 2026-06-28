@@ -12,10 +12,8 @@ import { computed, ref } from 'vue'
 import type { GraphNode, GraphLink } from '@/shared/types'
 import { getNodeColor } from '@/shared/config/graphStyles'  // 통계용 — sortedNodeStats/Rel 색
 import { technicalNodeName, logicalNodeName } from '@/shared/utils/graphDisplay'
+import { kindOf } from '@/shared/utils/nodeLabels'  // 배지=종류(자기자신 라벨)만, 실제 노드색과 일치
 import NodeDetailContent from './node-detail/NodeDetailContent.vue'
-
-// 검색 결과 최대 개수
-const MAX_SEARCH_RESULTS = 10
 
 // ============================================================================
 // 타입 정의
@@ -189,7 +187,6 @@ const searchResults = computed(() => {
       const elementId = node.id?.toString().toLowerCase() || ''
       return name.includes(query) || elementId.includes(query)
     })
-    .slice(0, MAX_SEARCH_RESULTS)
 })
 
 /** 검색 결과가 있는지 여부 */
@@ -332,38 +329,38 @@ function clearSearch(): void {
 }
 
 /**
- * 노드 이름 가져오기 (name 또는 id)
- */
-function getNodeDisplayName(node: GraphNode): string {
-  // 여러 속성에서 이름 추출 시도
-  const props = node.properties || {}
-  const name = props.name?.toString()
-    || props.id?.toString()
-    || props.title?.toString()
-    || props.description?.toString()?.substring(0, 50)
-    || ''
-  
-  // 이름이 없으면 ID 사용
-  if (!name) {
-    return node.id?.toString() || 'Unknown'
-  }
-  
-  return name
-}
-
-/**
  * 검색 결과에 표시할 추가 정보 (테이블명, 스키마 등)
  */
 function getNodeSubInfo(node: GraphNode): string {
   const props = node.properties || {}
+
+  // 소속(부모)은 id 계층에 인코딩됨 — COLUMN: "테이블.컬럼", FUNCTION: "패키지.모듈.함수".
+  // 마지막 '.' 앞이 소속. (식별자=id 통일, 소속 속성은 미저장)
+  const id = node.id?.toString() || ''
+  const lastDot = id.lastIndexOf('.')
+  if (lastDot > 0) return id.slice(0, lastDot)
+
+  // 폴백: 명시 속성(스키마/파일)
   const parts: string[] = []
-  
-  // 스키마/테이블 정보
   if (props.schema_name) parts.push(props.schema_name.toString())
-  if (props.table_name) parts.push(props.table_name.toString())
-  if (props.file_name) parts.push(props.file_name.toString())
-  
-  return parts.join(' • ')
+  if (props.file_path) parts.push(String(props.file_path).split(/[\\/]/).pop() || '')
+  return parts.filter(Boolean).join(' • ')
+}
+
+/** 검색 결과 1차 표시 — 논리명 우선(없으면 물리명). 길면 CSS ellipsis */
+function searchPrimary(node: GraphNode): string {
+  const p = node.properties || {}
+  return (p.logical_name || p.name || node.id || 'Unknown').toString()
+}
+
+/** 검색 결과 2차 줄 — (논리명을 1차로 썼으면) 물리명 · 소속. 길면 CSS ellipsis */
+function searchSecondary(node: GraphNode): string {
+  const p = node.properties || {}
+  const parts: string[] = []
+  if (p.logical_name && p.name && p.logical_name !== p.name) parts.push(p.name.toString())
+  const sub = getNodeSubInfo(node)
+  if (sub) parts.push(sub)
+  return parts.join(' · ')
 }
 
 
@@ -459,7 +456,7 @@ function getNodeSubInfo(node: GraphNode): string {
             <!-- 검색 결과 드롭다운 (입력칸 기준 앵커 — 검색 중 '캔버스 비우기' 버튼을 덮어 오조작 방지) -->
             <div v-if="showSearchResults" class="search-results-dropdown">
               <div class="search-results-header" v-if="hasSearchResults">
-                검색 결과 ({{ searchResults.length }}개{{ searchResults.length >= MAX_SEARCH_RESULTS ? '+' : '' }})
+                검색 결과 ({{ searchResults.length }}개)
               </div>
               <template v-if="hasSearchResults">
                 <div
@@ -470,11 +467,12 @@ function getNodeSubInfo(node: GraphNode): string {
                 >
                   <span
                     class="result-label"
+                    :title="resultNode.labels?.join(' / ')"
                     :style="{ background: getNodeColor(resultNode.labels || ['Unknown']) }"
-                  >{{ resultNode.labels?.join(' / ') || 'Node' }}</span>
+                  >{{ kindOf(resultNode.labels || ['Unknown']) }}</span>
                   <div class="result-info">
-                    <span class="result-name">{{ getNodeDisplayName(resultNode) }}</span>
-                    <span class="result-sub" v-if="getNodeSubInfo(resultNode)">{{ getNodeSubInfo(resultNode) }}</span>
+                    <span class="result-name" :title="searchPrimary(resultNode)">{{ searchPrimary(resultNode) }}</span>
+                    <span class="result-sub" v-if="searchSecondary(resultNode)" :title="searchSecondary(resultNode)">{{ searchSecondary(resultNode) }}</span>
                   </div>
                 </div>
               </template>
@@ -920,9 +918,9 @@ function getNodeSubInfo(node: GraphNode): string {
 
 .search-result-item {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 12px;
+  align-items: center;          /* 배지 세로 가운데 */
+  gap: 9px;
+  padding: 7px 11px;            /* 위아래 컴팩트 */
   cursor: pointer;
   transition: background 0.15s;
 
@@ -950,7 +948,7 @@ function getNodeSubInfo(node: GraphNode): string {
 .result-info {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;                     /* 이름-소속 붙임 */
   min-width: 0;
   flex: 1;
 }

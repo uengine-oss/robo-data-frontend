@@ -114,6 +114,19 @@ const table = computed(() => store.selectedTable)
 const columns = computed(() => store.selectedTableColumns)
 const isOpen = computed(() => store.isDetailPanelOpen)
 
+// 설명 표시 — 분석된 의미(AI)와 원본 설명 중복 제거.
+const analyzedText = computed(() => ((table.value as any)?.analyzed_description || '').trim())
+const rawText = computed(() => (table.value?.description || '').trim())
+// 원본 설명은 "분석본과 다른 진짜 원본"일 때만 표시. 코드 도출(code/procedure)이면 원본=분석본 → 숨김.
+const showRaw = computed(() => {
+  if (!analyzedText.value) return true                 // 분석본 없으면 원본(편집)만 보여줌
+  if (!rawText.value) return false
+  if (analyzedText.value === rawText.value) return false
+  const src = (table.value as any)?.description_source
+  if (src === 'code' || src === 'procedure') return false
+  return true
+})
+
 const availableTables = computed(() => {
   return store.allTables.filter(t => t.name !== table.value?.name)
 })
@@ -307,12 +320,20 @@ function isColumnUpdating(colName: string): boolean {
             <span v-if="isTableUpdating" class="detail-section__update-badge">✨ 업데이트</span>
           </div>
           
-          <!-- Description -->
-          <div class="detail-field" :class="{ 'is-updating': isTableUpdating }">
+          <!-- 분석된 의미 (AI 도출, 읽기 전용·깔끔) -->
+          <div v-if="analyzedText" class="detail-field">
+            <label>분석된 의미</label>
+            <div class="detail-field__analyzed">
+              <TextViewer :content="analyzedText" :max-height="160" />
+            </div>
+          </div>
+
+          <!-- 설명 (원본 — 분석본과 다른 진짜 원본일 때만, 편집 가능) -->
+          <div v-if="showRaw" class="detail-field" :class="{ 'is-updating': isTableUpdating }">
             <label>
               설명
-              <span 
-                v-if="table.description_source" 
+              <span
+                v-if="table.description_source"
                 class="detail-field__source-badge"
                 :style="{ background: getDescriptionColor(table.description_source) }"
               >
@@ -365,8 +386,11 @@ function isColumnUpdating(colName: string): boolean {
               <div class="column-item__header">
                 <span class="column-item__icon">{{ getColumnIcon(col) }}</span>
                 <span class="column-item__name">{{ col.name }}</span>
+                <!-- NOT NULL 고정 칸(빈칸도 유지) → 타입이 항상 맨 오른쪽 같은 위치. 카드와 일관 -->
+                <span class="column-item__required">
+                  <span v-if="!col.nullable" class="column-item__nn-badge">NOT NULL</span>
+                </span>
                 <span class="column-item__type">{{ col.dtype.toUpperCase() }}</span>
-                <span v-if="!col.nullable" class="column-item__required" title="NOT NULL">*</span>
               </div>
               
               <div v-if="editingColumnName === col.name" class="column-item__edit">
@@ -649,15 +673,39 @@ function isColumnUpdating(colName: string): boolean {
   }
 }
 
-/* 설명 출처 배지 (레이블 옆) */
+/* 설명 출처 배지 — 라벨 행 오른쪽 끝으로 정렬(출처 표시 유지·위치 정리) */
 .detail-field__source-badge {
+  margin-left: auto;
   font-size: 0.55rem;
   font-weight: 600;
   color: #1a1b1e;
-  padding: 1px 5px;
+  padding: 1px 6px;
   border-radius: 3px;
   text-transform: uppercase;
   letter-spacing: 0.3px;
+}
+
+/* 분석된 의미 — 읽기 전용 클린 블록(파란 좌측선 제거) */
+.detail-field__analyzed {
+  padding: 10px 12px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--color-text);
+
+  :deep(.text-viewer__body) {
+    white-space: normal;
+    line-height: 1.5;
+  }
+}
+
+/* 줄바꿈 — 한글은 어절 단위 보존(keep-all), 긴 영문/숫자 토큰만 강제 개행(anywhere) */
+.detail-section :deep(.text-viewer__body),
+.detail-field :deep(.text-viewer__body) {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 
 .detail-field__display {
@@ -741,32 +789,23 @@ function isColumnUpdating(colName: string): boolean {
   margin-top: 8px;
 }
 
-/* Columns List */
+/* Columns List — 각 컬럼 = 배경 있는 단일 카드(영역 구분 명확, 이중박스·색선은 폐기) */
 .columns-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  max-height: 300px;
+  gap: 5px;
+  max-height: 360px;
   overflow-y: auto;
 }
 
 .column-item {
   background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  padding: 8px 10px;
-  transition: border-color 0.15s;
-  
+  padding: 8px 11px;
+  transition: background 0.15s;
+
   &:hover {
-    border-color: var(--color-accent-light);
-  }
-  
-  &.is-pk {
-    border-left: 3px solid #ffd43b;
-  }
-  
-  &.is-fk {
-    border-left: 3px solid var(--color-accent);
+    background: var(--color-bg-secondary);
   }
 }
 
@@ -782,9 +821,13 @@ function isColumnUpdating(colName: string): boolean {
 
 .column-item__name {
   flex: 1;
+  min-width: 0;
   font-size: 0.85rem;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--color-text-bright);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .column-item__type {
@@ -796,36 +839,51 @@ function isColumnUpdating(colName: string): boolean {
   font-family: var(--font-mono);
 }
 
+/* NOT NULL 고정 슬롯 — 빈칸도 폭 유지해 타입이 항상 같은 위치(지그재그 방지) */
 .column-item__required {
-  color: var(--color-error);
-  font-weight: bold;
+  flex: 0 0 4.6rem;
+  display: flex;
+  justify-content: flex-end;
 }
 
-/* 컬럼 설명 출처 점 */
+/* NOT NULL 배지 — 주황(카드 별표와 색 일관) */
+.column-item__nn-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.13);
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+}
+
+/* 컬럼 설명 출처 점 — 작게(출처 색만) */
 .column-item__source-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   flex-shrink: 0;
+  margin-top: 5px;
 }
 
+/* 설명 — 박스 제거, 이름 아래 흐린 인라인 줄(아이콘 폭만큼 들여쓰기) */
 .column-item__desc {
   display: flex;
   align-items: flex-start;
   gap: 5px;
-  margin-top: 4px;
-  padding: 4px 8px;
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-sm);
-  font-size: 0.75rem;
+  margin-top: 2px;
+  padding-left: 1.55rem;
+  font-size: 0.73rem;
   line-height: 1.4;
-  color: var(--color-text-light);
+  color: var(--color-text-muted);
   cursor: pointer;
-  
+
   &:hover {
-    background: var(--color-bg);
+    color: var(--color-text-light);
   }
-  
+
   .placeholder {
     font-style: italic;
     color: var(--color-text-muted);
@@ -835,14 +893,6 @@ function isColumnUpdating(colName: string): boolean {
     white-space: normal;
     line-height: 1.4;
   }
-}
-
-/* 실제 컬럼명 (description이 레이블일 때 서브라인으로 표시) */
-.column-item__real-name {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  opacity: 0.8;
 }
 
 .column-item__edit {

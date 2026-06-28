@@ -30,6 +30,12 @@ const subInfo = computed(() => {
   return parts.join(' · ')
 })
 
+// 논리명(도메인 표시명) — 물리명(NodeDetailBase 타이틀)과 별개로 병기. 없으면 미표시. spec 025
+const logicalName = computed(() => {
+  const ln = (props.node.properties || {}).logical_name
+  return typeof ln === 'string' ? ln.trim() : ''
+})
+
 const ddlDescription = computed(() => {
   const p = props.node.properties || {}
   const source = p.description_source as string | undefined
@@ -95,6 +101,9 @@ const fks = computed(() =>
 <template>
   <NodeDetailBase :node="node" icon="🗂️" label-badge="TABLE" :sub-info="subInfo">
     <template #body>
+      <!-- 논리명(도메인 표시명) — 물리명은 상단 타이틀, 여기는 사람이 읽을 이름 -->
+      <div v-if="logicalName" class="logical-name" title="논리명 (도메인 표시명)">{{ logicalName }}</div>
+
       <!-- 설명 출처별 탭 -->
       <section v-if="ddlDescription || codeDescription" class="desc-section">
         <div class="tab-row">
@@ -160,6 +169,13 @@ const fks = computed(() =>
 </template>
 
 <style lang="scss" scoped>
+.logical-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-text);
+  margin-bottom: 0.5rem;
+}
+
 .desc-section, .col-section, .fk-section {
   padding: 12px;
   background: color-mix(in srgb, var(--color-bg-secondary) 60%, var(--color-bg));
