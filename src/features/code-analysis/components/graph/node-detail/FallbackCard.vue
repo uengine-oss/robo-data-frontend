@@ -14,7 +14,7 @@ interface Props {
 }
 const props = defineProps<Props>()
 
-const HIDDEN_KEYS = new Set(['labels', 'summary'])
+const HIDDEN_KEYS = new Set(['labels', 'summary', 'search_text'])  // search_text = 임베딩 검색 전용 (화면 비노출)
 
 const properties = computed(() => {
   const p = props.node.properties || {}
