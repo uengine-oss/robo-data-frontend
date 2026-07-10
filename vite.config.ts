@@ -66,7 +66,7 @@ export default defineConfig({
         // NDJSON / SSE 스트리밍 통과 — 버퍼링 비활성화
         selfHandleResponse: false,
         configure: (proxy) => {
-          const STREAM_PATTERNS = ['/stream', '/react', '/analyze', '/parsing', '/pipeline']
+          const STREAM_PATTERNS = ['/stream', '/react', '/analyze', '/parsing', '/pipeline', '/search']
           const isStreamReq = (url?: string) =>
             !!url && STREAM_PATTERNS.some(p => url.includes(p))
 
