@@ -21,8 +21,8 @@ export interface NodeClass {
   badgeClass: string
 }
 
-/** 외부 stub 의 부가 역할 라벨만 — 실제 종류 판정 시 스킵(나머지는 전부 antlr type=실타입). */
-const ROLE_LABELS = new Set(['INTERNAL', 'EXTERNAL'])
+/** 부가 라벨(stub 역할·검색 마커) — 실제 종류 판정 시 스킵(나머지는 전부 antlr type=실타입). */
+const ROLE_LABELS = new Set(['INTERNAL', 'EXTERNAL', 'EMBEDDED'])
 
 /** 역할 라벨을 뺀 첫 구체 라벨(= antlr type, 예 SELECT/METHOD/CLASS/FILE). 없으면 ''. */
 function specificLabel(labels: string[]): string {

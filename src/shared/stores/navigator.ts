@@ -43,8 +43,8 @@ const showLogicalNames = ref(false)
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** 종류(antlr type)=labels[0]. stereotype 은 위치(labels[1:])로 가르므로 하드코딩 안 함
- *  (드리프트 0 — nodeClassify.ts 와 동일 계약). 제외 대상은 외부 stub 마커뿐. */
-const ROLE_LABELS = new Set(['INTERNAL', 'EXTERNAL'])
+ *  (드리프트 0 — nodeClassify.ts 와 동일 계약). 제외 대상은 stub·검색 마커뿐. */
+const ROLE_LABELS = new Set(['INTERNAL', 'EXTERNAL', 'EMBEDDED'])
 
 /** 트리에서 제외할 라벨 — 변수/상수(antlr type 전부)·EM 노드는 트리에 안 보인다. */
 const EXCLUDED_LABELS = new Set([
