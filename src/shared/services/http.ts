@@ -272,12 +272,14 @@ export async function streamFetch(
   url: string,
   body: unknown,
   headers: Headers,
-  onEvent: StreamCallback
+  onEvent: StreamCallback,
+  signal?: AbortSignal
 ): Promise<void> {
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...headers },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal
   })
 
   if (!response.ok) {

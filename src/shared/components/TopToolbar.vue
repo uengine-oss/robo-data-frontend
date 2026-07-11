@@ -7,8 +7,8 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useSessionStore } from '@/shared/stores/session'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
-import { useNavigatorStore } from '@/shared/stores/navigator'
 import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
+import { useSemanticSearchStore } from '@/features/code-analysis/stores/semanticSearch'
 import { storeToRefs } from 'pinia'
 import SettingsModal from './SettingsModal.vue'
 import { IconSearch, IconBell, IconSettings } from '@/shared/icons'
@@ -16,10 +16,11 @@ import { getAppTitle } from '@/shared/config/appSettings'
 
 const sessionStore = useSessionStore()
 const projectStore = useAnalyzerStore()
-const navigatorStore = useNavigatorStore()
 const schemaCanvasStore = useSchemaCanvasStore()
+const semanticStore = useSemanticSearchStore()
 
 const { isProcessing, currentStep } = storeToRefs(projectStore)
+const { isSearching: semIsSearching, elapsedSec: semElapsed } = storeToRefs(semanticStore)
 
 const showSettings = ref(false)
 const searchQuery = ref('')
@@ -107,7 +108,9 @@ const handleSearch = () => {
   // 각 탭 검색의 단일 출처 store에 직접 설정 → 같은 탭에서도 즉시 반영
   const tab = sessionStore.activeTab
   if (tab === 'graph') {
-    navigatorStore.searchQuery = query
+    // ⌘K 전역 검색 = "찾아줘"(retrieve) → Overview 검색으로(트리 필터 아님, spec 046 FR-011).
+    // query 는 Overview 이름검색이 즉시 반영, 의미검색은 사용자가 버튼으로 실행.
+    semanticStore.setQuery(query)
   } else if (tab === 'schema') {
     schemaCanvasStore.searchQuery = query
   } else {
@@ -169,6 +172,14 @@ const onGlobalKey = (e: KeyboardEvent) => {
         <div class="progress-indicator">
           <span class="spinner"></span>
           <span class="step-text">{{ currentStep }}</span>
+        </div>
+      </div>
+
+      <!-- 의미검색 진행 배지 (spec 046) — 패널 밖에서도 진행 인지 -->
+      <div class="project-status" v-if="semIsSearching">
+        <div class="progress-indicator search-badge">
+          <span class="spinner"></span>
+          <span class="step-text">의미검색 중 · {{ semElapsed }}초</span>
         </div>
       </div>
       

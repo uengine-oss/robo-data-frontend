@@ -78,7 +78,7 @@ const { value: panelWidth, isResizing, startResize } = useResize({
       <input
         v-model="searchQuery"
         type="text"
-        placeholder="🔍 Search modules / classes / tables..."
+        placeholder="🔍 목록에서 좁히기…"
       />
     </div>
 

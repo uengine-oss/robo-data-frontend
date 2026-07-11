@@ -1,7 +1,7 @@
 /**
  * code-analysis api — antlr 파싱 + robo 분석. 공유 http 코어(shared/services/http) 사용.
  */
-import type { BackendRequestMetadata, FileUploadResponse, ParseResponse, AnalyzeEvent } from '@/shared/types'
+import type { BackendRequestMetadata, FileUploadResponse, ParseResponse, AnalyzeEvent, SearchEvent } from '@/shared/types'
 import { getNormalizedUploadPath } from '@/shared/utils/upload'
 import {
   ANTLR_BASE_URL, ROBO_BASE_URL,
@@ -133,7 +133,27 @@ export const roboApi = {
       onEvent as unknown as StreamCallback
     )
   },
-  
+
+  /**
+   * 의미 기반 코드 검색 (spec 046) — 자연어 질의 → 관련 코드 뭉치.
+   * 게이트웨이 경유 analyzer(5502). NDJSON 스트림(progress* → result → stream_end / error).
+   * signal 로 취소(fetch abort). 계약 = specs/046 contracts/search-stream.md.
+   */
+  async searchSemantic(
+    body: { query: string; limit?: number },
+    headers: Headers,
+    onEvent: (event: SearchEvent) => void,
+    signal?: AbortSignal
+  ): Promise<void> {
+    await streamFetch(
+      `${ROBO_BASE_URL}/search/semantic`,
+      body,
+      headers,
+      onEvent as unknown as StreamCallback,
+      signal
+    )
+  },
+
   /**
    * Neo4j에 기존 데이터 존재 여부 확인
    * 

@@ -257,6 +257,47 @@ export interface AnalyzeEvent {
 }
 
 // ============================================================================
+// 의미검색 (spec 046) — 코드노드 대상 스트림 검색. contracts/search-stream.md 계약.
+// ============================================================================
+
+/** 뭉치 소속 코드노드. id = 논리 node.id 속성(캔버스 매칭 키). */
+export interface ClusterNode {
+  id: string
+  name: string
+  labels: string[]
+  relevance?: number
+}
+
+/** 의미검색 결과 뭉치 = 캔버스에 함께 올라가는 단위. */
+export interface SearchCluster {
+  id: string
+  title: string
+  score: number          // 0~1 유사도
+  nodes: ClusterNode[]
+}
+
+/** 진행 단계 — label 은 서버 제공 문구(그대로 표시). */
+export interface SearchPhase {
+  stage: string
+  label: string
+  detail?: string
+}
+
+/** 의미검색 NDJSON 한 줄. type 별로만 필드가 채워진다. */
+export interface SearchEvent {
+  type: 'progress' | 'result' | 'error' | 'stream_end'
+  // progress
+  stage?: string
+  label?: string
+  detail?: string
+  // result
+  clusters?: SearchCluster[]
+  elapsed_ms?: number
+  // error
+  message?: string
+}
+
+// ============================================================================
 // API 응답
 // ============================================================================
 

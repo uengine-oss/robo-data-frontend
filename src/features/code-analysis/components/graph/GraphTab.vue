@@ -17,7 +17,7 @@ import type { GraphNode, GraphLink } from '@/shared/types'
 import { useResize } from '@/shared/composables/useResize'
 import { useDrag } from '@/shared/composables/useDrag'
 import { getNodeColor, getRelationshipColor } from '@/shared/config/graphStyles'
-import { isStubMarker } from '@/shared/utils/nodeLabels'
+import { isHiddenMarker, isStubMarker } from '@/shared/utils/nodeLabels'
 import { storageVersion } from '@/shared/utils/graphStyleStorage'
 import { CALLABLE_LABELS } from '@/shared/utils/nodeClassify'
 
@@ -427,7 +427,7 @@ const overallNodeStats = computed(() => {
   const stats = new Map<string, { count: number; color: string; group: 'kind' | 'role' }>()
   for (const node of graphData.value?.nodes ?? []) {
     for (const label of node.labels || ['Unknown']) {
-      if (label === '_Placeholder') continue
+      if (label === '_Placeholder' || isHiddenMarker(label)) continue
       const existing = stats.get(label)
       if (existing) { existing.count++; continue }
       const group = kindLabels.has(label) || isStubMarker(label) ? 'kind' : 'role'
@@ -511,6 +511,23 @@ function handleNodeSearchSelect(node: GraphNode): void {
   showNodePanel.value = true
   canvasStore.addNodeToCanvas(node.id)
 }
+
+/**
+ * 의미검색 뭉치 선택 (spec 046) — 뭉치의 노드들을 캔버스에 올린다.
+ * selectedNode 를 세팅하지 않아 패널은 Overview(검색) 유지(FR-005). 상세는 캔버스 노드 클릭으로.
+ * 현재 그래프에 없는 노드는 조용히 누락하지 않고 카운트해 안내(무반응 금지).
+ */
+function handleClusterSelect(nodeIds: string[]): void {
+  let missing = 0
+  for (const id of nodeIds) {
+    if (projectStore.nodeMap.has(id)) canvasStore.addNodeToCanvas(id)
+    else missing += 1
+  }
+  clusterMissingHint.value = missing > 0
+    ? `${missing}개 노드는 현재 그래프에 없어 추가하지 못했습니다`
+    : ''
+}
+const clusterMissingHint = ref('')
 
 function handleRelationshipSelect(relationship: GraphLink | null): void {
   selectedRelationship.value = relationship
@@ -763,6 +780,11 @@ watch(hasGraph, (has, prev) => {
           @node-drop="handleNodeDrop"
           @node-expand="handleNodeExpand"
         />
+        <!-- 의미검색 뭉치 중 현재 그래프에 없는 노드 안내 (spec 046, 무반응 금지) -->
+        <div v-if="clusterMissingHint" class="cluster-missing-banner">
+          <span>{{ clusterMissingHint }}</span>
+          <button @click="clusterMissingHint = ''" title="닫기">✕</button>
+        </div>
         <!-- 빈 상태 오버레이 -->
         <div v-if="!hasGraph" class="empty-state empty-overlay">
           <template v-if="autoPopulateHint">
@@ -951,6 +973,7 @@ watch(hasGraph, (has, prev) => {
             @clear-filters="handleClearFilters"
             @node-select="handleNodeSearchSelect"
             @reset-graph="handleResetGraph"
+            @cluster-select="handleClusterSelect"
           />
         </div>
         <!-- 리사이즈 핸들 -->
@@ -991,6 +1014,33 @@ watch(hasGraph, (has, prev) => {
   position: relative;
   overflow: hidden;
   background: var(--color-bg);
+}
+
+// 의미검색 뭉치 중 현재 그래프에 없는 노드 안내 배너 (spec 046)
+.cluster-missing-banner {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  font-size: 12px;
+  color: #e8c89a;
+  background: rgba(36, 29, 22, 0.95);
+  border: 1px solid #4a3a2a;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+
+  button {
+    background: none;
+    border: none;
+    color: #9a9187;
+    cursor: pointer;
+    font-size: 12px;
+  }
 }
 
 .content-area {

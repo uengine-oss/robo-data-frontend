@@ -9,10 +9,12 @@
  */
 
 import { computed, ref } from 'vue'
-import type { GraphNode, GraphLink } from '@/shared/types'
+import { storeToRefs } from 'pinia'
+import type { GraphNode, GraphLink, SearchCluster } from '@/shared/types'
 import { getNodeColor } from '@/shared/config/graphStyles'  // 통계용 — sortedNodeStats/Rel 색
 import { technicalNodeName, logicalNodeName } from '@/shared/utils/graphDisplay'
 import { kindOf } from '@/shared/utils/nodeLabels'  // 배지=종류(자기자신 라벨)만, 실제 노드색과 일치
+import { useSemanticSearchStore } from '@/features/code-analysis/stores/semanticSearch'
 import NodeDetailContent from './node-detail/NodeDetailContent.vue'
 
 // ============================================================================
@@ -76,7 +78,31 @@ const emit = defineEmits<{
   'clear-filters': []
   'node-select': [node: GraphNode]
   'reset-graph': []
+  'cluster-select': [nodeIds: string[]]
 }>()
+
+// ============================================================================
+// 의미 기반 코드 검색 (spec 046) — 검색어는 스토어가 단일 출처(⌘K 진입 공용).
+// ============================================================================
+const semanticStore = useSemanticSearchStore()
+const {
+  status: semStatus, phases: semPhases, elapsedSec: semElapsed,
+  clusters: semClusters, errorMessage: semError,
+  isSearching: semIsSearching, hasResults: semHasResults, isEmpty: semIsEmpty,
+} = storeToRefs(semanticStore)
+
+function runSemanticSearch(): void {
+  semanticStore.run()
+}
+function cancelSemanticSearch(): void {
+  semanticStore.cancel()
+}
+function selectCluster(cluster: SearchCluster): void {
+  emit('cluster-select', cluster.nodes.map(n => n.id))
+}
+function pct(score: number): number {
+  return Math.round((score ?? 0) * 100)
+}
 
 
 // ============================================================================
@@ -86,8 +112,11 @@ const emit = defineEmits<{
 /** 펼침 상태 관리 */
 const expandedKeys = ref<Set<string>>(new Set())
 
-/** 노드 이름 검색 쿼리 */
-const nodeSearchQuery = ref('')
+/** 노드 이름 검색 쿼리 — 의미검색과 같은 입력(스토어 query 단일 출처, ⌘K 진입 공용). */
+const nodeSearchQuery = computed({
+  get: () => semanticStore.query,
+  set: (v: string) => semanticStore.setQuery(v),
+})
 
 /** 검색 입력 필드 포커스 상태 */
 const isSearchFocused = ref(false)
@@ -440,7 +469,7 @@ function searchSecondary(node: GraphNode): string {
               v-model="nodeSearchQuery"
               type="text"
               class="node-search-input"
-              placeholder="🔍 노드 이름으로 검색..."
+              placeholder="🔍 노드 이름, 또는 업무 말로 물어보기"
               @focus="handleSearchFocus"
               @blur="handleSearchBlur"
               @keyup.escape="clearSearch"
@@ -490,6 +519,83 @@ function searchSecondary(node: GraphNode): string {
           >
             🔄 캔버스 비우기
           </button>
+        </div>
+
+        <!-- 의미 기반 관련 코드 (spec 046) — 이름검색 아래. 버튼 하나로 실행, 40초 스트림. -->
+        <div class="semantic-search">
+          <div class="sem-head">의미 기반 관련 코드</div>
+
+          <!-- 진행 중: 단계·경과초·취소 (결과가 나올 그 자리) -->
+          <template v-if="semIsSearching">
+            <div class="sem-progress-head">
+              <span class="sem-elapsed">{{ semElapsed }}초</span>
+              <button class="sem-cancel" @click="cancelSemanticSearch">취소</button>
+            </div>
+            <div class="sem-bar"><i /></div>
+            <div class="sem-steps">
+              <div
+                v-for="(p, i) in semPhases"
+                :key="p.stage + i"
+                class="sem-step"
+                :class="{ 'is-current': i === semPhases.length - 1 }"
+              >
+                <span class="sem-step-mk">{{ i === semPhases.length - 1 ? '●' : '✓' }}</span>
+                <span class="sem-step-label">{{ p.label }}</span>
+                <span v-if="p.detail" class="sem-step-detail">{{ p.detail }}</span>
+              </div>
+            </div>
+          </template>
+
+          <!-- 결과 뭉치 -->
+          <template v-else-if="semHasResults">
+            <div class="sem-result-head">
+              <span>관련 코드 ({{ semClusters.length }})</span>
+              <button class="sem-again" @click="runSemanticSearch">다시 찾기</button>
+            </div>
+            <div
+              v-for="cluster in semClusters"
+              :key="cluster.id"
+              class="sem-cluster"
+              :title="cluster.nodes.map(n => n.name).join(' · ')"
+              @click="selectCluster(cluster)"
+            >
+              <div class="sem-cluster-main">
+                <span class="sem-cluster-title">{{ cluster.title }}</span>
+                <span class="sem-cluster-sub">{{ cluster.nodes.map(n => n.name).join(' · ') }}</span>
+              </div>
+              <span class="sem-cluster-pct" :title="`관련도 ${pct(cluster.score)}%`">{{ pct(cluster.score) }}%</span>
+            </div>
+          </template>
+
+          <!-- 못 찾음 (0건) -->
+          <template v-else-if="semIsEmpty">
+            <div class="sem-empty">
+              <b>관련 코드를 못 찾았습니다</b>
+              <ul>
+                <li>함수 이름 말고 <b>업무 용어</b>로 써보세요</li>
+                <li>무엇이 <b>어떻게 되는지</b>를 자세히 써보세요</li>
+              </ul>
+              <button class="sem-again" @click="runSemanticSearch">다시 찾기</button>
+            </div>
+          </template>
+
+          <!-- 오류 (서버 사유 그대로) -->
+          <template v-else-if="semStatus === 'error'">
+            <div class="sem-error">{{ semError }}</div>
+            <button class="sem-again" @click="runSemanticSearch">다시 찾기</button>
+          </template>
+
+          <!-- 기본: 버튼 하나 + 항상 같은 한 줄 안내 -->
+          <template v-else>
+            <button
+              class="sem-run"
+              :disabled="!nodeSearchQuery.trim()"
+              @click="runSemanticSearch"
+            >
+              의미로 더 찾기 <small>약 40초</small>
+            </button>
+            <div class="sem-hint">자세히 쓸수록 잘 찾습니다</div>
+          </template>
         </div>
 
         <!-- Node labels 섹션 — 종류(labels[0]) / 역할(stereotype) 위치기반 분리 (spec 035) -->
@@ -999,6 +1105,152 @@ function searchSecondary(node: GraphNode): string {
   &:active {
     transform: translateY(0);
   }
+}
+
+/* ── 의미 기반 코드 검색 (spec 046) ── */
+.semantic-search {
+  margin-bottom: 20px;
+  flex-shrink: 0;
+}
+
+.sem-head {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary, #868e96);
+  padding: 6px 8px;
+  background: var(--color-bg-tertiary, #212430);
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+
+.sem-run {
+  width: 100%;
+  padding: 9px 0;
+  font-size: 12px;
+  color: var(--color-accent, #74c0fc);
+  background: color-mix(in srgb, var(--color-accent, #3b82f6) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent, #3b82f6) 45%, transparent);
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+
+  small { color: var(--color-text-subtle, #7f93b5); font-size: 10px; }
+  &:hover:not(:disabled) { background: color-mix(in srgb, var(--color-accent, #3b82f6) 22%, transparent); }
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
+}
+
+.sem-hint {
+  text-align: center;
+  font-size: 10px;
+  color: var(--color-text-subtle, #6d717a);
+  padding: 6px 2px 0;
+}
+
+.sem-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 2px 0 6px;
+}
+.sem-elapsed {
+  font-size: 11px;
+  color: var(--color-text-secondary, #868e96);
+  font-variant-numeric: tabular-nums;
+}
+.sem-cancel {
+  font-size: 10px;
+  color: #ffa8a8;
+  border: 1px solid #5a3236;
+  border-radius: 4px;
+  padding: 2px 8px;
+  background: rgba(90, 50, 54, 0.25);
+  cursor: pointer;
+}
+
+.sem-bar {
+  height: 2px;
+  background: var(--color-border, #2a2d36);
+  border-radius: 2px;
+  overflow: hidden;
+  margin: 2px 2px 6px;
+
+  i {
+    display: block;
+    height: 100%;
+    width: 45%;
+    background: linear-gradient(90deg, transparent, var(--color-accent, #6ea8fe), transparent);
+    animation: sem-slide 1.2s linear infinite;
+  }
+}
+@keyframes sem-slide { from { transform: translateX(-120%); } to { transform: translateX(320%); } }
+
+.sem-step {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 2px;
+  font-size: 11px;
+  color: var(--color-text-secondary, #868e96);
+
+  &.is-current { color: var(--color-text, #e6e7ea); }
+  .sem-step-mk { text-align: center; font-size: 10px; color: #37b24d; }
+  &.is-current .sem-step-mk { color: var(--color-accent, #6ea8fe); }
+  .sem-step-detail { font-size: 10px; color: var(--color-text-subtle, #7f93b5); font-variant-numeric: tabular-nums; }
+}
+
+.sem-result-head, .sem-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--color-text-secondary, #868e96);
+  padding: 2px 2px 6px;
+}
+.sem-error { color: #e8c89a; display: block; padding: 8px; background: rgba(74, 58, 42, 0.3); border: 1px solid #4a3a2a; border-radius: 5px; }
+
+.sem-again {
+  font-size: 10px;
+  color: var(--color-accent, #8fb4ee);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.sem-cluster {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--color-border-subtle, #24262d);
+  cursor: pointer;
+
+  &:hover { background: var(--color-bg-hover, #212430); }
+  .sem-cluster-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .sem-cluster-title { font-size: 12px; color: var(--color-text, #e6e7ea); }
+  .sem-cluster-sub {
+    font-size: 10px; color: var(--color-text-subtle, #7f93b5);
+    font-family: ui-monospace, Consolas, monospace;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sem-cluster-pct { font-size: 11px; color: var(--color-accent, #9ec5ff); font-variant-numeric: tabular-nums; }
+}
+
+.sem-empty {
+  padding: 8px;
+  background: rgba(74, 58, 42, 0.2);
+  border: 1px solid #4a3a2a;
+  border-radius: 5px;
+
+  b { font-size: 11px; color: #e8c89a; }
+  ul { margin: 7px 0; padding-left: 16px; }
+  li { font-size: 10.5px; color: var(--color-text-secondary, #9a9187); margin: 4px 0; }
 }
 
 .stats-section {

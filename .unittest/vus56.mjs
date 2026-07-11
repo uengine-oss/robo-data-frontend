@@ -1,0 +1,35 @@
+import { chromium } from 'playwright'
+import { fileURLToPath } from 'node:url'; import { dirname, join } from 'node:path'
+const SHOTS = join(dirname(fileURLToPath(import.meta.url)), 'screenshots')
+const log=(...a)=>console.log('[u]',...a)
+const b = await chromium.launch({ headless: true })
+const page = await b.newPage({ viewport: { width: 1680, height: 1000 }, deviceScaleFactor: 1.5 })
+const errs=[]; page.on('pageerror',e=>errs.push(String(e).slice(0,120)))
+const tab=(t)=>page.evaluate(t=>{document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('session').activeTab=t},t)
+try {
+  await page.goto('http://localhost:3000', { waitUntil:'networkidle', timeout:60000 }); await page.waitForTimeout(2500)
+  // US5 스키마 검색(아이콘)
+  await tab('schema'); await page.waitForTimeout(2000)
+  await page.evaluate(async()=>{const s=document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('schemaCanvas'); if(s.loadAllTables&&!s.allTables?.length)await s.loadAllTables(); s.showLogicalNames=false})
+  await page.waitForTimeout(600)
+  const sch = page.locator('aside input[placeholder*="검색"], input[placeholder*="테이블 검색"]').first()
+  await sch.click(); await sch.fill('au'); await page.waitForTimeout(2500)
+  await page.screenshot({path:join(SHOTS,'us5-icon.png'), clip:{x:0,y:60,width:380,height:560}})
+  // US6 상단검색 placeholder(스키마 탭)
+  const top = page.locator('input.search-input').first()
+  const phSchema = await top.getAttribute('placeholder')
+  log('top placeholder @schema:', phSchema)
+  // US6 그래프 탭 placeholder + 상단검색→노드검색 라우팅
+  await tab('graph'); await page.waitForTimeout(3500)
+  const phGraph = await top.getAttribute('placeholder')
+  log('top placeholder @graph:', phGraph)
+  await top.click(); await top.fill('auth'); await top.press('Enter'); await page.waitForTimeout(1500)
+  const navQ = await page.evaluate(()=>document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('navigator').searchQuery)
+  log('navigator.searchQuery after top search @graph:', JSON.stringify(navQ))
+  await page.screenshot({path:join(SHOTS,'us6-graph-routed.png'), clip:{x:0,y:0,width:700,height:700}})
+  // 상단 검색바 장식 확인(All▾ 제거)
+  const hasAllBtn = await page.evaluate(()=>!!document.querySelector('.search-type'))
+  log('search-type(All▾) present:', hasAllBtn)
+  log('pageerror', errs.length, errs.slice(0,3))
+} catch(e){ log('FATAL', e.message) }
+finally { await b.close() }
