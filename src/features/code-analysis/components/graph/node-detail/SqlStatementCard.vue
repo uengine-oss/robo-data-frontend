@@ -9,6 +9,7 @@ import type { GraphNode } from '@/shared/types'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { getRelationshipGroups } from '@/shared/utils/nodeRelationships'
 import NodeDetailBase from './NodeDetailBase.vue'
+import { AsyncCodeViewer as CodeViewer } from '@/shared/components/codeViewerAsync'
 
 interface Props { node: GraphNode }
 const props = defineProps<Props>()
@@ -80,9 +81,13 @@ const outputs = computed(() =>
           </button>
         </span>
         <div class="detail-card__body detail-card__body--flush">
-          <div class="detail-scroll" :class="{ 'detail-scroll--collapsed-sql': !showFullCode }">
-            <pre>{{ code }}</pre>
-          </div>
+          <CodeViewer
+            :content="code"
+            :file-path="String(node.properties?.file_path ?? '')"
+            language-hint="sql"
+            :max-height="showFullCode ? 520 : 120"
+            aria-label="원문 SQL"
+          />
         </div>
       </section>
     </template>

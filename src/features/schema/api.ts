@@ -219,6 +219,53 @@ export const roboSchemaApi = {
   },
   
   /**
+   * 테이블 설명 수정 (Neo4j)
+   */
+  async updateTableDescription(
+    tableName: string,
+    schema: string,
+    description: string,
+    headers: Record<string, string> = {}
+  ): Promise<void> {
+    const response = await fetch(`${ROBO_BASE_URL}/schema/tables/${tableName}/description`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ name: tableName, schema, description })
+    })
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+  },
+
+  /**
+   * 컬럼 설명 수정 (Neo4j)
+   */
+  async updateColumnDescription(
+    tableName: string,
+    columnName: string,
+    schema: string,
+    description: string,
+    headers: Record<string, string> = {}
+  ): Promise<void> {
+    const response = await fetch(
+      `${ROBO_BASE_URL}/schema/tables/${tableName}/columns/${columnName}/description`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify({
+          table_name: tableName,
+          table_schema: schema,
+          column_name: columnName,
+          description
+        })
+      }
+    )
+    if (!response.ok) {
+      await handleHttpError(response)
+    }
+  },
+
+  /**
    * 테이블 관계 추가 (Neo4j)
    */
   async addRelationship(

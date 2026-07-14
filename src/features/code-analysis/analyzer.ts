@@ -35,7 +35,7 @@ import type {
 import { useSessionStore } from '@/shared/stores/session'
 import { antlrApi, roboApi } from '@/features/code-analysis/api'
 import { kindOf } from '@/shared/utils/nodeLabels'
-import { isNodeHidden, isLinkHidden } from '@/shared/utils/graphVisibility'
+import { isNodeHidden, isLinkHidden, isSystemNode } from '@/shared/utils/graphVisibility'
 
 // 노드 종류 = labels[0] (위치 계약 spec 033) — stereotype/EXTERNAL 라벨은 후순위.
 function extractSubLabel(labels: readonly string[]): string {
@@ -286,7 +286,9 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const graphData = computed<GraphData>(() => {
     // showHidden 이면 기본 숨김(노드 라벨·링크 종류) 미적용 — neo4j 날것 그대로 전부 노출.
     const showAll = showHidden.value
-    const nodes = Array.from(nodeMap.value.values()).filter(n => showAll || !isNodeHidden(n))
+    const nodes = Array.from(nodeMap.value.values()).filter(
+      n => !isSystemNode(n) && (showAll || !isNodeHidden(n)),
+    )
     const visibleIds = new Set(nodes.map(n => n.id))
     const links = Array.from(linkMap.value.values()).filter(
       l => (showAll || !isLinkHidden(l.type)) && visibleIds.has(l.source) && visibleIds.has(l.target)
@@ -297,19 +299,35 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   function updateGraphData(nodes: Neo4jNode[], relationships: Neo4jRelationship[]): void {
     const newNodeMap = new Map(nodeMap.value)
     const newLinkMap = new Map(linkMap.value)
+    const systemNodeIds = new Set<string>()
 
     // elementId → 논리 id 매핑(이 응답 노드로). 관계 끝점(elementId)을 논리 id 로 변환.
     const elemToLogical = new Map<string, string>()
     for (const node of nodes) {
       const converted = convertNeo4jNode(node)
       elemToLogical.set(node['Node ID'], converted.id)
+      if (isSystemNode(converted)) {
+        systemNodeIds.add(converted.id)
+        systemNodeIdCache.add(converted.id)
+        newNodeMap.delete(converted.id)
+        continue
+      }
+      systemNodeIdCache.delete(converted.id)
       newNodeMap.set(converted.id, converted)
     }
 
     // 모든 링크(메타·숨김 포함)를 그대로 적재 — 표시 필터는 graphData/canvasGraphData 단계에서.
     for (const rel of relationships) {
       const converted = convertNeo4jRelationship(rel, elemToLogical)
+      if (systemNodeIds.has(converted.source) || systemNodeIds.has(converted.target)) {
+        newLinkMap.delete(converted.id)
+        continue
+      }
       newLinkMap.set(converted.id, converted)
+    }
+
+    for (const [id, link] of newLinkMap) {
+      if (systemNodeIds.has(link.source) || systemNodeIds.has(link.target)) newLinkMap.delete(id)
     }
 
     nodeMap.value = newNodeMap
@@ -320,6 +338,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     nodeMap.value = new Map()
     linkMap.value = new Map()
     nodeNameCache.clear()   // 보조 캐시도 함께 — 재분석/타프로젝트 stale 표시명 방지
+    systemNodeIdCache.clear()
   }
 
   // ----- 콘솔 메시지 -----
@@ -390,6 +409,8 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   let graphEventIdCounter = 0
   /** 같은 배치 내 노드 이름을 관계 이벤트가 재사용할 수 있도록 유지하는 캐시 */
   const nodeNameCache = new Map<string, string>()
+  /** UI 경계에서 거부한 시스템 노드 ID — 후속 관계 이벤트도 순서와 무관하게 차단. */
+  const systemNodeIdCache = new Set<string>()
 
   function addGraphEvent(event: Omit<GraphEvent, 'id' | 'timestamp'>): void {
     graphEventIdCounter++
@@ -415,6 +436,19 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   function mergeStreamNode(labels: string[], id: string, props: Record<string, unknown>): void {
     const node: GraphNode = { id, labels, properties: props }
     const next = new Map(nodeMap.value)
+    if (isSystemNode(node)) {
+      systemNodeIdCache.add(id)
+      next.delete(id)
+      nodeMap.value = next
+      const nextLinks = new Map(linkMap.value)
+      for (const [linkId, link] of nextLinks) {
+        if (link.source === id || link.target === id) nextLinks.delete(linkId)
+      }
+      linkMap.value = nextLinks
+      nodeNameCache.delete(id)
+      return
+    }
+    systemNodeIdCache.delete(id)
     next.set(id, node)
     nodeMap.value = next
 
@@ -435,6 +469,10 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   ): void {
     const target = to.id ?? to.name
     if (!target) return
+    if (systemNodeIdCache.has(from.id) || systemNodeIdCache.has(target)) return
+    const sourceNode = nodeMap.value.get(from.id)
+    const targetNode = nodeMap.value.get(target)
+    if ((sourceNode && isSystemNode(sourceNode)) || (targetNode && isSystemNode(targetNode))) return
     const link: GraphLink = {
       id: `${relType}|${from.id}|${target}|${from.rule_id ?? ''}|${to.rule_id ?? ''}`,
       source: from.id,
@@ -490,7 +528,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     strategy: (sourceType.value === 'oracle' || sourceType.value === 'postgresql') ? 'dbms' : 'framework',
     target: sourceType.value,
     nameCase: nameCaseOption.value,
-    datasourceName: datasourceName.value,
+    datasource: datasourceName.value,
     inferFkRelations: inferFkRelations.value,
     project_root: projectRoot.value || undefined,   // 경로 모드면 antlr·robo 둘 다 이 경로 사용
   }))
@@ -564,7 +602,11 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   /** message·error·warning → 콘솔 메시지 피드. */
   function logToConsole(event: AnalyzeEvent): void {
-    if (event.content) addMessage(event.type === 'error' ? 'error' : 'message', event.content)
+    const text = event.content ?? event.message
+    if (!text) return
+    const source = [event.component, event.operation].filter(Boolean).join(' / ')
+    const visible = source ? `${text} (${source})` : text
+    addMessage(event.type === 'error' ? 'error' : 'message', visible)
   }
 
   /**
@@ -717,7 +759,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     }
   }
 
-  async function doAnalyze(): Promise<void> {
+  async function doAnalyze(): Promise<boolean> {
     currentStep.value = '🧠 AI 분석 진행 중...'
     clearGraphEvents()
     resetProgressTracking()
@@ -726,23 +768,43 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     doneLeafCount.value = 0
     addMessage('message', '🔍 코드 분석을 시작했어요 — 차근차근 진행할게요. 잠시만 기다려 주세요 🙂')
 
+    const terminal = { value: 'none' as 'none' | 'complete' | 'stopped' }
+    const fatalError = { value: null as AnalyzeEvent | null }
+
     await roboApi.analyze(
       analyzeMeta.value,
       sessionStore.getHeaders(),
       (event) => {
         switch (event.type) {
-          case 'phase_event': applyPhaseEvent(event); break
+          case 'phase_event':
+            if (event.event === 'complete') terminal.value = 'complete'
+            if (event.event === 'stopped') terminal.value = 'stopped'
+            applyPhaseEvent(event)
+            break
           case 'node_event':
           case 'relationship_event': applyGraphEvent(event); break
           case 'processing_event': applyProcessingEvent(event); break
           case 'message':
           case 'error':
+            logToConsole(event)
+            if (event.fatal) fatalError.value = event
+            break
           case 'warning': logToConsole(event); break
           case 'tool_event': logToolEvent(event); break
           // system_log·todo_update 등 미렌더 타입은 무시
         }
       }
     )
+
+    if (fatalError.value) {
+      const event = fatalError.value
+      const detail = event.message ?? event.content ?? '원인을 알 수 없는 Analyzer 오류'
+      throw new Error(detail)
+    }
+    if (terminal.value === 'stopped') return false
+    if (terminal.value !== 'complete') {
+      throw new Error('Analyzer가 완료 신호 없이 연결을 종료했습니다.')
+    }
 
     addMessage('message', '✅ 코드 분석을 마쳤어요 — 결과를 정리하는 중이에요')
     currentPhaseProgress.value = 100
@@ -757,6 +819,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     } catch (e) {
       logger.warn('분석 후 Neo4j 데이터 재로드 실패:', e)
     }
+    return true
   }
 
   // ----- 통합 파이프라인 -----
@@ -893,7 +956,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     try {
       await doUpload(files, meta)
       await doParse()
-      await doAnalyze()
+      if (!await doAnalyze()) return
 
       currentStep.value = '전체 처리 완료'
       addMessage('message', '🎉 모든 처리가 끝났어요! 이제 그래프를 살펴보세요 😊')
@@ -943,7 +1006,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     try {
       addMessage('message', '🔄 다시 분석을 시작했어요...')
       await doParse()
-      await doAnalyze()
+      if (!await doAnalyze()) return
 
       currentStep.value = '전체 처리 완료'
       addMessage('message', '🎉 분석이 모두 끝났어요! 이제 그래프를 살펴보세요 😊')

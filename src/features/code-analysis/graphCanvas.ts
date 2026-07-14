@@ -18,7 +18,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { isContainerNode, CALLABLE_LABELS } from '@/shared/utils/nodeClassify'
-import { isLinkHidden, isNodeHidden } from '@/shared/utils/graphVisibility'
+import { isLinkHidden, isNodeHidden, isSystemNode } from '@/shared/utils/graphVisibility'
 import type { GraphData, GraphLink, GraphNode } from '@/shared/types'
 
 /**
@@ -64,6 +64,19 @@ export const useCanvasStore = defineStore('canvas', () => {
   // 노드패널 칩 = 캔버스에 "누적 로드"(spec 025, 표시필터 아님). 누른 노드 라벨·관계 타입을 다중으로 캔버스에 띄운다.
   const loadedLabels = ref<Set<string>>(new Set())
   const loadedRelTypes = ref<Set<string>>(new Set())
+
+  function isCanvasEligible(nodeId: string): boolean {
+    const node = projectStore.nodeMap.get(nodeId)
+    return Boolean(node && !isSystemNode(node))
+  }
+
+  /** 원시 상태를 읽는 프리셋까지 포함한 캔버스 최종 시스템 경계. */
+  function excludeSystemGraph(graph: GraphData): GraphData {
+    const nodes = graph.nodes.filter(node => !isSystemNode(node))
+    const visibleIds = new Set(nodes.map(node => node.id))
+    const links = graph.links.filter(link => visibleIds.has(link.source) && visibleIds.has(link.target))
+    return { nodes, links }
+  }
 
   /**
    * 모듈간 상호작용 가상 그래프 — MODULE/TABLE 노드 + 그 사이를 잇는 가상 링크.
@@ -389,10 +402,10 @@ export const useCanvasStore = defineStore('canvas', () => {
 
   const canvasGraphData = computed<GraphData>(() => {
     if (presetMode.value === 'module-interaction') {
-      return buildModuleInteractionGraph()
+      return excludeSystemGraph(buildModuleInteractionGraph())
     }
     if (presetMode.value === 'health-rw') {
-      return buildHealthGraph()
+      return excludeSystemGraph(buildHealthGraph())
     }
 
     // 캔버스는 "숨김 요소 표시" 토글과 무관 — 항상 사용자가 올린 부분집합(canvasNodeIds)만 렌더.
@@ -407,10 +420,11 @@ export const useCanvasStore = defineStore('canvas', () => {
     for (const link of visibleLinks()) {
       if (ids.has(link.source) && ids.has(link.target)) links.push(link)
     }
-    return { nodes, links }
+    return excludeSystemGraph({ nodes, links })
   })
 
   function addNodeToCanvas(nodeId: string): void {
+    if (!isCanvasEligible(nodeId)) return
     if (canvasNodeIds.value.has(nodeId)) return
     const next = new Set(canvasNodeIds.value)
     next.add(nodeId)
@@ -425,8 +439,9 @@ export const useCanvasStore = defineStore('canvas', () => {
     // (캔버스 표시는 사용자가 로드한 노드 기준이라 render 단계에서 안 거르므로, 여기서 안 넣는 게 근본.)
     const showAll = projectStore.showHidden
     const canAdd = (id: string): boolean => {
-      if (showAll) return true
       const n = projectStore.nodeMap.get(id)
+      if (n && isSystemNode(n)) return false
+      if (showAll) return true
       return !n || !isNodeHidden(n)
     }
     for (const link of visibleLinks()) {
@@ -501,7 +516,7 @@ export const useCanvasStore = defineStore('canvas', () => {
    */
   function setCanvasNodes(nodeIds: string[]): void {
     presetMode.value = null
-    canvasNodeIds.value = new Set(nodeIds)
+    canvasNodeIds.value = new Set(nodeIds.filter(isCanvasEligible))
   }
 
   /** 프리셋 활성화 — 일반 노드 집합은 비우고 가상 합성 결과만 노출. */
@@ -525,6 +540,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     const targets = new Set(labels.map(l => l.toUpperCase()))
     const next = new Set<string>()
     for (const node of projectStore.nodeMap.values()) {
+      if (isSystemNode(node)) continue
       const nodeLabels = node.labels || []
       if (nodeLabels.some(l => targets.has(l.toUpperCase()))) {
         next.add(node.id)
@@ -541,6 +557,7 @@ export const useCanvasStore = defineStore('canvas', () => {
   function rebuildPanelLoad(): void {
     const ids = new Set<string>()
     for (const node of projectStore.nodeMap.values()) {
+      if (isSystemNode(node)) continue
       if ((node.labels || []).some(l => loadedLabels.value.has(l))) ids.add(node.id)
     }
     for (const link of visibleLinks()) {

@@ -20,11 +20,11 @@ const projectStore = useAnalyzerStore()
 const navigatorStore = useNavigatorStore()
 
 const { isPanelOpen } = storeToRefs(navigatorStore)
-const { isProcessing, nodeMap } = storeToRefs(projectStore)
+const { isProcessing, graphData } = storeToRefs(projectStore)
 const { moduleTree, tableList, expandedSections, searchQuery } =
   storeToRefs(navigatorStore)
 
-const totalNodeCount = computed(() => nodeMap.value.size)
+const totalNodeCount = computed(() => graphData.value.nodes.length)
 
 interface Section {
   id: NavigatorSection

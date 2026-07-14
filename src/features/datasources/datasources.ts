@@ -7,6 +7,8 @@
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { DATA_FABRIC_BASE_URL } from '@/shared/services/http'
+import { useSessionStore } from '@/shared/stores/session'
 
 // ============================================================================
 // 타입 정의
@@ -94,16 +96,18 @@ export interface ExtractionProgress {
 // API 클라이언트
 // ============================================================================
 
-const API_BASE_URL = import.meta.env.VITE_DATA_FABRIC_URL ?? '/api/gateway/data-fabric'
+const API_BASE_URL = DATA_FABRIC_BASE_URL
 
 async function fetchApi<T>(
-  endpoint: string, 
+  endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
+  // Neo4j override(X-Neo4j-*) 를 실어야 Electron 이 고른 DB 에 데이터소스가 등록된다.
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      ...useSessionStore().getHeaders(),
       ...options.headers,
     },
   })
@@ -166,7 +170,7 @@ const datasourcesApi = {
     const url = `${API_BASE_URL}/api/datasources/${name}/extract-metadata`
     return fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...useSessionStore().getHeaders() },
       body: JSON.stringify({ schemas, password }),
     })
   },

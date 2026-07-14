@@ -1,10 +1,9 @@
 /**
  * schemaCanvas.ts
  * VueFlow 기반 스키마 캔버스 상태 관리
- * 
- * 데이터 소스:
- * - 'robo': robo-analyzer Neo4j (DDL 분석 결과)
- * - 'text2sql': neo4j-text2sql (PostgreSQL 인제스천)
+ *
+ * 스키마·관계·설명 = robo-analyzer Neo4j(DDL 분석 결과).
+ * 테이블의 실제 행 조회만 data-fabric(MindsDB → 대상 DB).
  */
 
 import { logger } from '@/shared/utils/logger'
@@ -13,19 +12,18 @@ import { computed, ref, watch } from 'vue'
 import { MarkerType } from '@vue-flow/core'
 import type { Edge, Node } from '@vue-flow/core'
 import { roboSchemaApi } from '@/features/schema/api'
-import { text2sqlApi } from '@/features/text2sql/api'
 import type { Text2SqlTableInfo, Text2SqlColumnInfo } from '@/shared/types'
+import { DATA_FABRIC_BASE_URL } from '@/shared/services/http'
 import { useSessionStore } from '@/shared/stores/session'
-import { useDatasourcesStore } from '@/features/datasources/datasources'
 import { applyElkLayout } from '@/shared/utils/elkLayout'
-
-export type SchemaDataSource = 'robo' | 'text2sql'
 
 export interface TableNodeData {
   tableName: string
   schema: string
   datasource?: string  // 데이터소스명 (예: robo_postgres)
+  logical_name?: string  // Neo4j 분석 논리명
   description?: string
+  analyzed_description?: string
   description_source?: 'ddl' | 'procedure' | 'code' | 'user' | ''  // 설명 출처
   columns: Text2SqlColumnInfo[]
   columnCount: number
@@ -49,10 +47,7 @@ export interface RelationshipData {
 export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   // Session stores
   const sessionStore = useSessionStore()
-  
-  // Data source selection
-  const dataSource = ref<SchemaDataSource>('robo')
-  
+
   // Canvas state
   const nodes = ref<Node<TableNodeData>[]>([])
   const edges = ref<Edge[]>([])
@@ -93,7 +88,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       from_table: string
       to_table: string
       type: string
-      source?: 'ddl' | 'procedure' | 'user'  // FK 관계 출처
+      source?: 'ddl' | 'procedure' | 'code' | 'user'  // FK 관계 출처
       column_pairs: Array<{ source: string; target: string; name?: string }>  // 각 컬럼 페어별 관계 이름
       name?: string  // 관계 이름 (전체 관계에 대한 이름)
     }
@@ -595,14 +590,6 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     return updatedColumns.value.has(`${tableName}:${columnName}`)
   }
   
-  // Watch data source changes
-  watch(dataSource, () => {
-    // Clear canvas when data source changes
-    clearCanvas()
-    loadAllTables()
-    loadUserRelationships()
-  })
-  
   // Computed
   const filteredTables = computed(() => {
     if (!searchQuery.value.trim()) return allTables.value
@@ -694,46 +681,26 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   async function loadAllTables() {
     loading.value = true
     try {
-      if (dataSource.value === 'robo') {
-        // Neo4j 직접 조회 (robo-analyzer)
-        const tables = await roboSchemaApi.getTables({
-          limit: 1000
-        })
-        allTables.value = tables.map(t => {
-          const rawSource = (t as any).description_source as string | undefined
+      // Neo4j 직접 조회 (robo-analyzer)
+      const tables = await roboSchemaApi.getTables({
+        limit: 1000
+      })
+      allTables.value = tables.map(t => {
+        const rawSource = (t as any).description_source as string | undefined
 
-          return {
-            name: t.name,
-            schema: t.table_schema,  // Backend returns table_schema
-            datasource: t.datasource || '',  // 데이터소스명 추가
-            logical_name: t.logical_name,  // 논리명(spec 025) — 카드 제목용
-            description: t.description || '',
-            description_source: (rawSource && (rawSource === 'ddl' || rawSource === 'procedure' || rawSource === 'code' || rawSource === 'user' || rawSource === ''))
-              ? rawSource
-              : undefined,  // 설명 출처
-            analyzed_description: t.analyzed_description,
-            column_count: t.column_count
-          }
-        })
-      } else {
-        // PostgreSQL 인제스천 (text2sql)
-        const datasourcesStore = useDatasourcesStore()
-        let datasourceName = (datasourcesStore.selectedDatasource?.name || '').trim()
-
-        if (!datasourceName) {
-          if (datasourcesStore.datasources.length === 0) {
-            await datasourcesStore.fetchDatasources()
-          }
-          datasourceName = (datasourcesStore.selectedDatasource?.name || datasourcesStore.datasources[0]?.name || '').trim()
+        return {
+          name: t.name,
+          schema: t.table_schema,  // Backend returns table_schema
+          datasource: t.datasource || '',  // 데이터소스명 추가
+          logical_name: t.logical_name,  // 논리명(spec 025) — 카드 제목용
+          description: t.description || '',
+          description_source: (rawSource && (rawSource === 'ddl' || rawSource === 'procedure' || rawSource === 'code' || rawSource === 'user' || rawSource === ''))
+            ? rawSource
+            : undefined,  // 설명 출처
+          analyzed_description: t.analyzed_description,
+          column_count: t.column_count
         }
-
-        if (!datasourceName) {
-          allTables.value = []
-          return
-        }
-
-        allTables.value = await text2sqlApi.getTables(datasourceName)
-      }
+      })
     } catch (error) {
       logger.error('Failed to load tables:', error)
       allTables.value = []
@@ -748,11 +715,6 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   async function performSemanticSearch(query: string): Promise<void> {
     if (!query.trim() || query.length < 2) {
       semanticSearchResults.value = []
-      return
-    }
-    
-    // Neo4j 데이터 소스에서만 시멘틱 검색 가능
-    if (dataSource.value !== 'robo') {
       return
     }
     
@@ -814,35 +776,26 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     }
     
     try {
-      let columns: Text2SqlColumnInfo[]
-      
-      if (dataSource.value === 'robo') {
-        const roboColumns = await roboSchemaApi.getTableColumns(tableName, {
-          schema: resolvedSchema
-        })
-        columns = roboColumns.map(c => {
-          const rawSource = (c as any).description_source as string | undefined
+      const roboColumns = await roboSchemaApi.getTableColumns(tableName, {
+        schema: resolvedSchema
+      })
+      const columns: Text2SqlColumnInfo[] = roboColumns.map(c => {
+        const rawSource = (c as any).description_source as string | undefined
 
-          return {
-            name: c.name,
-            table_name: c.table_name,
-            dtype: c.dtype,
-            nullable: c.nullable,
-            logical_name: (c as any).logical_name || undefined,  // 논리명(있으면 카드 우선)
-            description: c.description || '',
-            description_source: (rawSource && (rawSource === 'ddl' || rawSource === 'procedure' || rawSource === 'code' || rawSource === 'user' || rawSource === ''))
-              ? rawSource
-              : undefined,  // 설명 출처
-            analyzed_description: c.analyzed_description
-          }
-        })
-      } else {
-        if (!resolvedDatasource) {
-          throw new Error(`Text2SQL 컬럼 조회에는 datasource가 필요합니다: ${tableName}`)
+        return {
+          name: c.name,
+          table_name: c.table_name,
+          dtype: c.dtype,
+          nullable: c.nullable,
+          logical_name: (c as any).logical_name || undefined,  // 논리명(있으면 카드 우선)
+          description: c.description || '',
+          description_source: (rawSource && (rawSource === 'ddl' || rawSource === 'procedure' || rawSource === 'code' || rawSource === 'user' || rawSource === ''))
+            ? rawSource
+            : undefined,  // 설명 출처
+          analyzed_description: c.analyzed_description
         }
-        columns = await text2sqlApi.getTableColumns(resolvedDatasource, tableName, resolvedSchema || 'public')
-      }
-      
+      })
+
       // 빈 결과는 캐시하지 않음 — backend schema 매칭 실패 등 일시적 0건이
       // 캐시되면 이후 재조회해도 영원히 0개가 되어버려서 우측 패널에 "컬럼 (0)"
       // 으로 굳어버리는 문제 방지.
@@ -864,26 +817,19 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   
   async function loadUserRelationships() {
     try {
-      let relationships: RelationshipData[]
-      
-      if (dataSource.value === 'robo') {
-        const response = await roboSchemaApi.getRelationships()
-        relationships = (response.relationships || []).map(r => ({
-          from_table: r.from_table,
-          from_schema: r.from_schema,
-          from_column: r.from_column,
-          to_table: r.to_table,
-          to_schema: r.to_schema,
-          to_column: r.to_column,
-          relationship_type: r.relationship_type,
-          description: r.description,
-          name: (r as any).name  // 관계 이름
-        }))
-      } else {
-        const response = await text2sqlApi.getUserRelationships()
-        relationships = (response.relationships || []) as RelationshipData[]
-      }
-      
+      const response = await roboSchemaApi.getRelationships()
+      const relationships: RelationshipData[] = (response.relationships || []).map(r => ({
+        from_table: r.from_table,
+        from_schema: r.from_schema,
+        from_column: r.from_column,
+        to_table: r.to_table,
+        to_schema: r.to_schema,
+        to_column: r.to_column,
+        relationship_type: r.relationship_type,
+        description: r.description,
+        name: (r as any).name  // 관계 이름
+      }))
+
       userRelationships.value = relationships
       updateEdgesFromRelationships()
     } catch (error) {
@@ -1309,10 +1255,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   // =========================================================================
   // 테이블 데이터 조회 패널
   // =========================================================================
-  
-  const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? '/api/gateway'
-  const TEXT2SQL_API_BASE = import.meta.env.VITE_TEXT2SQL_API_URL || `${API_GATEWAY_URL}/text2sql`
-  
+
   /**
    * Behavior 실행 모드 시작
    * 하단 데이터 패널을 behavior 실행 모드로 열고 데이터를 로드합니다.
@@ -1398,88 +1341,35 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       return `${trimmed} LIMIT ${rowLimit}`
     }
 
-    const executeDirectSqlStream = async (
-      sqlToRun: string,
-      ds: string
+    /** data-fabric 경유 SQL 실행. SQL 은 `datasource.schema.table` 주소를 그대로 담고 있다. */
+    const executeSql = async (
+      sqlToRun: string
     ): Promise<
       | { ok: true; columns: string[]; rows: unknown[][]; rowCount: number; executionTimeMs: number }
       | { ok: false; error: string }
     > => {
-      const response = await fetch(`${TEXT2SQL_API_BASE}/direct-sql/stream`, {
+      const response = await fetch(`${DATA_FABRIC_BASE_URL}/api/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sql: sqlToRun,
-          datasource: ds,
-          max_sql_seconds: 30,
-          format_with_ai: false
-        })
+        body: JSON.stringify({ query: sqlToRun })
       })
 
       if (!response.ok) {
         return { ok: false, error: `HTTP ${response.status}` }
       }
 
-      const reader = response.body?.getReader()
-      if (!reader) return { ok: false, error: '스트림을 읽을 수 없습니다' }
-
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let latestError = ''
-      type StreamResultPayload = {
-        columns: string[]
-        rows: unknown[][]
-        rowCount: number
-        executionTimeMs: number
-      }
-      let latestResult: StreamResultPayload | undefined
-
-      const consumeLine = (line: string) => {
-        try {
-          const event = JSON.parse(line)
-          switch (event.event) {
-            case 'result':
-              latestResult = {
-                columns: event.columns || [],
-                rows: event.rows || [],
-                rowCount: Number(event.row_count || 0),
-                executionTimeMs: Number(event.execution_time_ms || 0)
-              }
-              break
-            case 'error':
-              latestError = String(event.message || 'SQL 실행 오류')
-              break
-          }
-        } catch {
-          // JSON 파싱 실패 라인은 무시
-        }
+      const result = await response.json()
+      if (result.type === 'error') {
+        return { ok: false, error: String(result.error || 'SQL 실행 오류') }
       }
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-        for (const line of lines) {
-          if (line.trim()) consumeLine(line)
-        }
+      return {
+        ok: true,
+        columns: result.columns || [],
+        rows: result.data || [],
+        rowCount: Number(result.row_count || 0),
+        executionTimeMs: Math.round(Number(result.execution_time || 0) * 1000)
       }
-
-      if (buffer.trim()) {
-        consumeLine(buffer.trim())
-      }
-
-      if (typeof latestResult !== 'undefined') {
-        return {
-          ok: true,
-          columns: latestResult.columns,
-          rows: latestResult.rows,
-          rowCount: latestResult.rowCount,
-          executionTimeMs: latestResult.executionTimeMs
-        }
-      }
-      return { ok: false, error: latestError || 'SQL 실행 결과를 수신하지 못했습니다.' }
     }
 
     const candidateSqls: string[] = []
@@ -1606,7 +1496,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     for (let i = 0; i < candidateSqls.length; i += 1) {
       const candidateSql = candidateSqls[i]
       tableDataPanel.value.executedSql = candidateSql
-      const result = await executeDirectSqlStream(candidateSql, resolvedDatasource)
+      const result = await executeSql(candidateSql)
       if (result.ok) {
         tableDataPanel.value.columns = result.columns
         tableDataPanel.value.rows = result.rows
@@ -1877,17 +1767,10 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   
   async function addRelationship(relationship: Omit<RelationshipData, 'relationship_type'>) {
     try {
-      if (dataSource.value === 'robo') {
-        await roboSchemaApi.addRelationship({
-          ...relationship,
-          relationship_type: 'FK_TO_TABLE'
-        })
-      } else {
-        await text2sqlApi.addRelationship({
-          ...relationship,
-          relationship_type: 'FK_TO_TABLE'
-        })
-      }
+      await roboSchemaApi.addRelationship({
+        ...relationship,
+        relationship_type: 'FK_TO_TABLE'
+      })
       await loadUserRelationships()
     } catch (error) {
       logger.error('Failed to add relationship:', error)
@@ -1929,11 +1812,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         match_strategy: relationship.matchStrategy || 'EXACT_MATCH'  // Correlation 전략 추가
       }
       
-      if (dataSource.value === 'robo') {
-        await roboSchemaApi.addRelationship(relData)
-      } else {
-        await text2sqlApi.addRelationship(relData)
-      }
+      await roboSchemaApi.addRelationship(relData)
       await loadUserRelationships()
     } catch (error) {
       logger.error('Failed to add relationship:', error)
@@ -1954,18 +1833,14 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       
       logger.debug('[schemaCanvas.removeRelationship] 삭제 요청:', params)
       
-      if (dataSource.value === 'robo') {
-        const result = await roboSchemaApi.deleteRelationship(params)
-        logger.debug('[schemaCanvas.removeRelationship] 삭제 결과:', result)
-        
-        // 삭제된 개수가 0이면 에러
-        if (result.deleted === 0) {
-          throw new Error('삭제된 관계가 없습니다. 관계 정보를 확인해주세요.')
-        }
-      } else {
-        await text2sqlApi.removeRelationship(params)
+      const result = await roboSchemaApi.deleteRelationship(params)
+      logger.debug('[schemaCanvas.removeRelationship] 삭제 결과:', result)
+
+      // 삭제된 개수가 0이면 에러
+      if (result.deleted === 0) {
+        throw new Error('삭제된 관계가 없습니다. 관계 정보를 확인해주세요.')
       }
-      
+
       await loadUserRelationships()
       return { success: true }
     } catch (error) {
@@ -1982,7 +1857,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       
       // 세션 헤더 전달하여 robo-analyzer API 호출
       const headers = sessionStore.getHeaders()
-      await text2sqlApi.updateTableDescription(tableName, schema, description, headers)
+      await roboSchemaApi.updateTableDescription(tableName, schema, description, headers)
       
       // Update local data
       if (table) {
@@ -2007,7 +1882,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       
       // 세션 헤더 전달하여 robo-analyzer API 호출
       const headers = sessionStore.getHeaders()
-      await text2sqlApi.updateColumnDescription(tableName, columnName, schema, description, headers)
+      await roboSchemaApi.updateColumnDescription(tableName, columnName, schema, description, headers)
       
       // Update cache
       if (tableColumnsCache.value[tableName]) {
@@ -2115,11 +1990,6 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     await applyElkLayout(nodes.value, edges.value)
   }
   
-  // Set data source
-  function setDataSource(source: SchemaDataSource) {
-    dataSource.value = source
-  }
-  
   return {
     // State
     nodes,
@@ -2133,7 +2003,6 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     loading,
     isDetailPanelOpen,
     searchQuery,
-    dataSource,
     fkVisibility,  // FK 관계 유형별 표시 상태
     showLogicalNames,  // 논리명/물리명 전환
     sourceCodePanel,  // 소스 코드 패널 상태
@@ -2180,7 +2049,6 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     updateColumnDescription,
     clearCanvas,
     loadRelatedTables,
-    setDataSource,
     addAllTablesToCanvas,
     applyAutoLayout,
     toggleFkVisibility,  // FK 표시 토글 함수
@@ -2208,4 +2076,3 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     addTableToCanvasWithAnimation
   }
 })
-

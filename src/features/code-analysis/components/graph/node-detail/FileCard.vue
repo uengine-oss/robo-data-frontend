@@ -11,6 +11,7 @@ import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { getRelationshipGroups, getMembersByLabels, ROUTINE_LABELS } from '@/shared/utils/nodeRelationships'
 import { technicalNodeName, logicalNodeName } from '@/shared/utils/graphDisplay'
 import NodeDetailBase from './NodeDetailBase.vue'
+import { AsyncCodeViewer as CodeViewer } from '@/shared/components/codeViewerAsync'
 
 interface Props { node: GraphNode }
 const props = defineProps<Props>()
@@ -34,38 +35,41 @@ const functions = computed(() =>
   getMembersByLabels(groups.value, projectStore.nodeMap, ROUTINE_LABELS)
     .map(l => resolveChild(l.target)),
 )
+
+const codeText = computed(() => (props.node.properties?.code_text as string) || '')
+const sourcePath = computed(() =>
+  (props.node.properties?.file_path as string)
+  || (props.node.properties?.file_name as string)
+  || '',
+)
 </script>
 
 <template>
   <NodeDetailBase :node="node" icon="📄" label-badge="FILE">
     <template #body>
-      <section v-if="functions.length > 0" class="member-section">
-        <h4 class="section-title">🔧 함수 ({{ functions.length }})</h4>
-        <ul class="member-list">
-          <li v-for="f in functions" :key="f.id" :title="f.logical ? `${f.name} (${f.logical})` : f.name">
-            <span class="member-name">{{ f.name }}</span>
-            <span v-if="f.logical" class="member-logical">({{ f.logical }})</span>
-          </li>
-        </ul>
+      <section v-if="functions.length > 0" class="detail-card">
+        <span class="detail-card__label">함수 · {{ functions.length }}</span>
+        <div class="detail-card__body detail-card__body--tight">
+          <ul class="member-list">
+            <li v-for="f in functions" :key="f.id" :title="f.logical ? `${f.name} (${f.logical})` : f.name">
+              <span class="member-name">{{ f.name }}</span>
+              <span v-if="f.logical" class="member-logical">({{ f.logical }})</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section v-if="codeText" class="detail-card">
+        <span class="detail-card__label">원문 코드</span>
+        <div class="detail-card__body detail-card__body--flush">
+          <CodeViewer :content="codeText" :file-path="sourcePath" :max-height="320" />
+        </div>
       </section>
     </template>
   </NodeDetailBase>
 </template>
 
 <style lang="scss" scoped>
-.member-section {
-  padding: 10px 12px;
-  background: var(--color-bg-secondary);
-  border-radius: 6px;
-}
-
-.section-title {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  margin: 0 0 8px;
-}
-
 .member-list {
   list-style: none;
   margin: 0;

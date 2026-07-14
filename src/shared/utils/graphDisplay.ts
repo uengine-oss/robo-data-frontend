@@ -22,20 +22,6 @@ export function applyLogicalMode(node: GraphNode, physical: string, logical: boo
   return logical ? logicalModeName(node, physical) : physical
 }
 
-/** C 계열 소스에서 블록/행 주석을 제거해 디테일 패널에 표시 (문자열 리터럴 내부는 미세 조정 안 함). */
-export function stripCStyleComments(source: string): string {
-  if (!source) return ''
-  let s = source.replace(/\/\*[\s\S]*?\*\//g, '')
-  const lines = s.split('\n')
-  const out: string[] = []
-  for (const line of lines) {
-    const t = line.trimStart()
-    if (t.startsWith('//')) continue
-    out.push(line)
-  }
-  return out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd()
-}
-
 export function technicalNodeName(node: GraphNode | undefined): string {
   if (!node) return ''
   const p = node.properties || {}
@@ -63,7 +49,6 @@ export function technicalNodeName(node: GraphNode | undefined): string {
   // 표시명 없는 DB 노드(TABLE/COLUMN)는 id("db.schema.name")의 마지막 세그먼트.
   const idVal = p.id as string | undefined
   // TABLE/COLUMN 만: 점 구분 경로("db.schema.name") → 마지막 세그먼트.
-  if (idVal && idVal.includes('.')) return idVal.split('.').pop() || idVal
   // 이름 없는 DBMS 구문(콜론 id)은 `타입 [라인]` — 긴 raw 식별자 노출 금지.
   const line = p.start_line
   const kind = nodeTypeLabel(node)

@@ -31,7 +31,7 @@ export interface BackendRequestMetadata {
   strategy: Strategy
   target: SourceType
   nameCase?: NameCaseOption
-  datasourceName?: string | null  // 타겟 데이터 소스 이름
+  datasource?: string | null  // 샘플 보강 시 조회할 DB (analyzer AnalyzeRequest.datasource)
   inferFkRelations?: boolean  // FK 관계 자동 추론 여부 (기본: false)
   targetFolder?: string  // source/ 아래 강제 배치할 폴더 prefix (폴더 픽커로 안 올린 단일 파일에만 적용)
   project_root?: string  // Electron 경로 모드: 분석할 로컬 폴더 절대경로. 미전달=업로드 모드(서버 data/source)
@@ -228,6 +228,10 @@ export interface AnalyzeGraphRef {
 export interface AnalyzeEvent {
   type: AnalyzeEventType
   content?: string                              // message·error·detected(JSON 문자열)
+  message?: string                              // analyzer log_error 메시지
+  fatal?: boolean                               // true = run 종결 실패
+  component?: string                            // 실패 발생 컴포넌트
+  operation?: string                            // 실패 작업
   // phase_event — 백엔드 실제 wire(executor.py·pause_controller.py): event + node(완료 step) + run_id.
   // tool_event 는 같은 event 필드에 tool_start|tool_end|tool_error 를 싣는다(spec 033).
   event?: 'start' | 'node_done' | 'stopped' | 'complete' | 'paused' | 'resumed'
@@ -237,7 +241,6 @@ export interface AnalyzeEvent {
   // tool_event — LLM 에이전트 도구 활동(스캔 등). message=친절 문구, agent=에이전트명.
   agent?: string
   tool?: string
-  message?: string
   // node_event
   op?: 'merge'
   label?: string                                // 단일 종류 라벨(labels[0], back-compat)

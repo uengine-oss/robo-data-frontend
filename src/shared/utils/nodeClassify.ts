@@ -9,6 +9,7 @@
  * 트리·노드패널이 이 한 곳을 공유 — 컴포넌트에 분기 산발 금지(DRY).
  */
 import type { GraphNode } from '@/shared/types'
+import { kindOfNode } from '@/shared/utils/nodeLabels'
 
 export type NodeRole = 'container' | 'callable' | 'statement' | 'table' | 'column' | 'other'
 
@@ -22,13 +23,8 @@ export interface NodeClass {
 }
 
 /** 부가 라벨(stub 역할·검색 마커) — 실제 종류 판정 시 스킵(나머지는 전부 antlr type=실타입). */
-const ROLE_LABELS = new Set(['INTERNAL', 'EXTERNAL', 'EMBEDDED'])
 
 /** 역할 라벨을 뺀 첫 구체 라벨(= antlr type, 예 SELECT/METHOD/CLASS/FILE). 없으면 ''. */
-function specificLabel(labels: string[]): string {
-  for (const l of labels) if (!ROLE_LABELS.has(l)) return l
-  return ''
-}
 
 /** 그릇(컨테이너) 타입집합 — spec 019: 그릇 = 실제 종류(antlr type). MODULE 은 외부 stub(:MODULE:EXTERNAL) 호환.
  *  PACKAGE 는 네임스페이스라 별도 취급(여기 제외). */
@@ -39,6 +35,17 @@ export const CONTAINER_LABELS: ReadonlySet<string> = new Set([
 /** 호출가능(루틴) 타입집합 — 메서드/함수/프로시저/트리거. 역할 라벨 대신 타입으로 판정. */
 export const CALLABLE_LABELS: ReadonlySet<string> = new Set([
   'METHOD', 'FUNCTION', 'PROCEDURE', 'TRIGGER',
+])
+
+/** 변수/상수 타입집합 (antlr type — 역할 라벨 폐기). 카드 라우팅·식별행이 **같은 집합**을 본다. */
+export const VARIABLE_LABELS: ReadonlySet<string> = new Set([
+  'VARIABLE', 'CONSTANT', 'FIELD', 'MEMBER', 'GLOBAL_VARIABLE',
+  'PARAMETER', 'PACKAGE_VARIABLE', 'CURSOR_VARIABLE', 'DEFINE', 'CONSTANT_FIELD',
+])
+
+/** 데이터타입 타입집합 (C struct/union/enum). */
+export const DATATYPE_LABELS: ReadonlySet<string> = new Set([
+  'STRUCT', 'UNION', 'ENUM', 'DATA_TYPE',
 ])
 
 /** 이 노드가 그릇(파일/클래스 등 코드 컨테이너)인가 — 소비처가 MODULE 역할 대신 타입으로 식별. */
@@ -56,7 +63,7 @@ export function classifyNode(node: GraphNode): NodeClass {
   if (labels.includes('PACKAGE')) return { role: 'container', badgeChar: 'P', badgeClass: 'badge-package' }
   // 컨테이너(그릇) — 타입으로 식별(spec 019). 배지는 **실제 종류**로(파일=F·클래스=C·인터페이스=I).
   if (isContainerNode(labels)) {
-    const kind = specificLabel(labels)
+    const kind = kindOfNode(node)
     if (/Interface|INTERFACE/.test(kind)) return { role: 'container', badgeChar: 'I', badgeClass: 'badge-interface' }
     if (/Class|CLASS/.test(kind)) return { role: 'container', badgeChar: 'C', badgeClass: 'badge-class' }
     return { role: 'container', badgeChar: kind ? kind.charAt(0).toUpperCase() : 'M', badgeClass: 'badge-module' }
@@ -65,13 +72,13 @@ export function classifyNode(node: GraphNode): NodeClass {
   if (labels.includes('COLUMN')) return { role: 'column', badgeChar: 'C', badgeClass: 'badge-column' }
   // 콜러블(루틴) — 타입집합으로 판정. 배지 = 실제 종류 첫 글자(메서드 M·함수 F·프로시저 P·트리거 T).
   {
-    const kind = specificLabel(labels)
+    const kind = kindOfNode(node)
     if (CALLABLE_LABELS.has(kind)) return { role: 'callable', badgeChar: kind.charAt(0).toUpperCase(), badgeClass: 'badge-function' }
   }
   if (labels.includes('BusinessLogic')) return { role: 'other', badgeChar: 'B', badgeClass: 'badge-bl' }
 
   // 그 외 = 자기 타입 라벨(DBMS 구문 SELECT/IF/… 또는 DBMS PROCEDURE/TRIGGER, Framework CLASS 등).
-  const kind = specificLabel(labels) || labels[0] || ''
+  const kind = kindOfNode(node)
   if (/Class|CLASS/.test(kind)) return { role: 'other', badgeChar: kind.charAt(0).toUpperCase(), badgeClass: 'badge-class' }
   if (/Interface|INTERFACE/.test(kind)) return { role: 'other', badgeChar: kind.charAt(0).toUpperCase(), badgeClass: 'badge-interface' }
   return { role: kind ? 'statement' : 'other', badgeChar: kind ? kind.charAt(0).toUpperCase() : '?', badgeClass: 'badge-default' }
@@ -79,7 +86,7 @@ export function classifyNode(node: GraphNode): NodeClass {
 
 /** 노드의 구체 타입 라벨(표시용 — 예 'SELECT', 'PROCEDURE', 'METHOD'). 없으면 ''. */
 export function nodeTypeLabel(node: GraphNode): string {
-  return specificLabel(node.labels || [])
+  return kindOfNode(node)
 }
 
 /** LLM 분석 제외(구조) 노드의 한글 라벨 — 단일 하드코딩 맵(DRY). LLM 논리명이 없는 자리를 채운다. */
@@ -95,7 +102,7 @@ const STRUCTURE_LABELS_KO: Record<string, string> = {
  * (분석된 노드는 논리명 없으면 영문 기술명으로 떠서 자연 구분, 별도 꼬리표 불필요).
  */
 export function structureLogicalName(node: GraphNode): string {
-  const type = specificLabel(node.labels || []) || (node.labels || [])[0] || ''
+  const type = kindOfNode(node)
   return STRUCTURE_LABELS_KO[type] || ''
 }
 

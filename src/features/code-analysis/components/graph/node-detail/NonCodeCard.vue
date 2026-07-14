@@ -7,6 +7,7 @@
 import { computed } from 'vue'
 import type { GraphNode } from '@/shared/types'
 import NodeDetailBase from './NodeDetailBase.vue'
+import { AsyncCodeViewer as CodeViewer } from '@/shared/components/codeViewerAsync'
 
 interface Props { node: GraphNode }
 const props = defineProps<Props>()
@@ -32,9 +33,7 @@ const subInfo = computed(() => {
       <section v-if="codeText" class="detail-card">
         <span class="detail-card__label">내용</span>
         <div class="detail-card__body detail-card__body--flush">
-          <div class="detail-scroll">
-            <pre>{{ codeText }}</pre>
-          </div>
+          <CodeViewer :content="codeText" :file-path="filePath" />
         </div>
       </section>
     </template>

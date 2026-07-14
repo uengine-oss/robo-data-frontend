@@ -164,7 +164,7 @@ const handleTreeSelect = (relPath: string) => {
   // 이미 열려있으면 해당 탭으로 이동
   const existing = openTabs.value.find(t => t.id === tabId)
   if (existing) {
-    activeTabId.value = tabId
+    activateTab(tabId)
     return
   }
   
@@ -175,7 +175,7 @@ const handleTreeSelect = (relPath: string) => {
     content: fileNode.fileContent,
     type: 'file'
   })
-  activeTabId.value = tabId
+  activateTab(tabId)
 }
 
 // 파일 삭제 핸들러
@@ -187,7 +187,9 @@ const handleRemoveFile = (relPath: string) => {
   if (tabIndex !== -1) {
     openTabs.value.splice(tabIndex, 1)
     if (activeTabId.value === tabId) {
-      activeTabId.value = openTabs.value[0]?.id || null
+      const nextTabId = openTabs.value[0]?.id || null
+      if (nextTabId) activateTab(nextTabId)
+      else activeTabId.value = null
     }
   }
 }
@@ -201,7 +203,9 @@ const handleRemoveDdlFile = (relPath: string) => {
   if (tabIndex !== -1) {
     openTabs.value.splice(tabIndex, 1)
     if (activeTabId.value === tabId) {
-      activeTabId.value = openTabs.value[0]?.id || null
+      const nextTabId = openTabs.value[0]?.id || null
+      if (nextTabId) activateTab(nextTabId)
+      else activeTabId.value = null
     }
   }
 }
@@ -234,7 +238,7 @@ const closeTab = (tabId: string) => {
   // 활성 탭이 닫히면 다른 탭으로 이동
   if (activeTabId.value === tabId) {
     if (openTabs.value.length > 0) {
-      activeTabId.value = openTabs.value[Math.max(0, index - 1)].id
+      activateTab(openTabs.value[Math.max(0, index - 1)].id)
     } else {
       activeTabId.value = null
     }
@@ -243,13 +247,31 @@ const closeTab = (tabId: string) => {
 
 // 뷰어 콘텐츠 ref
 const viewerContentRef = ref<HTMLElement>()
+const tabsHeaderRef = ref<HTMLElement>()
 
 // 탭 활성화
 const activateTab = (tabId: string) => {
   activeTabId.value = tabId
-  // 탭 전환 시 스크롤 맨 위로
+
+  // 사용자 파일 전환은 항상 새 문서의 시작점에서 시작한다. 탭이 overflow 바깥에
+  // 있으면 page가 아니라 tab strip만 이동해 활성 탭을 노출한다.
   nextTick(() => {
-    viewerContentRef.value?.scrollTo(0, 0)
+    viewerContentRef.value?.scrollTo({ top: 0, left: 0 })
+
+    const header = tabsHeaderRef.value
+    const active = header?.querySelector<HTMLElement>('.tab-item.active')
+    if (!header || !active) return
+
+    const activeLeft = active.offsetLeft
+    const activeRight = activeLeft + active.offsetWidth
+    const visibleLeft = header.scrollLeft
+    const visibleRight = visibleLeft + header.clientWidth
+
+    if (activeLeft < visibleLeft) {
+      header.scrollTo({ left: activeLeft })
+    } else if (activeRight > visibleRight) {
+      header.scrollTo({ left: activeRight - header.clientWidth })
+    }
   })
 }
 
@@ -549,7 +571,7 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
       <!-- 우측: 탭 형식 파일 뷰어 -->
       <div class="upload-right">
         <!-- 탭 헤더 -->
-        <div class="tabs-header" v-if="openTabs.length > 0">
+        <div ref="tabsHeaderRef" class="tabs-header" v-if="openTabs.length > 0">
           <div 
             v-for="tab in openTabs" 
             :key="tab.id"
@@ -1055,6 +1077,7 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   overflow: hidden;
+  min-width: 0;
   min-height: 0;
   height: 100%;
 }
@@ -1066,6 +1089,8 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
   overflow-x: auto;
   overflow-y: hidden;
   flex-shrink: 0;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
   
   // 스크롤바 표시 (연한 색상)

@@ -903,6 +903,7 @@ defineExpose({
     @dragover="onDragOver"
     @dragleave="onDragLeave"
     @drop="onDrop"
+    @click.self="emit('node-select', null); emit('relationship-select', null)"
   >
     <!-- 컨텍스트 메뉴 -->
     <Transition name="fade">

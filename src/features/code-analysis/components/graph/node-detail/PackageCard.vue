@@ -25,7 +25,7 @@ const childModules = computed(() => {
     const p = n?.properties || {}
     result.push({
       id: link.source,
-      name: (p.name as string) || (p.id as string)?.split('.').pop() || link.source,
+      name: (p.name as string) || link.source,
       type: (p.type as string) || (n?.labels?.[0] as string) || '',
     })
   }
@@ -36,33 +36,22 @@ const childModules = computed(() => {
 <template>
   <NodeDetailBase :node="node" icon="📦" label-badge="PACKAGE" :sub-info="fqn">
     <template #body>
-      <section v-if="childModules.length > 0" class="modules-section">
-        <h4 class="section-title">자식 모듈 ({{ childModules.length }})</h4>
-        <ul class="modules-list">
-          <li v-for="m in childModules" :key="m.id">
-            <span class="module-type">{{ m.type }}</span>
-            <span class="module-name">{{ m.name }}</span>
-          </li>
-        </ul>
+      <section v-if="childModules.length > 0" class="detail-card">
+        <span class="detail-card__label">자식 모듈 · {{ childModules.length }}</span>
+        <div class="detail-card__body detail-card__body--tight">
+          <ul class="modules-list">
+            <li v-for="m in childModules" :key="m.id">
+              <span class="module-type">{{ m.type }}</span>
+              <span class="module-name">{{ m.name }}</span>
+            </li>
+          </ul>
+        </div>
       </section>
     </template>
   </NodeDetailBase>
 </template>
 
 <style lang="scss" scoped>
-.modules-section {
-  padding: 10px 12px;
-  background: var(--color-bg-secondary);
-  border-radius: 6px;
-}
-
-.section-title {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  margin: 0 0 8px;
-}
-
 .modules-list {
   list-style: none;
   margin: 0;

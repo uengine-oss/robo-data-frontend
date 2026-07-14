@@ -16,6 +16,7 @@ import type { GraphNode } from '@/shared/types'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import { getRelationshipGroups, getMembersByLabels, DATA_MEMBER_LABELS } from '@/shared/utils/nodeRelationships'
 import NodeDetailBase from './NodeDetailBase.vue'
+import { AsyncCodeViewer as CodeViewer } from '@/shared/components/codeViewerAsync'
 
 interface Props {
   node: GraphNode
@@ -54,13 +55,21 @@ function resolveField(id: string): FieldEntry {
   return {
     id,
     name: (p.name as string) || id,
-    type: (p.variable_type as string) || (p.dtype as string) || '',
+    // 백엔드 저장 이름은 `var_type` — 옛 `variable_type` 은 어디서도 저장되지 않는다 (spec 045 FR-009).
+    type: (p.var_type as string) || (p.dtype as string) || '',
   }
 }
 
 const fields = computed<FieldEntry[]>(() =>
   getMembersByLabels(groups.value, projectStore.nodeMap, DATA_MEMBER_LABELS)
     .map(l => resolveField(l.target)),
+)
+
+const codeText = computed(() => (props.node.properties?.code_text as string) || '')
+const sourcePath = computed(() =>
+  (props.node.properties?.file_path as string)
+  || (props.node.properties?.file_name as string)
+  || '',
 )
 </script>
 
@@ -72,34 +81,29 @@ const fields = computed<FieldEntry[]>(() =>
     :sub-info="subInfo"
   >
     <template #body>
-      <section v-if="fields.length > 0" class="field-section">
-        <h4 class="section-title">📋 필드 ({{ fields.length }})</h4>
-        <ul class="field-list">
-          <li v-for="f in fields" :key="f.id">
-            <span class="field-name">{{ f.name }}</span>
-            <span v-if="f.type" class="field-type">: {{ f.type }}</span>
-          </li>
-        </ul>
+      <section v-if="fields.length > 0" class="detail-card">
+        <span class="detail-card__label">필드 · {{ fields.length }}</span>
+        <div class="detail-card__body detail-card__body--tight">
+          <ul class="field-list">
+            <li v-for="f in fields" :key="f.id">
+              <span class="field-name">{{ f.name }}</span>
+              <span v-if="f.type" class="field-type">: {{ f.type }}</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section v-if="codeText" class="detail-card">
+        <span class="detail-card__label">원문 코드</span>
+        <div class="detail-card__body detail-card__body--flush">
+          <CodeViewer :content="codeText" :file-path="sourcePath" :max-height="240" />
+        </div>
       </section>
     </template>
   </NodeDetailBase>
 </template>
 
 <style lang="scss" scoped>
-.field-section {
-  padding: 10px 12px;
-  background: var(--color-bg-secondary);
-  border-radius: 6px;
-}
-
-.section-title {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  margin: 0 0 8px;
-  letter-spacing: 0.5px;
-}
-
 .field-list {
   list-style: none;
   margin: 0;

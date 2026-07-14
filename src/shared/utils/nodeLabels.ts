@@ -12,28 +12,49 @@
  */
 
 /** stub 종류미상 마커 — 역할 아님. */
-const STUB_MARKER = 'EXTERNAL'
+const SYSTEM_ROLE_LABELS: ReadonlySet<string> = new Set(['INTERNAL', 'EXTERNAL'])
 
 /** 배관 마커 — 역할 아님 + 화면 비표시(spec 044 FR-009). */
 const HIDDEN_MARKERS: ReadonlySet<string> = new Set(['EMBEDDED'])
 
 /** 역할에서 제외하는 마커 전체. */
-const MARKER_LABELS: ReadonlySet<string> = new Set([STUB_MARKER, ...HIDDEN_MARKERS])
+const MARKER_LABELS: ReadonlySet<string> = new Set([...SYSTEM_ROLE_LABELS, ...HIDDEN_MARKERS])
 
 /** 노드의 종류(antlr 타입) = 첫 라벨. */
 export function kindOf(labels: readonly string[] | undefined): string {
-  return labels?.[0] ?? 'Unknown'
+  return labels?.find(label => !MARKER_LABELS.has(label)) ?? 'Unknown'
 }
 
 /** 노드의 역할(stereotype) 목록 = 첫 라벨 이후, 마커 제외. */
 export function rolesOf(labels: readonly string[] | undefined): string[] {
-  if (!labels || labels.length < 2) return []
-  return labels.slice(1).filter(l => !MARKER_LABELS.has(l))
+  if (!labels) return []
+  return labels.filter(l => SYSTEM_ROLE_LABELS.has(l))
 }
 
 /** 라벨이 stub 종류미상 마커인지. */
 export function isStubMarker(label: string): boolean {
-  return label === STUB_MARKER
+  return label === 'EXTERNAL'
+}
+
+function normalizedRole(value: unknown): string {
+  return typeof value === 'string' ? value.replace(/[^a-z0-9]/gi, '').toUpperCase() : ''
+}
+
+/** Node의 명시 stereotype과 system role label을 순서와 무관하게 반환한다. */
+export function semanticRoleLabels(node: { labels?: readonly string[]; properties?: Record<string, unknown> }): string[] {
+  const stereotype = normalizedRole(node.properties?.stereotype)
+  return (node.labels ?? []).filter(label =>
+    SYSTEM_ROLE_LABELS.has(label)
+    || (stereotype !== '' && normalizedRole(label) === stereotype),
+  )
+}
+
+/** Neo4j label 순서에 의존하지 않는 종류 label. */
+export function kindOfNode(node: { labels?: readonly string[]; properties?: Record<string, unknown> }): string {
+  const roles = new Set(semanticRoleLabels(node))
+  const explicit = typeof node.properties?.type === 'string' ? node.properties.type : ''
+  if (explicit && node.labels?.includes(explicit)) return explicit
+  return node.labels?.find(label => !roles.has(label) && !HIDDEN_MARKERS.has(label)) ?? 'Unknown'
 }
 
 /** 라벨이 화면 비표시 배관 마커인지 (통계·칩에서 완전 제외). */

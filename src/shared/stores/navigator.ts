@@ -17,6 +17,8 @@ import type { GraphLink, GraphNode } from '@/shared/types'
 import { ROUTINE_LABELS } from '@/shared/utils/nodeRelationships'
 import { isContainerNode } from '@/shared/utils/nodeClassify'
 import { typeWithLine, applyLogicalMode } from '@/shared/utils/graphDisplay'
+import { isNodeHidden, isSystemNode } from '@/shared/utils/graphVisibility'
+import { kindOfNode } from '@/shared/utils/nodeLabels'
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 타입 정의
@@ -42,17 +44,6 @@ const showLogicalNames = ref(false)
 // 트리 빌드 헬퍼 (순수 함수)
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** 종류(antlr type)=labels[0]. stereotype 은 위치(labels[1:])로 가르므로 하드코딩 안 함
- *  (드리프트 0 — nodeClassify.ts 와 동일 계약). 제외 대상은 stub·검색 마커뿐. */
-const ROLE_LABELS = new Set(['INTERNAL', 'EXTERNAL', 'EMBEDDED'])
-
-/** 트리에서 제외할 라벨 — 변수/상수(antlr type 전부)·EM 노드는 트리에 안 보인다. */
-const EXCLUDED_LABELS = new Set([
-  'VARIABLE', 'CONSTANT', 'GLOBAL_VARIABLE', 'DEFINE',
-  'FIELD', 'MEMBER', 'PARAMETER', 'PACKAGE_VARIABLE', 'CURSOR_VARIABLE', 'CONSTANT_FIELD',
-  'RULE', 'EXAMPLE', 'QUESTION',
-])
-
 /** 자식으로 확장할 관계 타입 (컨테이너 → 자식).
  *  HAS_MEMBER = 그릇(FILE/CLASS) → 멤버. 트리엔 **루틴만** 넣는다(데이터 멤버 변수·상수는
  *  노드패널 카드에서 표시 — 트리 노이즈 방지). 종류 구분 = 노드 라벨(buildChildIndexes). */
@@ -73,19 +64,8 @@ const META_CHILD_RELS = new Set(['HAS_RULE', 'HAS_EXAMPLE', 'HAS_QUESTION'])
  * 1) 부가 역할 라벨 제외한 첫 번째 = 실제 종류(antlr type, 예 [:METHOD]→'METHOD').
  * 2) 없으면(외부 stub 등) 우선순위 기반 폴백.
  */
-function pickDisplayLabel(labels: string[]): string {
-  for (const label of labels) {
-    if (!ROLE_LABELS.has(label)) return label
-  }
-  const ROLE_PRIORITY = [
-    'PACKAGE', 'MODULE', 'BusinessLogic',
-    'Query', 'Command', 'Validation', 'Endpoint',
-    'FUNCTION', 'FILE',
-  ]
-  for (const pref of ROLE_PRIORITY) {
-    if (labels.includes(pref)) return pref
-  }
-  return labels[0] ?? 'Unknown'
+function pickDisplayLabel(node: GraphNode): string {
+  return kindOfNode(node)
 }
 
 function pickDisplayName(node: GraphNode): string {
@@ -101,11 +81,11 @@ function pickDisplayName(node: GraphNode): string {
     : node.labels.includes('QUESTION') ? p['text'] : undefined
   if (metaText != null) {
     const s = String(metaText).trim()
-    return s.length > 40 ? s.slice(0, 40) + '…' : (s || pickDisplayLabel(node.labels))
+    return s.length > 40 ? s.slice(0, 40) + '…' : (s || pickDisplayLabel(node))
   }
   // 물리 식별자 — 이름 우선, 없으면 `타입 [라인]`(트리는 라인 표기). type 산출은 트리 고유(pickDisplayLabel).
   const name = p['name']
-  const physical = name ? String(name) : typeWithLine(pickDisplayLabel(node.labels), p['start_line'], true)
+  const physical = name ? String(name) : typeWithLine(pickDisplayLabel(node), p['start_line'], true)
   return applyLogicalMode(node, physical, showLogicalNames.value)
 }
 
@@ -121,9 +101,10 @@ function blSequenceKey(node: GraphNode): [number, ...number[]] {
 }
 
 function isExcluded(node: GraphNode): boolean {
-  // "숨김 요소 표시"(필터 메뉴) 켜지면 변수류도 트리에 노출 — 그래프/필터와 동일 토글.
+  // 캔버스와 같은 단일 정책. summary 생성 시점은 구조 탐색 표시 여부와 무관하다.
+  if (isSystemNode(node)) return true
   if (useAnalyzerStore().showHidden) return false
-  return node.labels.some(l => EXCLUDED_LABELS.has(l))
+  return isNodeHidden(node)
 }
 
 /**
@@ -179,7 +160,7 @@ function buildSubtree(
   return {
     id: node.id,
     name: pickDisplayName(node),
-    nodeType: pickDisplayLabel(node.labels),
+    nodeType: pickDisplayLabel(node),
     labels: node.labels,
     children: [...otherChildren, ...astChildren, ...blChildren],
   }
@@ -322,7 +303,11 @@ function buildModulesTree(
     }
   }
 
-  roots.sort((a, b) => a.name.localeCompare(b.name))
+  roots.sort((a, b) => {
+    const ap = a.labels.includes('PACKAGE') ? 0 : 1
+    const bp = b.labels.includes('PACKAGE') ? 0 : 1
+    return ap !== bp ? ap - bp : a.name.localeCompare(b.name)
+  })
   return roots
 }
 

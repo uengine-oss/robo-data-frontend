@@ -4,9 +4,10 @@
  */
 
 .node-detail-base {
-  --nd-stack-gap: 10px;
+  --nd-stack-gap: 14px;
+  --nd-content-pad-y: 12px;
+  --nd-content-pad-x: 12px;
   --nd-card-radius: 10px;
-  --nd-scroll-max-h: min(42vh, 380px);
   --nd-rel-accent-table: 59, 130, 246;
   --nd-rel-accent-call: 99, 102, 241;
   display: flex;
@@ -40,7 +41,7 @@
 }
 
 .node-detail-base .detail-card__body {
-  padding: 10px 12px;
+  padding: var(--nd-content-pad-y) var(--nd-content-pad-x);
 }
 
 .node-detail-base .detail-card__body--prose {
@@ -48,7 +49,7 @@
 }
 
 .node-detail-base .detail-card__body--tight {
-  padding: 8px 12px;
+  padding: var(--nd-content-pad-y) var(--nd-content-pad-x);
 }
 
 .node-detail-base .detail-locate {
@@ -72,53 +73,6 @@
 .node-detail-base .detail-locate__v {
   color: var(--color-text-light);
   word-break: break-word;
-}
-
-.node-detail-base .detail-scroll {
-  overflow: auto;
-  overflow-x: auto;
-  max-height: var(--nd-scroll-max-h);
-  scrollbar-width: thin;
-
-  &.detail-scroll--collapsed-sql {
-    max-height: 120px;
-  }
-
-  &::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: var(--color-border);
-    border-radius: 4px;
-  }
-
-  &::-webkit-scrollbar-corner {
-    background: transparent;
-  }
-}
-
-.node-detail-base .detail-scroll .text-viewer {
-  margin: 0;
-}
-
-.node-detail-base .detail-scroll pre,
-.node-detail-base .detail-scroll .text-viewer__body {
-  white-space: pre !important;
-  word-break: normal !important;
-  overflow-wrap: normal !important;
-  max-height: none !important;
-  overflow: visible !important;
-  padding: 10px 12px !important;
-  margin: 0 !important;
-  font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
-  font-size: 0.72rem;
-  line-height: 1.42;
-  letter-spacing: -0.02em;
-  tab-size: 4;
-  color: var(--color-text);
-  background: color-mix(in srgb, var(--color-bg-secondary) 68%, var(--color-bg));
 }
 
 .node-detail-base .detail-card__body--flush {

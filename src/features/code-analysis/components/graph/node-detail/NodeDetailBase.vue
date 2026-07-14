@@ -15,6 +15,7 @@ import { relationshipRowParts, technicalNodeName } from '@/shared/utils/graphDis
 import { getNodeColor } from '@/shared/config/graphStyles'
 import { colorLabelOf } from '@/shared/utils/nodeLabels'
 import { buildIdentityRows } from '@/shared/utils/nodeIdentity'
+import { semanticRoleLabels } from '@/shared/utils/nodeLabels'
 
 interface Props {
   node: GraphNode
@@ -38,8 +39,27 @@ const hasIdentityExtra = computed(() => Boolean(slots['identity-extra']?.()))
 
 const nodeName = computed(() => technicalNodeName(props.node))
 
-// 식별 정보 행(논리명·경로·라인·분류·종류별) — 단일 생성처(nodeIdentity). 종류 무관 일관 + 빠짐없이.
-const identityRows = computed(() => buildIdentityRows(props.node))
+const ownerNode = computed(() => {
+  const ownerId = props.node.properties?.owner_id
+  return typeof ownerId === 'string' ? projectStore.nodeMap.get(ownerId) : undefined
+})
+
+const packageNode = computed(() => {
+  const candidates = [props.node.id, ownerNode.value?.id].filter((id): id is string => Boolean(id))
+  for (const link of projectStore.linkMap.values()) {
+    if (link.type !== 'BELONGS_TO' || !candidates.includes(link.source)) continue
+    const target = projectStore.nodeMap.get(link.target)
+    if (target?.labels.includes('PACKAGE')) return target
+  }
+  return undefined
+})
+
+// 원본파일·경로·라인·소속·패키지 — id 파싱 없이 명시 속성/관계만 사용.
+const identityRows = computed(() => buildIdentityRows(props.node, {
+  ownerName: ownerNode.value ? technicalNodeName(ownerNode.value) : '',
+  packageName: packageNode.value ? technicalNodeName(packageNode.value) : '',
+}))
+const roleLabels = computed(() => semanticRoleLabels(props.node))
 
 // 식별 배지 색 = 그래프 캔버스와 동일한 노드 색(단일 소스 getNodeColor·colorLabelOf 재사용=DRY).
 // 활성 렌즈(isolate된 역할) 따라감(spec 040) — 캔버스 노드 색과 일치. 어떤 포맷이든 color-mix 틴트.
@@ -216,6 +236,11 @@ const relStripToneClass = computed(() => {
               <span class="identity-tech">{{ displayHeaderTitle }}</span>
             </span>
             <span v-if="labelBadge" class="identity-badge" :style="{ '--badge-color': badgeColor }">{{ labelBadge }}</span>
+            <span
+              v-for="role in roleLabels"
+              :key="role"
+              class="identity-badge identity-badge--role"
+            >{{ role }}</span>
           </div>
           <!-- 식별 정보 행 목록(논리명·경로·라인·분류·종류별) — 단일 생성처. 값 있는 것만, 종류 무관 일관. -->
           <div v-if="identityRows.length" class="identity-rows">
@@ -305,13 +330,16 @@ const relStripToneClass = computed(() => {
 .identity-head {
   display: flex;
   gap: 10px;
-  padding: 10px 12px 0;
+  padding: var(--nd-content-pad-y) var(--nd-content-pad-x);
   align-items: flex-start;
 }
 
 .identity-icon {
+  display: inline-flex;
+  align-items: center;
+  height: 1.42em;
   font-size: 1.15rem;
-  line-height: 1.3;
+  line-height: 1;
   flex-shrink: 0;
 }
 
@@ -353,7 +381,7 @@ const relStripToneClass = computed(() => {
 .identity-title-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
 }
 
@@ -409,6 +437,12 @@ const relStripToneClass = computed(() => {
   color: var(--badge-color, var(--color-text-muted));
   border: 1px solid color-mix(in srgb, var(--badge-color, var(--color-border)) 45%, transparent);
   background: color-mix(in srgb, var(--badge-color, var(--color-border)) 15%, transparent);
+}
+
+.identity-badge--role {
+  color: var(--color-text-bright);
+  border-color: var(--color-border);
+  background: var(--color-bg-tertiary);
 }
 
 .detail-health {

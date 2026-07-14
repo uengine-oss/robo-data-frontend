@@ -17,9 +17,10 @@ import type { GraphNode, GraphLink } from '@/shared/types'
 import { useResize } from '@/shared/composables/useResize'
 import { useDrag } from '@/shared/composables/useDrag'
 import { getNodeColor, getRelationshipColor } from '@/shared/config/graphStyles'
-import { isHiddenMarker, isStubMarker } from '@/shared/utils/nodeLabels'
+import { isHiddenMarker, semanticRoleLabels } from '@/shared/utils/nodeLabels'
 import { storageVersion } from '@/shared/utils/graphStyleStorage'
 import { CALLABLE_LABELS } from '@/shared/utils/nodeClassify'
+import { isSystemNode } from '@/shared/utils/graphVisibility'
 
 const projectStore = useAnalyzerStore()
 const canvasStore = useCanvasStore()
@@ -258,6 +259,7 @@ function ensureNodesForView(propKey: string, needLabel?: string): void {
   //  위에 영역 헐이 덧칠되던 비독립 버그가 있었다.)
   const matched: string[] = []
   for (const node of projectStore.nodeMap.values()) {
+    if (isSystemNode(node)) continue
     const v = node.properties?.[propKey]
     if (v === undefined || v === null || v === '') continue
     if (needLabel) {
@@ -419,18 +421,14 @@ const overallNodeStats = computed(() => {
   void storageVersion.value
   // 종류 = 어떤 노드든 labels[0] 로 등장한 라벨(+EXTERNAL stub 마커). 그 외 = 역할(stereotype).
   // 위치 파생이라 하드코딩 역할집합 0(spec 035). 라벨별 group 태그를 붙여 필터가 섹션 분리.
-  const kindLabels = new Set<string>()
-  for (const node of graphData.value?.nodes ?? []) {
-    const first = node.labels?.[0]
-    if (first && first !== '_Placeholder') kindLabels.add(first)
-  }
   const stats = new Map<string, { count: number; color: string; group: 'kind' | 'role' }>()
   for (const node of graphData.value?.nodes ?? []) {
+    const roleLabels = new Set(semanticRoleLabels(node))
     for (const label of node.labels || ['Unknown']) {
       if (label === '_Placeholder' || isHiddenMarker(label)) continue
       const existing = stats.get(label)
       if (existing) { existing.count++; continue }
-      const group = kindLabels.has(label) || isStubMarker(label) ? 'kind' : 'role'
+      const group = roleLabels.has(label) ? 'role' : 'kind'
       stats.set(label, { count: 1, color: getNodeColor([label]), group })
     }
   }
@@ -494,10 +492,12 @@ function resetStylePanel(): void {
 }
 
 function handleNodeSelect(node: GraphNode | null): void {
+  if (node && isSystemNode(node)) return
   selectedNode.value = node
   selectedRelationship.value = null
   resetStylePanel()
   if (node) showNodePanel.value = true
+  navigatorStore.selectNode(node?.id ?? null)
 }
 
 /**

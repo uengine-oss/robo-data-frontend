@@ -6,13 +6,33 @@
  * 오직 표시 단계에서 이 정의로 판단한다. 모든 표시 소비처(analyzer graphData·canvas
  * canvasGraphData)가 이 하나를 공유 → 정의가 흩어져 생기던 불일치 제거.
  *
- * "숨김 요소 표시"(showHidden) 토글이 켜지면 이 숨김을 적용하지 않고 전부 노출한다.
+ * 시스템 노드는 항상 제외한다. "숨김 요소 표시"(showHidden)는 사용자 그래프의 기본
+ * 숨김만 해제하며 시스템 노드에는 영향을 주지 않는다.
  */
 import type { GraphNode } from '@/shared/types'
 
-/** 화면 기본 숨김 노드 라벨 — 메타 노드(RULE/EXAMPLE/QUESTION) + 시각 노이즈(전역변수·매크로). */
+/** 검색·분석 런타임 전용 저장 노드 — UI에 어떤 경우에도 노출하지 않는다. */
+export const SYSTEM_NODE_LABELS: ReadonlySet<string> = new Set([
+  'GLOSSARY', 'EMBED_META',
+])
+
+/**
+ * 화면 기본 숨김 노드 라벨.
+ *
+ * 지원 전략의 "보이지 않아야 하는 타입"만 명시한다. 여기에 없는 새 언어/전략 타입은
+ * 기본 표시해 조용히 사라지지 않게 한다. summary는 스트리밍 후반에 채워지는 분석 결과라
+ * 표시 정책에 사용하지 않는다.
+ */
 export const HIDDEN_NODE_LABELS: ReadonlySet<string> = new Set([
-  'RULE', 'EXAMPLE', 'QUESTION', 'GLOBAL_VARIABLE', 'DEFINE',
+  // 분석 대상 내부에 정의가 없는 외부 참조 stub.
+  'EXTERNAL',
+  // 변수·상수 선언 — 상세 패널/전체 보기에서 확인.
+  'VARIABLE', 'CONSTANT', 'GLOBAL_VARIABLE', 'DEFINE',
+  'FIELD', 'MEMBER', 'PARAMETER', 'PACKAGE_VARIABLE', 'CURSOR_VARIABLE', 'CONSTANT_FIELD',
+  // 자료형 구조 — 전체 보기에서 확인.
+  'STRUCT', 'UNION', 'ENUM', 'DATA_TYPE',
+  // Example Mapping 메타.
+  'RULE', 'EXAMPLE', 'QUESTION',
 ])
 
 /**
@@ -29,6 +49,10 @@ export const HIDDEN_LINK_TYPES: ReadonlySet<string> = new Set([
 
 export function isNodeHidden(node: GraphNode): boolean {
   return (node.labels || []).some(l => HIDDEN_NODE_LABELS.has(l))
+}
+
+export function isSystemNode(node: GraphNode): boolean {
+  return (node.labels || []).some(l => SYSTEM_NODE_LABELS.has(l.toUpperCase()))
 }
 
 export function isLinkHidden(type: string): boolean {

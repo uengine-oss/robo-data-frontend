@@ -18,7 +18,7 @@
  */
 
 import type { GraphNode } from '@/shared/types'
-import { CALLABLE_LABELS } from '@/shared/utils/nodeClassify'
+import { CALLABLE_LABELS, DATATYPE_LABELS, VARIABLE_LABELS } from '@/shared/utils/nodeClassify'
 
 export type TemplateType =
   | 'module'
@@ -35,12 +35,8 @@ export type TemplateType =
   | 'fallback'
 
 const ATTACHED_LABELS = new Set(['RULE', 'EXAMPLE', 'QUESTION', 'Actor'])
-// 변수/상수 = antlr type 집합 (역할 라벨 폐기 — FIELD/MEMBER/DEFINE 등 자기 타입).
-const VARIABLE_LABELS = new Set([
-  'VARIABLE', 'CONSTANT', 'FIELD', 'MEMBER', 'GLOBAL_VARIABLE',
-  'PARAMETER', 'PACKAGE_VARIABLE', 'CURSOR_VARIABLE', 'DEFINE', 'CONSTANT_FIELD',
-])
-const DATATYPE_LABELS = new Set(['STRUCT', 'UNION', 'ENUM', 'DATA_TYPE'])
+// 변수/상수·데이터타입 집합은 `nodeClassify` 가 단일 진실 — 여기서 다시 정의하지 않는다
+// (종전엔 여기·nodeIdentity 가 각자 목록을 들어 서로 달랐다 — spec 045 FR-012).
 const NON_CODE_LABELS = new Set(['ARTIFACT_CHUNK', 'CONFIG_SECTION'])
 const DML_LABELS = new Set([
   'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'MERGE', 'UNION',

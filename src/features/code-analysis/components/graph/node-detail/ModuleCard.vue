@@ -21,7 +21,6 @@ const projectStore = useAnalyzerStore()
 const subLabel = computed(() => (props.node.properties?.type as string) || 'MODULE')
 
 const intent = computed(() => (props.node.properties?.intent as string) || '')
-const notes = computed(() => (props.node.properties?.notes as string) || '')
 
 const subInfo = computed(() => {
   const p = props.node.properties || {}
@@ -84,15 +83,6 @@ const umlEdges = computed(() =>
         </div>
       </section>
 
-      <section v-if="notes" class="detail-card">
-        <span class="detail-card__label">메모</span>
-        <div class="detail-card__body detail-card__body--tight module-meta">
-          <div class="meta-row">
-            <span class="meta-val">{{ notes }}</span>
-          </div>
-        </div>
-      </section>
-
       <section v-if="methods.length > 0" class="detail-card">
         <span class="detail-card__label">함수 · {{ methods.length }}</span>
         <div class="detail-card__body detail-card__body--tight">
@@ -127,38 +117,6 @@ const umlEdges = computed(() =>
   font-size: 0.8rem;
   color: var(--color-text);
   line-height: 1.5;
-}
-
-.module-meta .meta-row {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  font-size: 0.72rem;
-  padding: 4px 0;
-
-  &:first-child {
-    padding-top: 0;
-  }
-
-  &:last-child {
-    padding-bottom: 0;
-  }
-
-  .meta-key {
-    color: var(--color-text-muted);
-    font-weight: 700;
-    flex-shrink: 0;
-    font-size: 0.65rem;
-    letter-spacing: 0.04em;
-  }
-
-  .meta-val {
-    color: var(--color-text);
-    font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
-    font-size: 0.68rem;
-    word-break: break-word;
-    min-width: 0;
-  }
 }
 
 .member-list {

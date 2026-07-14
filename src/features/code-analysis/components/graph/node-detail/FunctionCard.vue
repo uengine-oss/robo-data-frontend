@@ -6,11 +6,11 @@
 
 import { computed } from 'vue'
 import type { GraphNode } from '@/shared/types'
-import { technicalNodeName, stripCStyleComments } from '@/shared/utils/graphDisplay'
+import { technicalNodeName } from '@/shared/utils/graphDisplay'
 import { getSemanticReport } from '@/shared/utils/nodeRelationships'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
 import NodeDetailBase from './NodeDetailBase.vue'
-import TextViewer from '@/shared/components/TextViewer.vue'
+import { AsyncCodeViewer as CodeViewer } from '@/shared/components/codeViewerAsync'
 
 interface Props {
   node: GraphNode
@@ -50,8 +50,14 @@ const subLabel = computed(() => {
 })
 
 const headerTech = computed(() => technicalNodeName(props.node))
+// "원문 코드" = 진짜 원문. 주석도 코드의 일부(레거시의 이력·경고·자백이 거기 있다) —
+// 지우면 라벨과 내용이 어긋난다.
 const codeText = computed(() => (props.node.properties?.code_text as string) || '')
-const codeForViewer = computed(() => stripCStyleComments(codeText.value))
+const sourcePath = computed(() =>
+  (props.node.properties?.file_path as string)
+  || (props.node.properties?.file_name as string)
+  || '',
+)
 // 논리명·경로·라인·분류(역할=stereotype)는 모두 식별 행(buildIdentityRows)에서 표시 — 카드 중복 제거.
 </script>
 
@@ -65,8 +71,8 @@ const codeForViewer = computed(() => stripCStyleComments(codeText.value))
     <template #body>
       <section v-if="hasSemantic" class="detail-card">
         <span class="detail-card__label">업무 규칙 · 예시 · 질문</span>
-        <p class="sem-hint">코드에서 뽑아낸 비즈니스 규칙 · 시나리오(예시) · 사람 확인이 필요한 질문</p>
         <div class="detail-card__body detail-card__body--tight">
+          <p class="sem-hint">코드에서 뽑아낸 비즈니스 규칙 · 시나리오(예시) · 사람 확인이 필요한 질문</p>
           <div v-for="(r, ri) in rules" :key="'rule-' + ri" class="sem-rule">
             <p class="sem-rule__stmt">📌 {{ r.statement }}</p>
             <ul v-if="r.examples.length" class="sem-ex">
@@ -85,9 +91,7 @@ const codeForViewer = computed(() => stripCStyleComments(codeText.value))
       <section v-if="codeText" class="detail-card">
         <span class="detail-card__label">원문 코드</span>
         <div class="detail-card__body detail-card__body--flush">
-          <div class="detail-scroll">
-            <TextViewer :content="codeForViewer" compact />
-          </div>
+          <CodeViewer :content="codeText" :file-path="sourcePath" />
         </div>
       </section>
     </template>
@@ -103,8 +107,7 @@ const codeForViewer = computed(() => stripCStyleComments(codeText.value))
 }
 
 .sem-hint {
-  margin: 0 0 8px;
-  padding: 0 12px;
+  margin: 0 0 10px;
   font-size: 0.68rem;
   line-height: 1.4;
   color: var(--color-text-muted);
