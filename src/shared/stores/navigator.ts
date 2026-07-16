@@ -127,7 +127,7 @@ function buildSubtree(
 
   const childIds = childIndex.get(nodeId) ?? []
   const blChildren: NavigatorTreeItem[] = []
-  const astChildren: NavigatorTreeItem[] = []   // DBMS 구문(PARENT_OF) — 소스 등장(라인) 순
+  const astChildren: NavigatorTreeItem[] = []   // 언어 공통 AST 구조(PARENT_OF) — 소스 등장(라인) 순
   const otherChildren: NavigatorTreeItem[] = []
 
   for (const cid of childIds) {
@@ -136,7 +136,7 @@ function buildSubtree(
     const rel = relIndex.get(nodeId)?.get(cid)
     if (rel === 'HAS_BUSINESS_LOGIC') blChildren.push(child)
     else if (rel === 'PARENT_OF') {
-      // DBMS 구문 — AST 중첩(소스 등장순). 배지·이름은 라벨/name 직독(classifyNode·pickDisplayName).
+      // 언어 공통 AST 구조 — 중첩(소스 등장순). 배지·이름은 라벨/name 직독.
       astChildren.push(child)
     }
     else otherChildren.push(child)
@@ -167,7 +167,7 @@ function buildSubtree(
 }
 
 /** source → [targetIds] / source → (target → relType) 인덱스 빌드.
- *  DBMS: 구문은 PARENT_OF 로 부모(프로시저/구문) 아래 **AST 그대로 중첩**.
+ *  언어 공통: 구조 노드는 PARENT_OF 로 루틴/구조 노드 아래 **AST 그대로 중첩**.
  *  그 구문이 모듈의 평면 자식(HAS_MEMBER 등)으로 **중복 등장하지 않도록** 억제(중첩 우선). */
 function buildChildIndexes(
   linkMap: Map<string, GraphLink>,
@@ -179,7 +179,7 @@ function buildChildIndexes(
   // "숨김 요소 표시" 켜지면 데이터 멤버(변수/상수)도 트리에 — 기본은 루틴만(노이즈 방지).
   const showHidden = useAnalyzerStore().showHidden
 
-  // 1) PARENT_OF 부모를 가진 노드(=DBMS 구문) 집합 — 평면 컨테이너 자식에서 제외 대상.
+  // 1) PARENT_OF 부모를 가진 노드(=언어 공통 AST 구조) 집합 — 평면 컨테이너 자식에서 제외 대상.
   const hasParent = new Set<string>()
   for (const link of linkMap.values()) {
     if (link.type === 'PARENT_OF') hasParent.add(link.target)
@@ -195,7 +195,12 @@ function buildChildIndexes(
   }
 
   for (const link of linkMap.values()) {
-    if (link.type === 'PARENT_OF') { add(link.source, link.target, 'PARENT_OF'); continue }
+    // Do not even build AST children in the default Navigator. showHidden restores
+    // the original PARENT_OF nesting and source-line ordering below.
+    if (link.type === 'PARENT_OF') {
+      if (showHidden) add(link.source, link.target, 'PARENT_OF')
+      continue
+    }
     // 메타(규칙·예시·질문)는 "숨김 요소 표시" 켤 때만 자식으로 — 평소엔 트리 노이즈 방지.
     const isChildRel = CHILD_REL_TYPES.has(link.type) || (showHidden && META_CHILD_RELS.has(link.type))
     if (!isChildRel) continue
@@ -204,7 +209,7 @@ function buildChildIndexes(
       const tgt = nodeMap.get(link.target)
       if (!tgt || !tgt.labels.some(l => ROUTINE_LABELS.has(l))) continue
     }
-    // 구문(PARENT_OF 부모 보유)은 모듈 평면 자식으로 넣지 않음 — 중첩 위치(부모 아래)에만.
+    // AST 구조(PARENT_OF 부모 보유)는 모듈 평면 자식으로 넣지 않음 — 중첩 위치에만.
     if (hasParent.has(link.target) && FLAT_CONTAINER_RELS.has(link.type)) continue
     add(link.source, link.target, link.type)
   }

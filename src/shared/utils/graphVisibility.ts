@@ -33,6 +33,10 @@ export const HIDDEN_NODE_LABELS: ReadonlySet<string> = new Set([
   'STRUCT', 'UNION', 'ENUM', 'DATA_TYPE',
   // Example Mapping 메타.
   'RULE', 'EXAMPLE', 'QUESTION',
+  // Control-flow/call/construction/dependency AST nodes are analysis internals.
+  // Keep the default graph routine/table-focused; reveal these via showHidden.
+  'IF', 'ELSE', 'LOOP', 'SWITCH', 'CASE', 'TRY', 'CATCH',
+  'FUNCTION_CALL', 'NEW_INSTANCE', 'IMPORT', 'INCLUDE',
 ])
 
 /**
@@ -42,13 +46,15 @@ export const HIDDEN_NODE_LABELS: ReadonlySet<string> = new Set([
  * - 코드 참조 보조 (REFERENCES, INIT_BY, AFFECTS_TABLE) — 의미 모호 + 양 많음.
  */
 export const HIDDEN_LINK_TYPES: ReadonlySet<string> = new Set([
-  'NEXT', 'REFERENCES', 'INIT_BY',
+  // Structural links are only useful together with hidden AST/container nodes.
+  'PARENT_OF', 'NEXT', 'BELONGS_TO',
+  'REFERENCES', 'INIT_BY',
   'HAS_RULE', 'HAS_EXAMPLE', 'HAS_QUESTION',
   'AFFECTS_TABLE', 'BRANCH',
 ])
 
 export function isNodeHidden(node: GraphNode): boolean {
-  return (node.labels || []).some(l => HIDDEN_NODE_LABELS.has(l))
+  return (node.labels || []).some(l => HIDDEN_NODE_LABELS.has(l.toUpperCase()))
 }
 
 export function isSystemNode(node: GraphNode): boolean {
@@ -56,5 +62,5 @@ export function isSystemNode(node: GraphNode): boolean {
 }
 
 export function isLinkHidden(type: string): boolean {
-  return HIDDEN_LINK_TYPES.has(type)
+  return HIDDEN_LINK_TYPES.has(type.toUpperCase())
 }

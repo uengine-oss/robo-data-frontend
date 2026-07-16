@@ -20,7 +20,7 @@ const createSuccess = ref(false)
 const testResult = ref<{ success: boolean; message: string } | null>(null)
 const searchQuery = ref('')
 const typeSearchQuery = ref('')
-const autoExtract = ref(true)  // 자동 메타데이터 추출 옵션
+const autoExtract = ref(false)  // 촬영/기본 동작: 사용자가 명시적으로 켤 때만 메타데이터 추출
 const extracting = ref(false)
 const extractionMessage = ref('')
 
@@ -283,7 +283,7 @@ function closeModal() {
   typeSearchQuery.value = ''
   extracting.value = false
   extractionMessage.value = ''
-  autoExtract.value = true
+  autoExtract.value = false
 }
 
 async function createConnection() {
