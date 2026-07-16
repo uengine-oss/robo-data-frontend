@@ -2,8 +2,7 @@
  * datasources.ts
  * 데이터 소스 관리 스토어
  * 
- * DataSource → Schema → Table → Column 계층 구조 관리
- * MindsDB가 지원하는 모든 데이터 소스 유형 포함
+ * DataSource 연결 registry와 MindsDB 실제 테이블 접근 관리
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
@@ -53,7 +52,6 @@ export interface DataSource {
   port?: number
   database?: string
   user?: string
-  schema_count?: number
   tables?: string[]
   created_at?: string
   // 헬스 상태
@@ -62,34 +60,16 @@ export interface DataSource {
 
 export interface HealthCheckResult {
   name: string
-  status: 'healthy' | 'disconnected' | 'unknown' | 'not_found' | 'checking'
+  status: 'healthy' | 'partial' | 'disconnected' | 'unknown' | 'not_found' | 'checking'
   message: string
   db_connected: boolean
   mindsdb_connected: boolean
 }
 
-export interface DataSourceSchema {
-  name: string
-  description?: string
-  table_count?: number
-}
-
 export interface DataSourceTable {
   name: string
   description?: string
-  schema?: string
   column_count?: number
-}
-
-export interface ExtractionProgress {
-  phase: string
-  message: string
-  progress: number
-  total_schemas: number
-  processed_schemas: number
-  total_tables: number
-  processed_tables: number
-  error?: string
 }
 
 // ============================================================================
@@ -121,33 +101,23 @@ async function fetchApi<T>(
 }
 
 const datasourcesApi = {
-  getTypes: () => fetchApi<{ types: DataSourceTypeConfig[] }>('/api/datasources/types'),
+  list: () => fetchApi<{ datasources: DataSource[] }>('/api/datasources'),
   
-  list: (source = 'neo4j') => 
-    fetchApi<{ datasources: DataSource[] }>(`/api/datasources?source=${source}`),
-  
-  create: (data: { name: string; engine: string; parameters: Record<string, any> }, registerTo = 'both') =>
-    fetchApi<DataSource>(`/api/datasources?register_to=${registerTo}`, {
+  create: (data: { name: string; engine: string; parameters: Record<string, any> }) =>
+    fetchApi<DataSource>('/api/datasources', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
   
-  get: (name: string, source = 'neo4j') =>
-    fetchApi<DataSource>(`/api/datasources/${name}?source=${source}`),
+  get: (name: string) => fetchApi<DataSource>(`/api/datasources/${name}`),
   
-  delete: (name: string, deleteFrom = 'neo4j') =>
-    fetchApi<{ message: string }>(`/api/datasources/${name}?delete_from=${deleteFrom}`, {
+  delete: (name: string) =>
+    fetchApi<{ message: string }>(`/api/datasources/${name}`, {
       method: 'DELETE',
     }),
   
-  getSchemas: (name: string) =>
-    fetchApi<{ schemas: DataSourceSchema[] }>(`/api/datasources/${name}/schemas`),
-  
-  getTables: (name: string, schema?: string, source = 'neo4j') => {
-    const params = new URLSearchParams({ source })
-    if (schema) params.append('schema', schema)
-    return fetchApi<{ tables: DataSourceTable[] }>(`/api/datasources/${name}/tables?${params}`)
-  },
+  getTables: (name: string) =>
+    fetchApi<{ tables: DataSourceTable[] }>(`/api/datasources/${name}/tables`),
   
   testConnection: (name: string, source = 'mindsdb') =>
     fetchApi<{ success: boolean; message: string }>(`/api/datasources/${name}/test?source=${source}`, {
@@ -165,28 +135,6 @@ const datasourcesApi = {
   checkHealth: (name: string) =>
     fetchApi<HealthCheckResult>(`/api/datasources/${name}/health`),
   
-  // 메타데이터 추출 (SSE 스트리밍) - 패스워드 필요 시 전달
-  extractMetadata: (name: string, schemas?: string[], password?: string) => {
-    const url = `${API_BASE_URL}/api/datasources/${name}/extract-metadata`
-    return fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...useSessionStore().getHeaders() },
-      body: JSON.stringify({ schemas, password }),
-    })
-  },
-  
-  // 메타데이터 추출 (동기) - 패스워드 필요 시 전달
-  extractMetadataSync: (name: string, schemas?: string[], password?: string) =>
-    fetchApi<{ success: boolean; message: string; schemas: number; tables: number }>(
-      `/api/datasources/${name}/extract-metadata-sync`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ schemas, password }),
-      }
-    ),
-  
-  // 지원하는 엔진 목록
-  getSupportedEngines: () => fetchApi<{ engines: string[] }>('/api/datasources/supported-engines'),
 }
 
 // ============================================================================
@@ -1321,8 +1269,6 @@ export const useDatasourcesStore = defineStore('datasources', () => {
   const datasources = ref<DataSource[]>([])
   const datasourceTypes = ref<DataSourceTypeConfig[]>([])
   const selectedDatasource = ref<DataSource | null>(null)
-  const schemas = ref<DataSourceSchema[]>([])
-  const selectedSchema = ref<DataSourceSchema | null>(null)
   const tables = ref<DataSourceTable[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -1378,15 +1324,8 @@ export const useDatasourcesStore = defineStore('datasources', () => {
   }
 
   // Actions
-  async function fetchTypes() {
-    try {
-      const response = await datasourcesApi.getTypes()
-      datasourceTypes.value = response.types
-    } catch (e: any) {
-      console.error('Failed to fetch data source types:', e)
-      // 기본 타입 설정 (전체 목록)
-      datasourceTypes.value = getAllDataSourceTypes()
-    }
+  function fetchTypes() {
+    datasourceTypes.value = getAllDataSourceTypes()
   }
 
   async function fetchDatasources() {
@@ -1433,12 +1372,11 @@ export const useDatasourcesStore = defineStore('datasources', () => {
     name: string, 
     engine: string, 
     parameters: Record<string, any>,
-    registerTo = 'both'
   ): Promise<boolean> {
     loading.value = true
     error.value = null
     try {
-      const newDatasource = await datasourcesApi.create({ name, engine, parameters }, registerTo)
+      const newDatasource = await datasourcesApi.create({ name, engine, parameters })
       datasources.value.push(newDatasource)
       return true
     } catch (e: any) {
@@ -1457,7 +1395,6 @@ export const useDatasourcesStore = defineStore('datasources', () => {
       datasources.value = datasources.value.filter(ds => ds.name !== name)
       if (selectedDatasource.value?.name === name) {
         selectedDatasource.value = null
-        schemas.value = []
         tables.value = []
       }
       return true
@@ -1471,37 +1408,15 @@ export const useDatasourcesStore = defineStore('datasources', () => {
 
   async function selectDatasource(datasource: DataSource) {
     selectedDatasource.value = datasource
-    selectedSchema.value = null
     tables.value = []
-    await fetchSchemas(datasource.name)
+    await fetchTables(datasource.name)
   }
 
-  async function fetchSchemas(datasourceName: string) {
+  async function fetchTables(datasourceName: string) {
     loading.value = true
     error.value = null
     try {
-      const response = await datasourcesApi.getSchemas(datasourceName)
-      schemas.value = response.schemas
-    } catch (e: any) {
-      error.value = e.message || 'Failed to fetch schemas'
-      schemas.value = []
-    } finally {
-      loading.value = false
-    }
-  }
-
-  async function selectSchema(schema: DataSourceSchema) {
-    if (!selectedDatasource.value) return
-    
-    selectedSchema.value = schema
-    loading.value = true
-    error.value = null
-    
-    try {
-      const response = await datasourcesApi.getTables(
-        selectedDatasource.value.name, 
-        schema.name
-      )
+      const response = await datasourcesApi.getTables(datasourceName)
       tables.value = response.tables
     } catch (e: any) {
       error.value = e.message || 'Failed to fetch tables'
@@ -1535,142 +1450,14 @@ export const useDatasourcesStore = defineStore('datasources', () => {
     return getAllDataSourceTypes()
   }
 
-  // ========================================
-  // 메타데이터 추출 기능
-  // ========================================
-  
-  const extractionProgress = ref<ExtractionProgress | null>(null)
-  const isExtracting = ref(false)
-  const supportedEngines = ref<string[]>([])
-  
-  async function fetchSupportedEngines() {
-    try {
-      const response = await datasourcesApi.getSupportedEngines()
-      supportedEngines.value = response.engines
-    } catch (e: any) {
-      console.error('Failed to fetch supported engines:', e)
-      // 기본값
-      supportedEngines.value = ['postgres', 'postgresql', 'mysql', 'mariadb']
-    }
-  }
-  
-  function isEngineSupported(engine: string): boolean {
-    return supportedEngines.value.includes(engine.toLowerCase())
-  }
-  
-  async function extractMetadata(
-    name: string,
-    schemas?: string[],
-    password?: string,
-    onProgress?: (progress: ExtractionProgress) => void
-  ): Promise<boolean> {
-    isExtracting.value = true
-    extractionProgress.value = null
-    error.value = null
-    
-    try {
-      const response = await datasourcesApi.extractMetadata(name, schemas, password)
-      
-      if (!response.ok) {
-        throw new Error('Failed to start extraction')
-      }
-      
-      const reader = response.body?.getReader()
-      if (!reader) {
-        throw new Error('No response body')
-      }
-      
-      const decoder = new TextDecoder()
-      let buffer = ''
-      
-      while (true) {
-        const { done, value } = await reader.read()
-        
-        if (done) break
-        
-        buffer += decoder.decode(value, { stream: true })
-        
-        // Parse SSE events
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-        
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6)) as ExtractionProgress
-              extractionProgress.value = data
-              onProgress?.(data)
-              
-              if (data.phase === 'error') {
-                error.value = data.error || data.message
-                return false
-              }
-            } catch (e) {
-              console.error('Failed to parse SSE event:', e)
-            }
-          }
-        }
-      }
-      
-      // 완료 후 데이터 새로고침
-      await fetchDatasources()
-      if (selectedDatasource.value?.name === name) {
-        await fetchSchemas(name)
-      }
-      
-      return extractionProgress.value?.phase === 'complete'
-    } catch (e: any) {
-      error.value = e.message || 'Extraction failed'
-      return false
-    } finally {
-      isExtracting.value = false
-    }
-  }
-  
-  async function extractMetadataSync(
-    name: string,
-    schemas?: string[],
-    password?: string
-  ): Promise<{ success: boolean; message: string; schemas?: number; tables?: number }> {
-    isExtracting.value = true
-    error.value = null
-    
-    try {
-      const result = await datasourcesApi.extractMetadataSync(name, schemas, password)
-      
-      // 완료 후 데이터 새로고침
-      await fetchDatasources()
-      if (selectedDatasource.value?.name === name) {
-        await fetchSchemas(name)
-      }
-      
-      return result
-    } catch (e: any) {
-      error.value = e.message || 'Extraction failed'
-      return { success: false, message: e.message }
-    } finally {
-      isExtracting.value = false
-    }
-  }
-  
-  function resetExtractionProgress() {
-    extractionProgress.value = null
-    isExtracting.value = false
-  }
-
   return {
     // State
     datasources,
     datasourceTypes,
     selectedDatasource,
-    schemas,
-    selectedSchema,
     tables,
     loading,
     error,
-    extractionProgress,
-    isExtracting,
-    supportedEngines,
     // Getters
     hasDatasources,
     sortedDatasources,
@@ -1682,8 +1469,7 @@ export const useDatasourcesStore = defineStore('datasources', () => {
     createDatasource,
     deleteDatasource,
     selectDatasource,
-    fetchSchemas,
-    selectSchema,
+    fetchTables,
     testConnection,
     testConnectionWithParams,
     checkHealth,
@@ -1691,11 +1477,5 @@ export const useDatasourcesStore = defineStore('datasources', () => {
     clearError,
     getDefaultTypes,
     getAllDataSourceTypes,
-    // Extraction
-    fetchSupportedEngines,
-    isEngineSupported,
-    extractMetadata,
-    extractMetadataSync,
-    resetExtractionProgress,
   }
 })

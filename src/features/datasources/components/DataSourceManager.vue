@@ -5,7 +5,7 @@
  * MindsDB 지원 전체 데이터 소스 유형 포함
  */
 import { ref, onMounted, computed } from 'vue'
-import { useDatasourcesStore, type DataSourceTypeConfig, type DataSource, type DataSourceCategory, type ExtractionProgress, getAllDataSourceTypes } from '@/features/datasources/datasources'
+import { useDatasourcesStore, type DataSourceTypeConfig, type DataSource, type DataSourceCategory, getAllDataSourceTypes } from '@/features/datasources/datasources'
 
 const store = useDatasourcesStore()
 
@@ -20,15 +20,6 @@ const createSuccess = ref(false)
 const testResult = ref<{ success: boolean; message: string } | null>(null)
 const searchQuery = ref('')
 const typeSearchQuery = ref('')
-const autoExtract = ref(false)  // 촬영/기본 동작: 사용자가 명시적으로 켤 때만 메타데이터 추출
-const extracting = ref(false)
-const extractionMessage = ref('')
-
-// Extraction modal state
-const showExtractionModal = ref(false)
-const extractionSource = ref<DataSource | null>(null)
-const extractionParams = ref<Record<string, any>>({})
-const extractionSchemas = ref<string>('')
 
 // Data source icons and colors - comprehensive mapping
 const datasourceConfig: Record<string, { icon: string; color: string; gradient: string }> = {
@@ -281,9 +272,6 @@ function closeModal() {
   createSuccess.value = false
   testResult.value = null
   typeSearchQuery.value = ''
-  extracting.value = false
-  extractionMessage.value = ''
-  autoExtract.value = false
 }
 
 async function createConnection() {
@@ -291,7 +279,6 @@ async function createConnection() {
   
   creating.value = true
   store.clearError()
-  extractionMessage.value = ''
   
   // 1. 데이터 소스 등록
   const success = await store.createDatasource(
@@ -305,34 +292,12 @@ async function createConnection() {
     return
   }
   
-  // 2. 자동 메타데이터 추출 (지원되는 엔진인 경우)
-  const supportedEngines = ['postgres', 'postgresql', 'mysql', 'mariadb']
-  if (autoExtract.value && supportedEngines.includes(selectedType.value.type.toLowerCase())) {
-    extracting.value = true
-    extractionMessage.value = '메타데이터 추출 중...'
-    
-    try {
-      // 저장된 연결 정보를 사용하여 추출 (비밀번호 포함)
-      const extractResult = await store.extractMetadataSync(connectionName.value)
-      
-      if (extractResult.success) {
-        extractionMessage.value = `✅ ${extractResult.schemas}개 스키마, ${extractResult.tables}개 테이블 추출 완료!`
-      } else {
-        extractionMessage.value = `⚠️ 메타데이터 추출 실패: ${extractResult.message}`
-      }
-    } catch (e: any) {
-      extractionMessage.value = `⚠️ 메타데이터 추출 실패: ${e.message}`
-    }
-    
-    extracting.value = false
-  }
-  
   creating.value = false
   createSuccess.value = true
   
   setTimeout(() => {
     closeModal()
-  }, autoExtract.value ? 2500 : 1500)
+  }, 1500)
 }
 
 async function deleteSource(name: string) {
@@ -363,75 +328,6 @@ async function testConnection() {
   })
 }
 
-// ========================================
-// 메타데이터 추출 관련 함수
-// ========================================
-
-function getDefaultPort(engine: string): number {
-  const portMap: Record<string, number> = {
-    postgres: 5432,
-    postgresql: 5432,
-    mysql: 3306,
-    mariadb: 3306,
-    mssql: 1433,
-    oracle: 1521,
-    mongodb: 27017,
-    redis: 6379
-  }
-  return portMap[engine.toLowerCase()] || 5432
-}
-
-function openExtractionModal(source: DataSource) {
-  extractionSource.value = source
-  // 비밀번호만 입력받도록 간소화
-  extractionParams.value = {
-    engine: source.engine,
-    host: source.host || 'localhost',
-    port: source.port || getDefaultPort(source.engine),
-    user: source.user || '',
-    password: '',  // 비밀번호만 사용자가 입력
-    database: source.database || ''
-  }
-  extractionSchemas.value = ''
-  store.resetExtractionProgress()
-  showExtractionModal.value = true
-}
-
-function closeExtractionModal() {
-  showExtractionModal.value = false
-  extractionSource.value = null
-  extractionParams.value = {}
-  extractionSchemas.value = ''
-  store.resetExtractionProgress()
-}
-
-async function startExtraction() {
-  if (!extractionSource.value) return
-  
-  const schemas = extractionSchemas.value
-    .split(',')
-    .map(s => s.trim())
-    .filter(s => s.length > 0)
-  
-  // 패스워드가 입력되었으면 전달 (Neo4j에도 업데이트됨)
-  const password = extractionParams.value.password || undefined
-  
-  const success = await store.extractMetadata(
-    extractionSource.value.name,
-    schemas.length > 0 ? schemas : undefined,
-    password
-  )
-  
-  if (success) {
-    // 성공 시 목록 새로고침
-    await store.fetchDatasources()
-  }
-}
-
-function canExtract(engine: string): boolean {
-  const supportedEngines = ['postgres', 'postgresql', 'mysql', 'mariadb']
-  return supportedEngines.includes(engine.toLowerCase())
-}
 </script>
 
 <template>
@@ -554,24 +450,6 @@ function canExtract(engine: string): boolean {
                 {{ source.database }}
               </span>
             </div>
-            <div class="source-meta" v-if="source.schema_count">
-              <span class="meta-badge">{{ source.schema_count }} 스키마</span>
-            </div>
-            
-            <!-- 메타데이터 추출 버튼 -->
-            <div class="card-actions" v-if="mode !== 'selector'">
-              <button 
-                v-if="canExtract(source.engine)"
-                @click.stop="openExtractionModal(source)"
-                class="btn-extract"
-                title="스키마 메타데이터 추출"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
-                </svg>
-                메타데이터 추출
-              </button>
-            </div>
           </div>
         </div>
       </div>
@@ -594,28 +472,8 @@ function canExtract(engine: string): boolean {
         </div>
 
         <div class="panel-content">
-          <!-- Schemas -->
           <div class="panel-section">
-            <h4>📁 스키마</h4>
-            <div v-if="store.schemas.length === 0" class="empty-section">
-              스키마가 없습니다
-            </div>
-            <div v-else class="schema-list">
-              <button
-                v-for="schema in store.schemas"
-                :key="schema.name"
-                @click="store.selectSchema(schema)"
-                :class="['schema-item', { selected: store.selectedSchema?.name === schema.name }]"
-              >
-                <span class="schema-name">{{ schema.name }}</span>
-                <span v-if="schema.table_count" class="schema-count">{{ schema.table_count }} 테이블</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Tables -->
-          <div v-if="store.selectedSchema" class="panel-section">
-            <h4>📋 테이블 - {{ store.selectedSchema.name }}</h4>
+            <h4>📋 실제 DB 테이블</h4>
             <div v-if="store.tables.length === 0" class="empty-section">
               테이블이 없습니다
             </div>
@@ -757,36 +615,12 @@ function canExtract(engine: string): boolean {
                     {{ testResult.success ? '✅' : '❌' }} {{ testResult.message }}
                   </div>
 
-                  <!-- 자동 메타데이터 추출 옵션 -->
-                  <div class="auto-extract-option" v-if="canExtract(selectedType?.type || '')">
-                    <label class="checkbox-label">
-                      <input type="checkbox" v-model="autoExtract" />
-                      <span class="checkbox-text">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
-                        </svg>
-                        데이터 소스 등록 후 자동으로 메타데이터 추출
-                      </span>
-                    </label>
-                  </div>
-
-                  <!-- 추출 진행 상황 -->
-                  <div v-if="extracting" class="extraction-inline-progress">
-                    <div class="spinner"></div>
-                    <span>{{ extractionMessage }}</span>
-                  </div>
-                  
-                  <div v-if="extractionMessage && !extracting && createSuccess" class="extraction-result">
-                    {{ extractionMessage }}
-                  </div>
-
                   <div class="form-actions">
                     <button type="button" @click="testConnection" :disabled="!connectionName || creating" class="btn-test">
                       연결 테스트
                     </button>
-                    <button type="submit" :disabled="creating || extracting || !connectionName" class="btn-create">
-                      <span v-if="creating && !extracting">등록 중...</span>
-                      <span v-else-if="extracting">메타데이터 추출 중...</span>
+                    <button type="submit" :disabled="creating || !connectionName" class="btn-create">
+                      <span v-if="creating">등록 중...</span>
                       <span v-else>연결 생성</span>
                     </button>
                   </div>
@@ -798,135 +632,6 @@ function canExtract(engine: string): boolean {
       </Transition>
     </Teleport>
 
-    <!-- 메타데이터 추출 모달 -->
-    <Teleport to="body">
-      <Transition name="modal">
-        <div v-if="showExtractionModal" class="modal-overlay" @click.self="closeExtractionModal">
-          <div class="modal extraction-modal">
-            <div class="modal-header">
-              <h2>
-                <span class="extraction-icon">📥</span>
-                메타데이터 추출
-              </h2>
-              <button @click="closeExtractionModal" class="btn-modal-close" :disabled="store.isExtracting">✕</button>
-            </div>
-
-            <div class="modal-body">
-              <!-- 대상 데이터 소스 정보 -->
-              <div v-if="extractionSource" class="extraction-target">
-                <div class="target-icon" :style="{ background: getConfig(extractionSource.engine).gradient }">
-                  {{ getConfig(extractionSource.engine).icon }}
-                </div>
-                <div class="target-info">
-                  <h3>{{ extractionSource.display_name || extractionSource.name }}</h3>
-                  <span>{{ extractionSource.engine.toUpperCase() }}</span>
-                </div>
-              </div>
-
-              <!-- 진행 상황 표시 -->
-              <div v-if="store.isExtracting || store.extractionProgress" class="extraction-progress">
-                <div class="progress-header">
-                  <span class="progress-phase">{{ store.extractionProgress?.phase || 'preparing' }}</span>
-                  <span class="progress-percent">{{ store.extractionProgress?.progress || 0 }}%</span>
-                </div>
-                
-                <div class="progress-bar">
-                  <div 
-                    class="progress-fill" 
-                    :style="{ width: `${store.extractionProgress?.progress || 0}%` }"
-                    :class="{ 'error': store.extractionProgress?.error }"
-                  ></div>
-                </div>
-                
-                <p class="progress-message">{{ store.extractionProgress?.message || '준비 중...' }}</p>
-                
-                <div v-if="store.extractionProgress?.total_schemas" class="progress-stats">
-                  <span>📁 스키마: {{ store.extractionProgress.processed_schemas }}/{{ store.extractionProgress.total_schemas }}</span>
-                  <span>📋 테이블: {{ store.extractionProgress.processed_tables }}/{{ store.extractionProgress.total_tables }}</span>
-                </div>
-                
-                <div v-if="store.extractionProgress?.phase === 'complete'" class="success-message">
-                  <span class="success-icon">✅</span>
-                  메타데이터 추출이 완료되었습니다!
-                </div>
-                
-                <div v-if="store.extractionProgress?.error" class="error-message">
-                  <span class="error-icon">❌</span>
-                  {{ store.extractionProgress.error }}
-                </div>
-              </div>
-
-              <!-- 추출 옵션 (추출 전) -->
-              <div v-else class="extraction-form">
-                <p class="form-desc">
-                  등록된 연결 정보로 데이터베이스에 연결하여 스키마, 테이블, 컬럼 정보를 추출합니다.
-                </p>
-                
-                <!-- 연결 정보 요약 (읽기 전용) -->
-                <div class="connection-summary" v-if="extractionSource">
-                  <div class="summary-item">
-                    <span class="summary-label">호스트</span>
-                    <span class="summary-value">{{ extractionSource.host || 'localhost' }}:{{ extractionSource.port || getDefaultPort(extractionSource.engine) }}</span>
-                  </div>
-                  <div class="summary-item">
-                    <span class="summary-label">데이터베이스</span>
-                    <span class="summary-value">{{ extractionSource.database || '-' }}</span>
-                  </div>
-                  <div class="summary-item">
-                    <span class="summary-label">사용자</span>
-                    <span class="summary-value">{{ extractionSource.user || '-' }}</span>
-                  </div>
-                </div>
-                
-                <div class="form-grid">
-                  <!-- 비밀번호 입력 -->
-                  <div class="form-group full-width">
-                    <label>비밀번호 <span class="optional">(재인증 필요 시)</span></label>
-                    <input 
-                      v-model="extractionParams.password" 
-                      type="password" 
-                      placeholder="비밀번호를 입력하세요" 
-                      autocomplete="off"
-                    />
-                    <span class="form-hint">저장된 비밀번호로 접속 실패 시 다시 입력하세요. 입력하면 Neo4j에도 업데이트됩니다.</span>
-                  </div>
-                  
-                  <!-- 스키마 필터 (선택) -->
-                  <div class="form-group full-width">
-                    <label>스키마 필터 <span class="optional">(선택)</span></label>
-                    <input v-model="extractionSchemas" type="text" placeholder="public, sales, hr" />
-                    <span class="form-hint">쉼표로 구분하여 특정 스키마만 추출합니다. 비워두면 모든 스키마를 추출합니다.</span>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 액션 버튼 -->
-              <div class="form-actions" v-if="!store.isExtracting && store.extractionProgress?.phase !== 'complete'">
-                <button @click="closeExtractionModal" class="btn-test">
-                  취소
-                </button>
-                <button 
-                  @click="startExtraction" 
-                  class="btn-create"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
-                  </svg>
-                  추출 시작
-                </button>
-              </div>
-              
-              <!-- 완료 후 닫기 버튼 -->
-              <div class="form-actions" v-if="store.extractionProgress?.phase === 'complete'">
-                <button @click="closeExtractionModal" class="btn-create">
-                  닫기
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
   </div>
 </template>
 
@@ -1853,78 +1558,6 @@ function canExtract(engine: string): boolean {
   }
 }
 
-// Auto Extract Option
-.auto-extract-option {
-  margin: 16px 0;
-  padding: 12px 16px;
-  background: rgba(99, 102, 241, 0.08);
-  border-radius: 10px;
-  border: 1px solid rgba(99, 102, 241, 0.2);
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-  
-  input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
-    accent-color: #6366f1;
-    cursor: pointer;
-  }
-}
-
-.checkbox-text {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.9rem;
-  color: var(--color-text);
-  
-  svg {
-    color: #6366f1;
-  }
-}
-
-.extraction-inline-progress {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  background: rgba(99, 102, 241, 0.1);
-  border-radius: 10px;
-  margin-bottom: 16px;
-  
-  span {
-    font-size: 0.9rem;
-    color: var(--color-text);
-  }
-}
-
-.spinner {
-  width: 20px;
-  height: 20px;
-  border: 2px solid rgba(99, 102, 241, 0.3);
-  border-top-color: #6366f1;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.extraction-result {
-  padding: 12px 16px;
-  background: rgba(34, 197, 94, 0.1);
-  border-radius: 10px;
-  margin-bottom: 16px;
-  font-size: 0.9rem;
-  color: #22c55e;
-}
-
 // Transitions
 .slide-up-enter-active, .slide-up-leave-active {
   transition: all 0.3s ease;
@@ -1947,233 +1580,4 @@ function canExtract(engine: string): boolean {
   }
 }
 
-// ========================================
-// 카드 액션 버튼
-// ========================================
-
-.card-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--color-border);
-}
-
-.btn-extract {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 0.8rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-  
-  &:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
-  }
-}
-
-// ========================================
-// 메타데이터 추출 모달
-// ========================================
-
-.extraction-modal {
-  max-width: 520px;
-}
-
-.extraction-icon {
-  margin-right: 8px;
-}
-
-.extraction-target {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 16px;
-  background: var(--color-bg);
-  border-radius: 12px;
-  margin-bottom: 24px;
-}
-
-.target-icon {
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 12px;
-  font-size: 1.5rem;
-}
-
-.target-info {
-  h3 {
-    margin: 0;
-    font-size: 1.1rem;
-    color: var(--color-text);
-  }
-  
-  span {
-    font-size: 0.8rem;
-    color: var(--color-text-muted);
-    font-weight: 500;
-  }
-}
-
-// 연결 정보 요약 (읽기 전용)
-.connection-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 16px;
-  background: var(--color-bg);
-  border-radius: 12px;
-  margin-bottom: 20px;
-  border: 1px solid var(--color-border);
-}
-
-.summary-item {
-  flex: 1;
-  min-width: 120px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.summary-label {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.summary-value {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.optional {
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  font-weight: normal;
-}
-
-.extraction-progress {
-  padding: 20px;
-  background: var(--color-bg);
-  border-radius: 12px;
-  margin-bottom: 20px;
-}
-
-.progress-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.progress-phase {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: #6366f1;
-  text-transform: capitalize;
-}
-
-.progress-percent {
-  font-size: 1.25rem;
-  font-weight: 700;
-  color: var(--color-text);
-}
-
-.progress-bar {
-  height: 8px;
-  background: var(--color-border);
-  border-radius: 4px;
-  overflow: hidden;
-  margin-bottom: 12px;
-}
-
-.progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 100%);
-  border-radius: 4px;
-  transition: width 0.3s ease;
-  
-  &.error {
-    background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%);
-  }
-}
-
-.progress-message {
-  margin: 0 0 12px;
-  font-size: 0.9rem;
-  color: var(--color-text-muted);
-}
-
-.progress-stats {
-  display: flex;
-  gap: 20px;
-  
-  span {
-    font-size: 0.85rem;
-    color: var(--color-text-muted);
-  }
-}
-
-.success-message {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
-  background: rgba(34, 197, 94, 0.1);
-  border-radius: 8px;
-  color: #22c55e;
-  font-weight: 500;
-  margin-top: 16px;
-  
-  .success-icon {
-    font-size: 1.25rem;
-  }
-}
-
-.error-message {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
-  background: rgba(239, 68, 68, 0.1);
-  border-radius: 8px;
-  color: #ef4444;
-  font-weight: 500;
-  margin-top: 16px;
-  
-  .error-icon {
-    font-size: 1.25rem;
-  }
-}
-
-.extraction-form {
-  .form-desc {
-    margin: 0 0 20px;
-    color: var(--color-text-muted);
-    font-size: 0.9rem;
-  }
-}
-
-.full-width {
-  grid-column: 1 / -1;
-}
-
-.form-hint {
-  display: block;
-  margin-top: 6px;
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-}
 </style>

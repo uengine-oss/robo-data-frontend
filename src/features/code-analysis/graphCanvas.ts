@@ -28,12 +28,10 @@ import type { GraphData, GraphLink, GraphNode } from '@/shared/types'
  */
 export type CanvasPreset = 'module-interaction' | 'health-rw' | null
 
-/** 노드별 계층 조상(파일/패키지) — 중첩 헐(spec 021) 그룹핑용. */
+/** 노드별 계층 조상(패키지) — 헐/클러스터(spec 021·022) 그룹핑용.
+ * (fileKey/fileLabel/packageLabel 제거 — 유일 소비자였던 '영역(구조)' 보기 삭제, 2026-07-16.) */
 export interface HierarchyInfo {
-  fileKey: string | null
-  fileLabel: string
   packageKey: string | null
-  packageLabel: string
   isExternal: boolean
 }
 
@@ -364,26 +362,14 @@ export const useCanvasStore = defineStore('canvas', () => {
       if (link.type === 'BELONGS_TO') fileToPackage.set(link.source, link.target)
       else if (link.type === 'HAS_MEMBER') memberToFile.set(link.target, link.source)
     }
-    const nameOf = (id: string | null): string => {
-      if (!id) return ''
-      const n = projectStore.nodeMap.get(id)
-      return (n?.properties?.name as string) || id
-    }
-    const baseName = (path: string): string =>
-      path.replace(/\\/g, '/').split('/').filter(Boolean).pop() || path
-
     const map = new Map<string, HierarchyInfo>()
     for (const node of projectStore.nodeMap.values()) {
       const isExternal = (node.labels || []).includes('EXTERNAL')
       const containerId = memberToFile.get(node.id) ?? null
-      const filePath = node.properties?.file_path as string | undefined
-      const fileKey = containerId ?? (filePath ?? null)
-      const fileLabel = containerId ? nameOf(containerId) : (filePath ? baseName(filePath) : '')
       let packageKey: string | null = containerId ? (fileToPackage.get(containerId) ?? null) : null
       if (!packageKey) packageKey = fileToPackage.get(node.id) ?? null
-      let packageLabel = nameOf(packageKey)
-      if (isExternal) { packageKey = '__external__'; packageLabel = 'external (외부 호출)' }
-      map.set(node.id, { fileKey, fileLabel, packageKey, packageLabel, isExternal })
+      if (isExternal) packageKey = '__external__'
+      map.set(node.id, { packageKey, isExternal })
     }
     return map
   })

@@ -19,7 +19,6 @@ import { useDrag } from '@/shared/composables/useDrag'
 import { getNodeColor, getRelationshipColor } from '@/shared/config/graphStyles'
 import { isHiddenMarker, semanticRoleLabels } from '@/shared/utils/nodeLabels'
 import { storageVersion } from '@/shared/utils/graphStyleStorage'
-import { CALLABLE_LABELS } from '@/shared/utils/nodeClassify'
 import { isSystemNode } from '@/shared/utils/graphVisibility'
 
 const projectStore = useAnalyzerStore()
@@ -52,15 +51,14 @@ const progressPanelCollapsed = ref(false) // 진행 패널 축소 상태
  * groupHullBy / colorMode / preset 은 viewMode 에서 파생(computed)되므로
  * 단일 진실원천은 viewMode 하나다. (NvlGraph/canvasStore 가 소비하는 prop 계약은 불변)
  */
-// 'area'=협력 군집 / 'area-struct'=영역(구조,파일) / 'module'=모듈간 / 'health'=건강
-// (spec 021: 'table-flow' 제거 — 노드 폭발 위험. 테이블은 모듈간 보기에서 표시.)
-type ViewMode = 'default' | 'module' | 'area' | 'area-struct' | 'health'
+// 'area'=협력 군집 / 'module'=모듈간 / 'health'=건강
+// (spec 021: 'table-flow' 제거 — 노드 폭발. 'area-struct'(영역·구조) 제거 — 모듈간과 구조 중복, 사용자 결정 2026-07-16.)
+type ViewMode = 'default' | 'module' | 'area' | 'health'
 const viewMode = ref<ViewMode>('default')
 
 /**
  * 중첩 영역(헐) 레벨 — NvlGraph :hullLevels 소비(spec 021).
  *  - 협력 군집(area)   = [component_id 단일 레벨]
- *  - 영역(구조)        = [패키지, 파일] 2겹 중첩(계층 조상맵 기반)
  *  - 그 외             = [] (표시 안 함). 모듈간은 별도(Phase4)에서 패키지 1겹.
  */
 const hullLevels = computed<HullLevel[]>(() => {
@@ -72,15 +70,6 @@ const hullLevels = computed<HullLevel[]>(() => {
       },
       labelOf: () => '',   // 이름은 앵커 캡션이 보여줌(헐 라벨 중복 제거)
       padding: 30,
-    }]
-  }
-  if (viewMode.value === 'area-struct') {
-    // 패키지 외곽 헐 1겹(이름은 앵커 칩이 표시 — 헐 라벨 중복 제거).
-    const hmap = canvasStore.hierarchyMap
-    return [{
-      keyOf: (n) => hmap.get(n.id)?.packageKey ?? null,
-      labelOf: () => '',
-      padding: 26,
     }]
   }
   if (viewMode.value === 'module' || viewMode.value === 'health') {
@@ -118,10 +107,6 @@ const clusterKeyOf = computed<((n: GraphNode) => string | null) | null>(() => {
       return (v === undefined || v === null || v === '') ? '__ungrouped__' : String(v)
     }
   }
-  if (viewMode.value === 'area-struct') {
-    const hmap = canvasStore.hierarchyMap
-    return (n) => hmap.get(n.id)?.packageKey ?? null   // 패키지(폴더) 단위 허브 — 다른 보기와 일관
-  }
   return null
 })
 
@@ -147,12 +132,6 @@ const clusterLabelOf = computed<((key: string) => string) | null>(() => {
       }
       return `군집 ${key}`
     }
-  }
-  if (viewMode.value === 'area-struct') {
-    const hmap = canvasStore.hierarchyMap
-    const labelByPkg = new Map<string, string>()
-    for (const info of hmap.values()) if (info.packageKey) labelByPkg.set(info.packageKey, info.packageLabel)
-    return (key) => labelByPkg.get(key) || key
   }
   return null
 })
@@ -228,9 +207,6 @@ function applyViewMode(mode: ViewMode): void {
     hintIfEmpty('위험도 정보를 가진 함수가 없습니다 — 분석을 끝까지 실행해 주세요')
   } else if (mode === 'area') {
     ensureNodesForView('component_id')
-  } else if (mode === 'area-struct') {
-    // 파일 단위 구조 영역 — 루틴(호출가능)만 파일별로 묶어 깔끔하게(구문 전부는 너무 빽빽).
-    ensureNodesForView('file_path', 'routine')
   } else {
     autoPopulateHint.value = ''
   }
@@ -250,9 +226,8 @@ function hintIfEmpty(reason: string): void {
  * 추가할 노드가 0개면 침묵 대신 안내 힌트를 띄운다.
  *
  * @param propKey   노드가 가져야 할 속성 키 (예: 'component_id', 'risk_level')
- * @param needLabel (선택) 이 라벨/타입을 가진 노드로 한정 (예: 'routine' = 호출가능 노드)
  */
-function ensureNodesForView(propKey: string, needLabel?: string): void {
+function ensureNodesForView(propKey: string): void {
   autoPopulateHint.value = ''
   // spec 021: 보기모드 독립 — 진입할 때마다 자기 콘텐츠로 리셋(이전 보기 노드 잔상 0).
   // (과거엔 캔버스 비었을 때만 채우는 early-return 이라 테이블흐름→영역 전환 시 이전 노드
@@ -262,29 +237,17 @@ function ensureNodesForView(propKey: string, needLabel?: string): void {
     if (isSystemNode(node)) continue
     const v = node.properties?.[propKey]
     if (v === undefined || v === null || v === '') continue
-    if (needLabel) {
-      const want = needLabel.toUpperCase()
-      const labels = (node.labels || []).map(l => l.toUpperCase())
-      // 'routine' 은 호출가능(타입집합) 추상화 — CALLABLE 여부로 판정.
-      if (needLabel === 'routine') {
-        if (!labels.some(l => CALLABLE_LABELS.has(l))) continue
-      } else if (!labels.includes(want)) {
-        continue
-      }
-    }
     matched.push(node.id)
   }
 
   if (matched.length === 0) {
     canvasStore.setCanvasNodes([])   // 독립: 매치 0이면 이전 보기 잔상 비우고 사유 안내만
     autoPopulateHint.value =
-      propKey === 'file_path'
-        ? '파일 경로 정보를 가진 노드가 없습니다 — 분석을 끝까지 실행해 주세요'
-        : propKey === 'component_id'
-          ? '협력 군집(컴포넌트) 정보를 가진 노드가 없습니다 — 분석을 끝까지 실행해 주세요'
-          : propKey === 'risk_level'
-            ? '건강(위험도) 정보를 가진 함수가 없습니다 — 분석을 끝까지 실행해 주세요'
-            : '표시할 노드가 없습니다 — 분석을 끝까지 실행해 주세요'
+      propKey === 'component_id'
+        ? '협력 군집(컴포넌트) 정보를 가진 노드가 없습니다 — 분석을 끝까지 실행해 주세요'
+        : propKey === 'risk_level'
+          ? '건강(위험도) 정보를 가진 함수가 없습니다 — 분석을 끝까지 실행해 주세요'
+          : '표시할 노드가 없습니다 — 분석을 끝까지 실행해 주세요'
     return
   }
   canvasStore.setCanvasNodes(matched)
@@ -298,7 +261,6 @@ const activeViewLabel = computed(() => {
   switch (viewMode.value) {
     case 'module': return '모듈간'
     case 'area': return '협력 군집'
-    case 'area-struct': return '영역(구조)'
     case 'health': return '건강'
     default: return '기본'
   }
@@ -852,11 +814,6 @@ watch(hasGraph, (has, prev) => {
               <span class="vm-icon">🔗</span>
               <span class="vm-text"><b>모듈간 상호작용</b><small>모듈·함수·테이블만</small></span>
               <span class="vm-check">{{ viewMode === 'module' ? '✓' : '' }}</span>
-            </button>
-            <button class="view-menu-item" :class="{ active: viewMode === 'area-struct' }" @click="selectViewMode('area-struct')">
-              <span class="vm-icon">🗺️</span>
-              <span class="vm-text"><b>영역(구조)</b><small>파일 단위 묶음 · 파일명 표시</small></span>
-              <span class="vm-check">{{ viewMode === 'area-struct' ? '✓' : '' }}</span>
             </button>
             <button class="view-menu-item" :class="{ active: viewMode === 'area' }" @click="selectViewMode('area')">
               <span class="vm-icon">🧩</span>

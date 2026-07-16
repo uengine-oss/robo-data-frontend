@@ -269,6 +269,7 @@ export interface ClusterNode {
   name: string
   labels: string[]
   relevance?: number
+  role?: 'anchor' | 'evidence' | 'core' | 'expanded'
 }
 
 /** 의미검색 결과 뭉치 = 캔버스에 함께 올라가는 단위. */

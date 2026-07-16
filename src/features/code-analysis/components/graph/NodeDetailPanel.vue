@@ -104,6 +104,19 @@ function pct(score: number): number {
   return Math.round((score ?? 0) * 100)
 }
 
+function clusterAnswerNodes(cluster: SearchCluster) {
+  const anchors = cluster.nodes.filter(node => node.role === 'anchor')
+  return (anchors.length > 0 ? anchors : cluster.nodes).slice(0, 3)
+}
+
+function clusterAnswerNames(cluster: SearchCluster): string {
+  return clusterAnswerNodes(cluster).map(node => node.name).join(' · ')
+}
+
+function clusterEvidenceCount(cluster: SearchCluster): number {
+  return cluster.nodes.filter(node => node.role === 'evidence').length
+}
+
 
 // ============================================================================
 // 상태
@@ -556,12 +569,17 @@ function searchSecondary(node: GraphNode): string {
               v-for="cluster in semClusters"
               :key="cluster.id"
               class="sem-cluster"
-              :title="cluster.nodes.map(n => n.name).join(' · ')"
+              :title="clusterAnswerNames(cluster)"
               @click="selectCluster(cluster)"
             >
               <div class="sem-cluster-main">
                 <span class="sem-cluster-title">{{ cluster.title }}</span>
-                <span class="sem-cluster-sub">{{ cluster.nodes.map(n => n.name).join(' · ') }}</span>
+                <span class="sem-cluster-sub">
+                  {{ clusterAnswerNames(cluster) }}
+                  <small v-if="clusterEvidenceCount(cluster) > 0">
+                    · 근거 {{ clusterEvidenceCount(cluster) }}개
+                  </small>
+                </span>
               </div>
               <span class="sem-cluster-pct" :title="`관련도 ${pct(cluster.score)}%`">{{ pct(cluster.score) }}%</span>
             </div>
