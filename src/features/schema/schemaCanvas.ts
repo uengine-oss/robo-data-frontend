@@ -1332,6 +1332,24 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       return ''
     }
 
+    const toTargetDatabaseSql = (query: string, datasourceName: string): string => {
+      const trimmed = String(query || '').trim().replace(/;+\s*$/, '')
+      if (!trimmed || !datasourceName) return trimmed
+      const escapedDatasource = datasourceName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const quotedDatasourcePattern = '[`"]?' + escapedDatasource + '[`"]?'
+      const nativeWrapper = new RegExp(
+        `^SELECT\\s+\\*\\s+FROM\\s+${quotedDatasourcePattern}\\s*\\(([\\s\\S]*)\\)$`,
+        'i'
+      )
+      const wrapped = trimmed.match(nativeWrapper)
+      const targetSql = wrapped?.[1]?.trim() || trimmed
+      const qualifiedDatasource = new RegExp(
+        `(\\b(?:FROM|JOIN)\\s+)${quotedDatasourcePattern}\\s*\\.`,
+        'gi'
+      )
+      return targetSql.replace(qualifiedDatasource, '$1')
+    }
+
     const withLimit = (rawSql: string, rowLimit: number): string => {
       const trimmed = String(rawSql || '').trim().replace(/;+\s*$/, '')
       if (!trimmed) return ''
@@ -1341,7 +1359,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       return `${trimmed} LIMIT ${rowLimit}`
     }
 
-    /** data-fabric 경유 SQL 실행. SQL 은 `datasource.schema.table` 주소를 그대로 담고 있다. */
+    /** datasource와 대상 DB SELECT를 분리해 Data Fabric read-only 경계로 전달한다. */
     const executeSql = async (
       sqlToRun: string
     ): Promise<
@@ -1351,7 +1369,11 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       const response = await fetch(`${DATA_FABRIC_BASE_URL}/api/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: sqlToRun })
+        body: JSON.stringify({
+          datasource: resolvedDatasource,
+          query: sqlToRun,
+          max_rows: limit
+        })
       })
 
       if (!response.ok) {
@@ -1395,12 +1417,21 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
 
         // MV 우선, 실패 시 원본 query로 자동 폴백
         if (otData.materializedView) {
-          primarySql = `SELECT * FROM ${otData.materializedView} LIMIT ${limit}`
+          primarySql = withLimit(
+            toTargetDatabaseSql(
+              `SELECT * FROM ${String(otData.materializedView)}`,
+              resolvedDatasource
+            ),
+            limit
+          )
           candidateSqls.push(primarySql)
         }
 
         if (otQuery) {
-          const fallbackSql = withLimit(otQuery, limit)
+          const fallbackSql = withLimit(
+            toTargetDatabaseSql(otQuery, resolvedDatasource),
+            limit
+          )
           if (fallbackSql && !candidateSqls.includes(fallbackSql)) {
             candidateSqls.push(fallbackSql)
           }
@@ -1441,7 +1472,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       if (resolvedDatasource) {
         const schemaIdent = needsSchemaQuoting ? quoteMysqlIdent(schemaName) : schemaName
         const tableIdent = needsTableQuoting ? quoteMysqlIdent(tableName) : tableName
-        fullTableName = `${resolvedDatasource}.${schemaIdent}.${tableIdent}`
+        fullTableName = `${schemaIdent}.${tableIdent}`
       } else {
         if (needsSchemaQuoting || needsTableQuoting) {
           fullTableName = `"${schemaName}"."${tableName}"`
