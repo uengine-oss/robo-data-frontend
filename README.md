@@ -206,6 +206,8 @@ Pinia 스토어는 Composition API 스타일입니다. 핵심 스토어:
 ### 단일 클라이언트 (`shared/services/http.ts`)
 모든 도메인 API가 공유하는 코어:
 - **Base**: `API_GATEWAY_URL`(`/api/gateway`) — `ANTLR_BASE_URL`·`ROBO_BASE_URL`·`TEXT2SQL_BASE_URL`·`ONTOLOGY_BASE_URL` 파생
+- **선택 alarm SSE**: text2sql alarm backend를 함께 배포한 환경에서만
+  `VITE_ENABLE_ALARM_STREAM=true`로 활성화합니다. 기본값은 연결하지 않음입니다.
 - `postJson` / `postFormData` — JSON·FormData POST
 - `streamFetch` — **NDJSON** 스트림(`\n` 분리, 줄 단위 JSON, 손상 줄은 logger 기록 후 스킵하고 계속)
 - `streamSseFetch` — **SSE** 스트림(`event:`/`data:` 줄, 빈 줄 flush)

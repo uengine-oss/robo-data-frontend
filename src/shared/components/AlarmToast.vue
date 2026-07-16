@@ -25,9 +25,13 @@ interface Alarm {
 const alarms = ref<Alarm[]>([])
 const isConnected = ref(false)
 const eventSource = ref<EventSource | null>(null)
+const alarmStreamEnabled = import.meta.env.VITE_ENABLE_ALARM_STREAM === 'true'
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let stopped = false
 
 // SSE 연결
 const connectSSE = () => {
+  if (!alarmStreamEnabled || stopped) return
   // 기존 연결 종료
   if (eventSource.value) {
     eventSource.value.close()
@@ -53,8 +57,11 @@ const connectSSE = () => {
   eventSource.value.onerror = (error) => {
     console.error('SSE 오류:', error)
     isConnected.value = false
+    eventSource.value?.close()
+    eventSource.value = null
     // 5초 후 재연결
-    setTimeout(connectSSE, 5000)
+    if (reconnectTimer) clearTimeout(reconnectTimer)
+    reconnectTimer = setTimeout(connectSSE, 5000)
   }
 }
 
@@ -108,12 +115,19 @@ const getSeverityIcon = (severity: string) => {
 }
 
 onMounted(() => {
+  stopped = false
   connectSSE()
 })
 
 onUnmounted(() => {
+  stopped = true
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
   if (eventSource.value) {
     eventSource.value.close()
+    eventSource.value = null
   }
 })
 

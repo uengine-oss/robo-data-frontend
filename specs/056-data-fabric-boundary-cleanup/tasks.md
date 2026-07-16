@@ -5,3 +5,4 @@
 - [x] T003 생성·연결검사·목록·삭제 계약을 새 Fabric API와 정합한다.
 - [ ] T004 typecheck/build/Playwright와 활성 참조 0을 검증한다.
 - [x] T005 table-data 조회를 구조화 read-only query 계약으로 이동하고 실제 row-limit을 검증한다.
+- [x] T006 선택적 text2sql alarm SSE를 명시적 opt-in으로 바꾸고 strict UI smoke를 재검증한다.

@@ -5,4 +5,6 @@
 안전하게 병합한 후 typecheck/build/Playwright로 검증한다.
 Schema table-data 조회는 Data Fabric의 구조화 read-only 계약으로 함께 이동한다. UI는 schema/table
 식별자로 대상 SELECT만 만들고 datasource와 max_rows를 request field로 분리한다.
+전역 AlarmToast는 `VITE_ENABLE_ALARM_STREAM=true`일 때만 연결해 선택 서비스 부재를 정상 구성으로
+표현하고, 기본 화면에서 실패 재연결 loop를 만들지 않는다.
 
