@@ -16,7 +16,7 @@ import GraphStylePanel from './GraphStylePanel.vue'
 import type { GraphNode, GraphLink } from '@/shared/types'
 import { useResize } from '@/shared/composables/useResize'
 import { useDrag } from '@/shared/composables/useDrag'
-import { getNodeColor, getRelationshipColor } from '@/shared/config/graphStyles'
+import { getNodeColor, getRelationshipColor, registerLabelColors } from '@/shared/config/graphStyles'
 import { isHiddenMarker, semanticRoleLabels } from '@/shared/utils/nodeLabels'
 import { storageVersion } from '@/shared/utils/graphStyleStorage'
 import { isSystemNode } from '@/shared/utils/graphVisibility'
@@ -40,25 +40,26 @@ const progressPanelCollapsed = ref(false) // 진행 패널 축소 상태
 
 /**
  * 보기 모드 (spec 018 — 단일선택 enum).
- * 모듈간/영역/건강은 서로 배타라 한 번에 하나만 켜진다. 기존엔 독립 토글이라
+ * 모듈간/업무 단위는 서로 배타라 한 번에 하나만 켜진다. 기존엔 독립 토글이라
  * 동시에 켜져 화면 의미가 모호해지고 silent no-op 가 섞였다 → 단일 enum 으로 일원화.
  *
  *  - 'default' : 프리셋 끔, hull 끔, 색=라벨별
- *  - 'module'  : 모듈간 상호작용 프리셋(가상 그래프)
- *  - 'area'    : 협력 군집(hull, component_id=CALL Leiden 군집 기준). ※구조적 "영역(파일/모듈)"과 별개
- *  - 'health'  : 위험도(risk_level)별 노드 색 강조
+ *  - 'module'  : 모듈간 상호작용 — 영역을 접고 영역을 넘는 관계만 그린다(spec 059)
+ *  - 'area'    : 실제 업무 단위(hull, component_id=CALL 군집 기준). ※폴더 구조와 별개
  *
- * groupHullBy / colorMode / preset 은 viewMode 에서 파생(computed)되므로
+ * groupHullBy / preset 은 viewMode 에서 파생(computed)되므로
  * 단일 진실원천은 viewMode 하나다. (NvlGraph/canvasStore 가 소비하는 prop 계약은 불변)
  */
-// 'area'=협력 군집 / 'module'=모듈간 / 'health'=건강
-// (spec 021: 'table-flow' 제거 — 노드 폭발. 'area-struct'(영역·구조) 제거 — 모듈간과 구조 중복, 사용자 결정 2026-07-16.)
-type ViewMode = 'default' | 'module' | 'area' | 'health'
+// 'module'=모듈간 상호작용 / 'area'=실제 업무 단위
+// (spec 021: 'table-flow' 제거 — 노드 폭발. 'area-struct'(영역·구조) 제거 — 모듈간과 구조 중복.
+//  spec 059: '건강' 제거 — 화면 전체를 위험색으로 칠해 정작 봐야 할 결합이 묻혔다. 실제 건강
+//  악화를 보여주는 화면은 별도 UI/UX 로 다시 설계한다(우선순위 낮음, 사용자 결정 2026-07-21).)
+type ViewMode = 'default' | 'module' | 'area'
 const viewMode = ref<ViewMode>('default')
 
 /**
  * 중첩 영역(헐) 레벨 — NvlGraph :hullLevels 소비(spec 021).
- *  - 협력 군집(area)   = [component_id 단일 레벨]
+ *  - 실제 업무 단위(area) = [component_id 단일 레벨]
  *  - 그 외             = [] (표시 안 함). 모듈간은 별도(Phase4)에서 패키지 1겹.
  */
 const hullLevels = computed<HullLevel[]>(() => {
@@ -72,13 +73,14 @@ const hullLevels = computed<HullLevel[]>(() => {
       padding: 30,
     }]
   }
-  if (viewMode.value === 'module' || viewMode.value === 'health') {
-    // 모듈간·건강: 패키지 1겹으로 루틴을 감싸고, **테이블도 '__tables__' 한 영역으로** 묶어 헐을 그린다
-    // (앵커 키 '__tables__' 와 일치 → 테이블 영역 + '테이블' 이름표). external 은 '__external__' 그룹.
+  if (viewMode.value === 'module') {
+    // 모듈간: 패키지 1겹으로 루틴을 감싸 영역 테두리를 그린다. external 은 '__external__' 그룹.
     const hmap = canvasStore.hierarchyMap
     return [{
       keyOf: (n) => {
-        if ((n.labels || []).includes('TABLE')) return '__tables__'
+        // spec 059: 테이블을 '__tables__' 별도 구역으로 빼지 않는다 — 그 구역이 선을 화면 가로로
+        // 늘여 결합을 가렸다. 테이블은 **자기를 가장 많이 쓰는 영역 안으로 녹인다**.
+        if ((n.labels || []).includes('TABLE')) return canvasStore.tableAreaKey(n.id)
         return hmap.get(n.id)?.packageKey ?? null
       },
       labelOf: () => '',
@@ -90,15 +92,15 @@ const hullLevels = computed<HullLevel[]>(() => {
 
 /**
  * 클러스터 분리 키(spec 022) — NvlGraph :clusterKeyOf 소비. 노드를 이 키로 묶어 화면에서 떨어뜨림.
- *  - 모듈간: 모듈=패키지(external은 '__external__'), 테이블='__tables__' → 3 클러스터 분리(뒤섞임 해소)
+ *  - 모듈간: 모듈=패키지(external은 '__external__'), 테이블=주인 영역 → 영역 단위로 분리
  *  - 협력군집: component_id(미보유='__ungrouped__') → 군집/기타 분리
  *  - 그 외: null(분리 안 함 — 영역구조는 중첩이라 분리 불필요, 건강은 단일)
  */
 const clusterKeyOf = computed<((n: GraphNode) => string | null) | null>(() => {
-  if (viewMode.value === 'module' || viewMode.value === 'health') {
+  if (viewMode.value === 'module') {
     const hmap = canvasStore.hierarchyMap
     return (n) => (n.labels || []).includes('TABLE')
-      ? '__tables__'
+      ? canvasStore.tableAreaKey(n.id)
       : (hmap.get(n.id)?.packageKey ?? null)
   }
   if (viewMode.value === 'area') {
@@ -112,15 +114,14 @@ const clusterKeyOf = computed<((n: GraphNode) => string | null) | null>(() => {
 
 /**
  * 클러스터 키 → 앵커(대표 노드) 라벨(spec 022). clusterKeyOf 와 짝 — NvlGraph 가 각 클러스터
- * 중심에 이 라벨의 앵커 노드를 둔다. 키는 노드 id(패키지)·합성키(__tables__/__external__/
- * __ungrouped__)·component_id 가 섞이므로 보기별로 사람이 읽을 이름으로 푼다.
+ * 중심에 이 라벨의 앵커 노드를 둔다. 키는 노드 id(패키지)·합성키('__external__'/'__ungrouped__')·
+ * component_id 가 섞이므로 보기별로 사람이 읽을 이름으로 푼다.
  */
 const clusterLabelOf = computed<((key: string) => string) | null>(() => {
-  if (viewMode.value === 'module' || viewMode.value === 'health') {
+  if (viewMode.value === 'module') {
     return (key) =>
-      key === '__tables__' ? '테이블'
-        : key === '__external__' ? 'external (외부 호출)'
-          : (projectStore.nodeMap.get(key)?.properties?.name as string) || '모듈'
+      key === '__external__' ? 'external (외부 호출)'
+        : (projectStore.nodeMap.get(key)?.properties?.name as string) || '모듈'
   }
   if (viewMode.value === 'area') {
     return (key) => {
@@ -136,8 +137,6 @@ const clusterLabelOf = computed<((key: string) => string) | null>(() => {
   return null
 })
 
-/** 노드 색 기준 — health 모드면 'health', 그 외 'label'. NvlGraph :colorMode 소비. */
-const colorMode = computed<'label' | 'health'>(() => (viewMode.value === 'health' ? 'health' : 'label'))
 
 /**
  * 필터 ▾ (spec 020/038) — 타입 끄고/켜기(blacklist). 보기모드와 직교(동시 적용).
@@ -164,7 +163,9 @@ const hiddenFilterCount = computed(() => relFilter.count + nodeFilter.count)
 const showFilterMenu = ref(false)
 
 /**
- * "숨김 요소 표시" — 기본 숨김(변수·INIT_BY·REFERENCES·메타노드)을 통째로 드러냄.
+ * "내부 요소 펼치기"(spec 059 FR-027) — 기본 접힘(변수·INIT_BY·REFERENCES·메타노드)을 통째로 펼침.
+ * 이름을 '숨김'에서 '펼치기'로 바꾼 이유: 데이터는 지워지지 않고 접혀 있을 뿐이라, '숨김'은
+ * 사용자가 무언가 사라졌다고 오해하게 만든다.
  * 노드·관계 끄고/켜기(nodeFilter·relFilter)와 **독립 축**: 서로 상태를 안 건드린다.
  * 그래프(graphData)·네비게이터(isExcluded)·필터 목록이 한 토글로 동시 반영.
  */
@@ -173,7 +174,7 @@ function toggleShowHidden(): void {
 }
 
 /**
- * 보기 ▾ 드롭다운 (spec 018) — 보기 모드(모듈간/영역/건강)를 상단 일렬 버튼 대신 한 곳에서 고른다.
+ * 보기 ▾ 드롭다운 (spec 018) — 보기 모드(모듈간/업무 단위)를 상단 일렬 버튼 대신 한 곳에서 고른다.
  * 단일선택: 한 항목을 누르면 그 모드로, 이미 그 모드면 default 로 토글오프. 한 번에 하나만 켜짐.
  * 관계필터는 별개 축이라 보기모드와 무관하게 독립 토글.
  */
@@ -181,7 +182,7 @@ const showViewMenu = ref(false)
 
 /**
  * 보기 모드 선택 — 단일선택. 이미 선택된 모드면 default 로 끔(토글오프).
- * 모드 진입 시 그 모드가 무언가를 보이게 캔버스를 보장(영역/건강은 빈 캔버스면 해당 속성 노드 자동 로드).
+ * 모드 진입 시 그 모드가 무언가를 보이게 캔버스를 보장(업무 단위는 빈 캔버스면 해당 속성 노드 자동 로드).
  */
 function selectViewMode(mode: Exclude<ViewMode, 'default'>): void {
   const next: ViewMode = viewMode.value === mode ? 'default' : mode
@@ -193,18 +194,19 @@ function selectViewMode(mode: Exclude<ViewMode, 'default'>): void {
 /** 보기 모드 적용 — 프리셋/캔버스 populate 까지 일괄 처리(단일 결정처). */
 function applyViewMode(mode: ViewMode): void {
   viewMode.value = mode
-  // 이전 프리셋(모듈간/건강 가상그래프) 해제 — 다른 모드로 갈 때 항상 클리어.
+  // 이전 프리셋(모듈간 가상그래프) 해제 — 다른 모드로 갈 때 항상 클리어.
   if (canvasPresetMode.value) canvasStore.setPreset(null)
 
   if (mode === 'module') {
-    // 모듈간: 가상 그래프 프리셋(모듈↔모듈 CALL + 모듈↔테이블 R/W).
+    // 모듈간 상호작용 — 기존 가상 그래프(모듈↔모듈 CALL + 모듈↔테이블 R/W)를 그대로 쓴다.
+    // spec 059 가 바꾼 것은 두 가지뿐이다: 테이블을 '__tables__' 별도 구역이 아니라 **주인 영역의
+    // 테두리 안**으로 녹이고(clusterKeyOf/hullLevels), 색을 영역 통과 여부로 진하기 구분한다.
     canvasStore.setPreset('module-interaction')
-    // FR-010: 합성 결과가 비면 빈 화면 침묵 대신 사유 안내(전략·DDL 무관, 데이터 유무로만).
-    hintIfEmpty('모듈 간 상호작용을 그릴 데이터가 없습니다 — 모듈·호출(CALLS)·테이블 R/W 정보가 있어야 합니다')
-  } else if (mode === 'health') {
-    // 건강(spec 022): 위험 루틴 + 그들이 닿는 모든 관계(R/W 테이블·CALL 루틴). 위험색=colorMode.
-    canvasStore.setPreset('health-rw')
-    hintIfEmpty('위험도 정보를 가진 함수가 없습니다 — 분석을 끝까지 실행해 주세요')
+    // FR-004: 합성 결과가 비면 빈 화면 침묵 대신 사유 안내(전략·DDL 무관, 데이터 유무로만).
+    hintIfEmpty(
+      '영역 간 관계가 없습니다 — 분석 대상의 폴더(패키지)가 둘 이상이고 그 사이에 호출이나 '
+      + '테이블 접근이 있어야 합니다. 폴더가 하나뿐이면 모든 관계가 그 안에 있어 그릴 선이 없습니다.',
+    )
   } else if (mode === 'area') {
     ensureNodesForView('component_id')
   } else {
@@ -213,19 +215,27 @@ function applyViewMode(mode: ViewMode): void {
 }
 
 /**
- * FR-010 — 프리셋/로드 적용 직후 캔버스가 비었으면 사유 안내, 아니면 안내 해제.
- * 판정은 전략명이 아니라 **canvasGraphData(동기 computed) 노드 수** 단일 규칙 → 전략·DDL 무관.
+ * FR-004 — 프리셋 적용 직후 그릴 게 없으면 사유 안내, 아니면 안내 해제.
+ * 판정은 전략명이 아니라 **canvasGraphData(동기 computed)** 단일 규칙 → 전략·DDL 무관.
+ *
+ * ★모듈간 상호작용은 "영역 간 관계"를 보는 화면이라 **관계 0건도 빈 화면**이다.
+ * 영역이 하나뿐이면 노드는 1개지만 그릴 선이 없어, 사유 없이 외딴 동그라미만 남는다.
+ * (실측 2026-07-21: shop_mall 은 PACKAGE 가 1개뿐이라 정확히 이 상태가 된다.)
  */
 function hintIfEmpty(reason: string): void {
-  autoPopulateHint.value = canvasGraphData.value.nodes.length === 0 ? reason : ''
+  const graph = canvasGraphData.value
+  const nothingToShow = viewMode.value === 'module'
+    ? graph.links.length === 0
+    : graph.nodes.length === 0
+  autoPopulateHint.value = nothingToShow ? reason : ''
 }
 
 /**
- * 빈 캔버스에서 영역/건강 보기를 켜면 무반응(재스타일만 함)이던 문제 근본수정.
+ * 빈 캔버스에서 업무 단위 보기를 켜면 무반응(재스타일만 함)이던 문제 근본수정.
  * 캔버스가 비어 있으면 해당 속성을 가진 노드만 골라 캔버스에 자동 추가(바운디드 — 전체덤프 X).
  * 추가할 노드가 0개면 침묵 대신 안내 힌트를 띄운다.
  *
- * @param propKey   노드가 가져야 할 속성 키 (예: 'component_id', 'risk_level')
+ * @param propKey   노드가 가져야 할 속성 키 (예: 'component_id')
  */
 function ensureNodesForView(propKey: string): void {
   autoPopulateHint.value = ''
@@ -244,10 +254,8 @@ function ensureNodesForView(propKey: string): void {
     canvasStore.setCanvasNodes([])   // 독립: 매치 0이면 이전 보기 잔상 비우고 사유 안내만
     autoPopulateHint.value =
       propKey === 'component_id'
-        ? '협력 군집(컴포넌트) 정보를 가진 노드가 없습니다 — 분석을 끝까지 실행해 주세요'
-        : propKey === 'risk_level'
-          ? '건강(위험도) 정보를 가진 함수가 없습니다 — 분석을 끝까지 실행해 주세요'
-          : '표시할 노드가 없습니다 — 분석을 끝까지 실행해 주세요'
+        ? '업무 단위(군집) 정보를 가진 노드가 없습니다 — 분석을 끝까지 실행해 주세요'
+        : '표시할 노드가 없습니다 — 분석을 끝까지 실행해 주세요'
     return
   }
   canvasStore.setCanvasNodes(matched)
@@ -256,12 +264,39 @@ function ensureNodesForView(propKey: string): void {
 /** 자동 로드 결과 안내 (해당 속성 노드 0개일 때). 빈 문자열이면 표시 안 함. */
 const autoPopulateHint = ref('')
 
+/**
+ * 층 칩(영역/모듈/루틴) — spec 059. 언어마다 다른 종류 이름(FILE/CLASS/PACKAGE_BODY…)을 하나로
+ * 묶어 부른다. 판정과 구성 라벨은 캔버스 스토어(→ nodeClassify)가 소유하고 여기서는 표시값만 만든다.
+ */
+const LAYER_COLORS: Record<string, string> = { 영역: '#7C6BAD', 모듈: '#4A7C8C', 루틴: '#6B8E5A' }
+const LAYER_MEMBERS: Record<string, string> = {
+  영역: '패키지·폴더',
+  모듈: '파일·클래스·PL/SQL 패키지',
+  루틴: '함수·메서드·프로시저·트리거',
+}
+const layerStats = computed(() => {
+  void storageVersion.value
+  return [...canvasStore.layerCounts().entries()]
+    .filter(([, count]) => count > 0)
+    .map(([layer, count]) => ({
+      layer,
+      count,
+      color: LAYER_COLORS[layer] ?? '#6b7280',
+      active: canvasStore.isLayerLoaded(layer),
+      members: LAYER_MEMBERS[layer] ?? '',
+    }))
+})
+
+/** 층 칩 클릭 — 그 층을 구성하는 실제 라벨들을 켜고 끈다(스토어가 펼친다). */
+function handleLayerFilter(layer: string): void {
+  canvasStore.toggleLayerLoad(layer)
+}
+
 /** 현재 보기 모드 라벨 (보기 ▾ 버튼 표시용). */
 const activeViewLabel = computed(() => {
   switch (viewMode.value) {
     case 'module': return '모듈간'
-    case 'area': return '협력 군집'
-    case 'health': return '건강'
+    case 'area': return '실제 업무 단위'
     default: return '기본'
   }
 })
@@ -384,6 +419,18 @@ const overallNodeStats = computed(() => {
   // 종류 = 어떤 노드든 labels[0] 로 등장한 라벨(+EXTERNAL stub 마커). 그 외 = 역할(stereotype).
   // 위치 파생이라 하드코딩 역할집합 0(spec 035). 라벨별 group 태그를 붙여 필터가 섹션 분리.
   const stats = new Map<string, { count: number; color: string; group: 'kind' | 'role' }>()
+
+  // spec 059: 색을 묻기 **전에** 이 그래프의 전체 라벨을 한 번에 등록해 배정 순서를 고정한다.
+  // 등록하지 않으면 "화면에서 처음 만난 순서"가 배정 순서가 되어 다시 열 때 색이 달라진다.
+  // 등록은 정렬된 순서로 하며 이미 색을 받은 라벨은 건드리지 않는다(색 불변).
+  const allLabels: string[] = []
+  for (const node of graphData.value?.nodes ?? []) {
+    for (const label of node.labels || []) {
+      if (label !== '_Placeholder' && !isHiddenMarker(label)) allLabels.push(label)
+    }
+  }
+  registerLabelColors(allLabels)
+
   for (const node of graphData.value?.nodes ?? []) {
     const roleLabels = new Set(semanticRoleLabels(node))
     for (const label of node.labels || ['Unknown']) {
@@ -425,14 +472,27 @@ const relTypeList = computed(() => {
 /** 필터 ▾ 노드 토글 목록 — 현재 캔버스 노드 라벨 기준(관계 목록과 동형). 멀티라벨은 각 라벨로 집계. */
 const nodeTypeList = computed(() => {
   const counts = new Map<string, number>()
+  const roleLabels = new Set<string>()
   for (const node of canvasGraphData.value?.nodes ?? []) {
+    for (const role of semanticRoleLabels(node)) roleLabels.add(role)
     for (const label of node.labels ?? []) {
-      if (label === '_Placeholder') continue
+      if (label === '_Placeholder' || isHiddenMarker(label)) continue
       counts.set(label, (counts.get(label) ?? 0) + 1)
     }
   }
-  return Array.from(counts, ([type, count]) => ({ type, count }))
+  // spec 059: 종류(무엇인가)와 역할(무슨 일을 하는가)은 다른 축이다. 개요 패널은 이미 나눠
+  // 보여주는데 필터만 한 줄로 섞여 있어 같은 개념이 두 화면에서 다르게 보였다(원칙 §7 위반).
+  return Array.from(counts, ([type, count]) => ({
+    type,
+    count,
+    group: roleLabels.has(type) ? 'role' as const : 'kind' as const,
+  }))
 })
+
+/** 필터의 '종류' 섹션 — 이게 무엇인가(antlr 타입). */
+const nodeKindList = computed(() => nodeTypeList.value.filter(n => n.group === 'kind'))
+/** 필터의 '역할' 섹션 — 이게 무슨 일을 하는가(stereotype). */
+const nodeRoleList = computed(() => nodeTypeList.value.filter(n => n.group === 'role'))
 
 // 캔버스(NvlGraph)에 표시 중인 그래프가 있는지
 const hasGraph = computed(() => canvasGraphData.value.nodes.length > 0)
@@ -543,10 +603,10 @@ const { presetMode: canvasPresetMode, loadedLabels, loadedRelTypes } = storeToRe
 const activeNodeLoads = computed(() => [...loadedLabels.value])
 const activeRelLoads = computed(() => [...loadedRelTypes.value])
 
-// 프리셋(모듈간/건강 가상그래프)이 외부 동작(캔버스 비우기·라벨 격리 등)으로 해제되면
+// 프리셋(모듈간 가상그래프)이 외부 동작(캔버스 비우기·라벨 격리 등)으로 해제되면
 // 해당 보기도 default 로 환원 — 상태 일관성.
 watch(canvasPresetMode, (mode) => {
-  if (mode === null && (viewMode.value === 'module' || viewMode.value === 'health')) {
+  if (mode === null && viewMode.value === 'module') {
     viewMode.value = 'default'
   }
 })
@@ -588,10 +648,17 @@ function handleNodeDrop(payload: { nodeId: string }): void {
 }
 
 /**
- * 캔버스 노드 더블클릭 → 그 노드의 1-hop 이웃을 캔버스에 추가 (누적).
+ * 캔버스 노드 더블클릭 (spec 059).
+ *  - 모듈간 상호작용 보기: 모듈을 **한 단계** 펼쳐 그 안의 루틴을 드러낸다. 지목한 대상만 열리고
+ *    다시 누르면 접힌다. 전체 펼치기는 제공하지 않는다.
+ *  - 그 외 보기: 기존대로 1-hop 이웃을 캔버스에 누적 추가한다.
  */
 function handleNodeExpand(nodeId: string): void {
   if (!nodeId) return
+  if (canvasPresetMode.value === 'module-interaction') {
+    canvasStore.expandLayer(nodeId)
+    return
+  }
   canvasStore.expandNodeOnCanvas(nodeId)
 }
 
@@ -729,7 +796,6 @@ watch(hasGraph, (has, prev) => {
           :hullLevels="hullLevels"
           :clusterKeyOf="clusterKeyOf"
           :clusterLabelOf="clusterLabelOf"
-          :colorMode="colorMode"
           :hiddenRelTypes="relFilter.hidden"
           :hiddenNodeTypes="nodeFilter.hidden"
           :isolatedLabels="activeNodeLoads"
@@ -750,7 +816,7 @@ watch(hasGraph, (has, prev) => {
         <!-- 빈 상태 오버레이 -->
         <div v-if="!hasGraph" class="empty-state empty-overlay">
           <template v-if="autoPopulateHint">
-            <!-- 영역/건강 보기를 켰지만 해당 속성 노드가 0개 — 침묵 대신 안내 -->
+            <!-- 보기를 켰지만 그릴 대상이 0개 — 침묵 대신 안내 -->
             <div class="empty-icon">🔍</div>
             <h3>{{ activeViewLabel }} 보기로 표시할 노드가 없습니다</h3>
             <p>{{ autoPopulateHint }}</p>
@@ -792,8 +858,8 @@ watch(hasGraph, (has, prev) => {
         <span class="toggle-text">{{ showLogicalNames ? '논리명' : '물리명' }}</span>
       </label>
 
-      <!-- 보기 ▾ (spec 018): 보기 모드(모듈간/영역/건강 + 향후 추가)를 한 곳에서 단일선택.
-           모듈간/영역/건강은 서로 배타 — 한 번에 하나만. 관계필터는 별개 축(동시 가능). -->
+      <!-- 보기 ▾ (spec 018): 보기 모드(모듈간/업무 단위)를 한 곳에서 단일선택.
+           모듈간/업무 단위는 서로 배타 — 한 번에 하나만. 관계필터는 별개 축(동시 가능). -->
       <div class="view-menu-wrap">
         <button
           class="view-menu-btn"
@@ -817,13 +883,8 @@ watch(hasGraph, (has, prev) => {
             </button>
             <button class="view-menu-item" :class="{ active: viewMode === 'area' }" @click="selectViewMode('area')">
               <span class="vm-icon">🧩</span>
-              <span class="vm-text"><b>협력 군집</b><small>호출(CALL)로 뭉친 루틴 묶음</small></span>
+              <span class="vm-text"><b>실제 업무 단위</b><small>호출로 함께 움직이는 루틴 묶음</small></span>
               <span class="vm-check">{{ viewMode === 'area' ? '✓' : '' }}</span>
-            </button>
-            <button class="view-menu-item" :class="{ active: viewMode === 'health' }" @click="selectViewMode('health')">
-              <span class="vm-icon">🩺</span>
-              <span class="vm-text"><b>건강 보기</b><small>위험 함수 색 강조(빨강/노랑/파랑)</small></span>
-              <span class="vm-check">{{ viewMode === 'health' ? '✓' : '' }}</span>
             </button>
           </div>
         </Transition>
@@ -845,15 +906,15 @@ watch(hasGraph, (has, prev) => {
         </button>
         <Transition name="fade">
           <div v-if="showFilterMenu" class="view-menu-pop">
-            <!-- 섹션 B: 숨김 요소 표시 (기본 숨김 해제 — 관계 끄고/켜기와 독립 축) -->
-            <div class="vm-section-label">숨김 요소 <span class="vm-section-hint">기본 숨김 해제</span></div>
+            <!-- 섹션 B: 내부 요소 펼치기 (기본 접힘 해제 — 관계 끄고/켜기와 독립 축, spec 059) -->
+            <div class="vm-section-label">내부 요소 <span class="vm-section-hint">기본 접힘 해제</span></div>
             <button
               class="view-menu-item"
               :class="{ active: showHidden }"
               @click="toggleShowHidden"
             >
               <span class="vm-icon">{{ showHidden ? '☑' : '☐' }}</span>
-              <span class="vm-text"><b>숨긴 요소까지 모두 보기</b><small>변수·내부 연결·분석 보조 노드 등 기본은 가려둔 것</small></span>
+              <span class="vm-text"><b>내부 요소까지 펼치기</b><small>변수·내부 연결·분석 보조 노드 — 지운 게 아니라 접어둔 것</small></span>
             </button>
 
             <div class="vm-divider" />
@@ -863,16 +924,32 @@ watch(hasGraph, (has, prev) => {
             <div v-if="nodeTypeList.length === 0" class="vm-empty-hint">
               지금 캔버스에 그려진 노드가 없어요.<br>네비게이터에서 노드를 올리면 종류가 여기 나타납니다.
             </div>
-            <div v-else class="vm-chips">
-              <button
-                v-for="nt in nodeTypeList"
-                :key="'n-' + nt.type"
-                class="vm-chip"
-                :class="{ off: !nodeFilter.isShown(nt.type) }"
-                :title="(nodeFilter.isShown(nt.type) ? '끄기: ' : '켜기: ') + nt.type"
-                @click="nodeFilter.toggle(nt.type)"
-              >{{ nt.type }}<span class="vm-chip-n">{{ nt.count }}</span></button>
-            </div>
+            <template v-else>
+              <div class="vm-chips">
+                <button
+                  v-for="nt in nodeKindList"
+                  :key="'n-' + nt.type"
+                  class="vm-chip"
+                  :class="{ off: !nodeFilter.isShown(nt.type) }"
+                  :title="(nodeFilter.isShown(nt.type) ? '끄기: ' : '켜기: ') + nt.type"
+                  @click="nodeFilter.toggle(nt.type)"
+                >{{ nt.type }}<span class="vm-chip-n">{{ nt.count }}</span></button>
+              </div>
+              <!-- 역할은 종류와 다른 축이라 줄을 나눈다(개요 패널과 같은 규칙, 원칙 §7). -->
+              <template v-if="nodeRoleList.length > 0">
+                <div class="vm-sub-label">역할</div>
+                <div class="vm-chips">
+                  <button
+                    v-for="nt in nodeRoleList"
+                    :key="'r-' + nt.type"
+                    class="vm-chip"
+                    :class="{ off: !nodeFilter.isShown(nt.type) }"
+                    :title="(nodeFilter.isShown(nt.type) ? '끄기: ' : '켜기: ') + nt.type"
+                    @click="nodeFilter.toggle(nt.type)"
+                  >{{ nt.type }}<span class="vm-chip-n">{{ nt.count }}</span></button>
+                </div>
+              </template>
+            </template>
 
             <div class="vm-divider" />
 
@@ -912,6 +989,8 @@ watch(hasGraph, (has, prev) => {
         </div>
         <div class="panel-body">
           <NodeDetailPanel
+            :layerStats="layerStats"
+            @layer-filter="handleLayerFilter"
             :node="selectedNode"
             :relationship="selectedRelationship"
             :nodeStats="overallNodeStats"
@@ -1295,6 +1374,12 @@ watch(hasGraph, (has, prev) => {
   &.active .vm-text b { color: var(--color-accent); }
 }
 
+.vm-sub-label {
+  margin: 8px 0 4px;
+  font-size: 11px;
+  color: var(--color-text-dim, #868e96);
+  letter-spacing: 0.02em;
+}
 .vm-section-label {
   padding: 11px 12px 6px;
   font-size: 10.5px;

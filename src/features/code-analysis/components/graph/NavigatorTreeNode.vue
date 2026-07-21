@@ -50,6 +50,13 @@ function onDragStart(e: DragEvent) {
 
 function onDoubleClick() {
   // Navigator 더블클릭 = 드래그 대체. 그 노드 하나만 캔버스에 추가.
+  // 단 모듈간 상호작용 보기에서는 캔버스가 프리셋(합성 그래프)이라 노드를 "추가"하는 개념이 없다.
+  // 그때는 캔버스 더블클릭과 **같은 동작**(층 한 단계 펼치기)을 한다 — 작은 원을 정확히 겨누지
+  // 않고도 이름으로 골라 펼칠 수 있어야 한다(spec 059 US3).
+  if (canvasStore.presetMode === 'module-interaction') {
+    canvasStore.expandLayer(props.node.id)
+    return
+  }
   canvasStore.addNodeToCanvas(props.node.id)
 }
 

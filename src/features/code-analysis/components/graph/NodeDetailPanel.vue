@@ -28,7 +28,19 @@ interface Stats {
   group?: 'kind' | 'role'
 }
 
+/** 층 칩 하나(spec 059) — 영역/모듈/루틴. 계산은 GraphTab 이 한다. */
+export interface LayerStat {
+  layer: string
+  count: number
+  color: string
+  active: boolean
+  /** 이 층에 해당하는 실제 종류들(툴팁) — 예 '파일·클래스·PL/SQL 패키지' */
+  members: string
+}
+
 interface Props {
+  /** 층 칩(영역/모듈/루틴) — spec 059. GraphTab 이 계산해 내려준다. */
+  layerStats?: LayerStat[]
   node: GraphNode | null
   relationship: GraphLink | null
   nodeStats?: Map<string, Stats>
@@ -61,6 +73,7 @@ const LONG_VALUE_THRESHOLD = 50
 // ============================================================================
 
 const props = withDefaults(defineProps<Props>(), {
+  layerStats: () => [],
   totalNodes: 0,
   totalRelationships: 0,
   hasGraph: false,
@@ -71,6 +84,7 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const emit = defineEmits<{
+  'layer-filter': [layer: string]
   'node-type-select': [nodeType: string, topOffset: number]
   'relationship-type-select': [relType: string, topOffset: number]
   'relationship-filter': [relType: string]
@@ -141,6 +155,29 @@ const isSearchFocused = ref(false)
 
 
 /** 속성 목록 (관계용) */
+/**
+ * 영역 간 관계(spec 059)의 속성을 사람이 읽을 이름으로 바꾼다.
+ * 이 선은 여러 원본 관계를 하나로 합친 것이라 **무엇 때문에 두 영역이 묶였는지**를 보여줘야
+ * 한다(FR-007). 표에 없는 키는 원래 이름을 그대로 둔다 — 모르는 속성이 조용히 사라지지 않게.
+ */
+const REL_PROPERTY_LABELS: Record<string, string> = {
+  count: '묶인 관계 수',
+  via_tables: '원인 테이블',
+  via_routines: '원인 루틴',
+  crosses_area: '영역을 넘음',
+  virtual: '합쳐진 선',
+  via_count: '경유 개수',
+  via_sample: '경유 예시',
+}
+
+/** 배열은 쉼표로, 참/거짓은 예/아니오로 — 원문 JSON 을 그대로 들이밀지 않는다. */
+function formatRelValue(value: unknown): string {
+  if (Array.isArray(value)) return value.length ? value.join(', ') : '(없음)'
+  if (typeof value === 'boolean') return value ? '예' : '아니오'
+  if (typeof value === 'object' && value !== null) return JSON.stringify(value, null, 2)
+  return String(value)
+}
+
 const relationshipProperties = computed<PropertyItem[]>(() => {
   // 노드가 있으면 관계 속성은 절대 표시하지 않음
   if (props.node) return []
@@ -155,9 +192,9 @@ const relationshipProperties = computed<PropertyItem[]>(() => {
   if (props.relationship.properties) {
     const propEntries = Object.entries(props.relationship.properties)
       .map(([key, value]) => ({
-        key,
-        value: typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value),
-        isMultiLine: typeof value === 'object' || String(value).includes('\n')
+        key: REL_PROPERTY_LABELS[key] ?? key,
+        value: formatRelValue(value),
+        isMultiLine: typeof value === 'object' && !Array.isArray(value),
       }))
     propsList.push(...propEntries)
   }
@@ -208,6 +245,15 @@ const kindNodeStats = computed(() => sortedNodeStats.value.filter(s => s.group !
 
 /** 역할(stereotype) 라벨 통계 — 필터 '역할' 섹션. */
 const roleNodeStats = computed(() => sortedNodeStats.value.filter(s => s.group === 'role'))
+
+/**
+ * 층(영역/모듈/루틴) 칩 — spec 059.
+ * 이 패널은 표현 전용이라 판정을 하지 않는다. 계산은 GraphTab 이 캔버스 스토어(→ nodeClassify)에서
+ * 받아 prop 으로 내려주고, 클릭은 emit 으로 올린다 — 종류·역할 칩과 같은 방식.
+ */
+function handleLayerFilter(layer: string): void {
+  emit('layer-filter', layer)
+}
 
 /** 관계 통계 (개수 많은 순 정렬) */
 const sortedRelStats = computed(() => {
@@ -630,6 +676,24 @@ function searchSecondary(node: GraphNode): string {
               title="클릭: 이것만 보기 (그 라벨만 캔버스에 로드) · 우클릭: 색상 변경"
             >?</span>
           </div>
+          <!-- 층(영역/모듈/루틴) — spec 059. 언어마다 다른 종류 이름을 하나로 묶어 부른다.
+               Java 면 CLASS, C 면 FILE, 오라클이면 패키지 본문이 모두 '모듈'이다. -->
+          <template v-if="props.layerStats.length">
+            <div class="label-group-title">층</div>
+            <div class="badge-container">
+              <span
+                v-for="stat in props.layerStats"
+                :key="stat.layer"
+                class="stat-badge clickable"
+                :class="{ active: stat.active, dimmed: hasActiveFilters() && !stat.active }"
+                :style="{ background: stat.color }"
+                :title="`${stat.layer} — ${stat.members}`"
+                @click="handleLayerFilter(stat.layer)"
+              >
+                {{ stat.layer }} ({{ stat.count }})
+              </span>
+            </div>
+          </template>
           <!-- 종류 -->
           <div class="label-group-title">종류</div>
           <div class="badge-container">

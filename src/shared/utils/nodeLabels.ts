@@ -25,12 +25,6 @@ export function kindOf(labels: readonly string[] | undefined): string {
   return labels?.find(label => !MARKER_LABELS.has(label)) ?? 'Unknown'
 }
 
-/** 노드의 역할(stereotype) 목록 = 첫 라벨 이후, 마커 제외. */
-export function rolesOf(labels: readonly string[] | undefined): string[] {
-  if (!labels) return []
-  return labels.filter(l => SYSTEM_ROLE_LABELS.has(l))
-}
-
 /** 라벨이 stub 종류미상 마커인지. */
 export function isStubMarker(label: string): boolean {
   return label === 'EXTERNAL'
@@ -63,18 +57,24 @@ export function isHiddenMarker(label: string): boolean {
 }
 
 /**
- * 색을 칠할 기준 라벨 — "활성 렌즈"(spec 040). 노드의 역할(labels[1:]) 중 지금 isolate 된 게
- * 있으면 그 역할로 색칠(역할 칩과 일치), 없으면 종류(labels[0]). 역할 우선.
+ * 색을 칠할 기준 라벨 — "활성 렌즈"(spec 040). 노드의 역할 중 지금 isolate 된 게 있으면 그 역할로
+ * 색칠(역할 칩과 일치), 없으면 종류. 역할 우선.
+ *
+ * ★spec 059: 역할 판정을 `semanticRoleLabels` 로 통일했다. 이전 `rolesOf` 는 독스트링과 반대로
+ * 마커(INTERNAL/EXTERNAL)만 돌려줘 COMMAND·HELPER 같은 실제 역할이 하나도 안 걸렸고, 그래서
+ * 역할 칩을 눌러도 색이 바뀌지 않았다(캔버스·상세패널 양쪽). 역할 판정처는 이제 하나다.
+ *
+ * @param node     라벨과 stereotype 을 함께 봐야 역할을 판정할 수 있어 노드를 받는다.
  * @param isolated 현재 isolate 된 라벨 집합 — loadedLabels(라벨 원본 케이스).
  */
 export function colorLabelOf(
-  labels: readonly string[] | undefined,
+  node: { labels?: readonly string[]; properties?: Record<string, unknown> },
   isolated?: ReadonlySet<string>,
 ): string {
   if (isolated && isolated.size) {
-    for (const role of rolesOf(labels)) {
+    for (const role of semanticRoleLabels(node)) {
       if (isolated.has(role)) return role
     }
   }
-  return kindOf(labels)
+  return kindOf(node.labels)
 }

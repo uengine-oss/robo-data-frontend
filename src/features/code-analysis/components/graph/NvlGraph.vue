@@ -21,7 +21,10 @@ import {
 } from '@neo4j-nvl/interaction-handlers'
 import type { GraphData, GraphNode, GraphLink, NvlNode, NvlRelationship } from '@/shared/types'
 import type { PartialNode, PartialRelationship } from '@neo4j-nvl/base'
-import { getNodeColor, getRelationshipColor, getRelationshipWidth, getNodeSize } from '@/shared/config/graphStyles'
+import {
+  getNodeColor, getRelationshipColor, getRelationshipWidth, getNodeSize,
+  getRelationshipDisplayName,
+} from '@/shared/config/graphStyles'
 import { colorLabelOf } from '@/shared/utils/nodeLabels'
 import { storageVersion } from '@/shared/utils/graphStyleStorage'
 import { useNavigatorStore } from '@/shared/stores/navigator'
@@ -52,12 +55,6 @@ interface Props {
    * 이 라벨의 합성 앵커 노드를 두고, 끌면 그룹째 이동한다. 미지정이면 키를 그대로 라벨로.
    */
   clusterLabelOf?: ((key: string) => string) | null
-  /**
-   * 노드 색 기준.
-   *  - 'label'(기본) → 라벨별 색(getNodeColor)
-   *  - 'health'      → 건강지표(risk)별 색 — 나쁜 함수 강조. 지표 없는 노드는 회색.
-   */
-  colorMode?: 'label' | 'health'
   /** 숨길 관계 타입 (끄고/켜기 blacklist, spec 020). 여기 든 타입은 그리지 않는다. */
   hiddenRelTypes?: string[]
   /** 숨길 노드 타입 (끄고/켜기 blacklist, spec 038). 이 라벨을 가진 노드·그 관계를 안 그린다. */
@@ -124,7 +121,6 @@ const props = withDefaults(defineProps<Props>(), {
   hullLevels: () => [],
   clusterKeyOf: null,
   clusterLabelOf: null,
-  colorMode: 'label',
   hiddenRelTypes: () => [],
   hiddenNodeTypes: () => [],
   isolatedLabels: () => [],
@@ -134,22 +130,13 @@ const props = withDefaults(defineProps<Props>(), {
 /** isolate 라벨 집합(대문자) — 역할 렌즈 색 판정용(spec 040). */
 const isolatedSet = computed(() => new Set(props.isolatedLabels))
 
-// 건강지표(risk)별 노드 색 — getNodeColor(공유 유틸)는 건드리지 않고 여기서만 override.
-// 색 의미(사용자 확정): 위험=빨강 / 주의=노랑 / 양호=파랑 (green 대신 blue).
-const HEALTH_COLORS: Record<string, string> = {
-  high: '#fa5252',   // 위험 — 빨강
-  medium: '#ffd43b', // 주의 — 노랑
-  low: '#4dabf7',    // 양호 — 파랑
-}
-const HEALTH_NEUTRAL = '#868e96' // 위험도 미산정 노드(드물게 risk_level 없는 루틴)
-
-/** colorMode 에 따른 노드 색 — 'health' 면 risk 기반, 아니면 라벨 기반(활성 렌즈: isolate된 역할 우선). */
+/**
+ * 노드 색 — 라벨 기반(활성 렌즈: isolate 된 역할 우선).
+ * spec 059 에서 건강(risk) 색 override 를 삭제했다. 화면 전체를 위험색으로 칠하면 정작 봐야 할
+ * 결합이 묻힌다 — 위험은 "발견된 문제" 목록에서 해당 대상만 캔버스에 투영해 본다.
+ */
 function resolveNodeColor(labels: string[], properties?: Record<string, unknown>): string {
-  if (props.colorMode === 'health') {
-    const risk = String(properties?.risk_level ?? '')
-    return HEALTH_COLORS[risk] ?? HEALTH_NEUTRAL
-  }
-  return getNodeColor([colorLabelOf(labels, isolatedSet.value)])
+  return getNodeColor([colorLabelOf({ labels, properties }, isolatedSet.value)])
 }
 
 const emit = defineEmits<{
@@ -234,15 +221,28 @@ function toNvlNode(node: GraphNode, isSelected = false): NvlNode {
   }
 }
 
+/**
+ * 묶인 관계 수 → 선 굵기(spec 059 FR-003). 건수가 수십 개까지 벌어져도 화면을 덮지 않도록
+ * 로그로 눌러 담고 상한을 둔다. 굵기는 "많다/적다"를 읽히게 하는 용도이지 정확한 수치가 아니다 —
+ * 정확한 건수는 관계를 선택하면 패널에서 확인한다.
+ */
+function bundledWidth(count: number): number {
+  return Math.min(12, 2 + Math.log2(count + 1) * 1.8)
+}
+
 function toNvlRelationship(link: GraphLink, isSelected = false): NvlRelationship {
   const isVirtual = link.properties?.virtual === true
+  // spec 059: 색 = (종류, 영역 통과 여부) 2축. 굵기는 별개 축으로 넘나드는 관계 수를 나타낸다.
+  // 캡션은 한국어 표시명 — 색약에서 빨강·주황이 붙어 보여도 글자로 구분된다.
+  const crossesArea = link.properties?.crosses_area === true
+  const bundled = typeof link.properties?.count === 'number' ? (link.properties.count as number) : 0
   const base: NvlRelationship = {
     id: link.id,
     from: link.source,
     to: link.target,
-    caption: link.type,
-    color: getRelationshipColor(link.type),
-    width: getRelationshipWidth(link.type),
+    caption: getRelationshipDisplayName(link.type),
+    color: getRelationshipColor(link.type, crossesArea),
+    width: bundled > 0 ? bundledWidth(bundled) : getRelationshipWidth(link.type),
     selected: isSelected,
     properties: link.properties
   }
@@ -849,11 +849,6 @@ watch(() => props.clusterKeyOf, () => {
 // 우측 패널 열림/닫힘으로 가시영역이 바뀌면 다시 프레임(리사이즈 중 매 px 재맞춤은 피하고 토글만).
 watch(() => props.rightInset, (n, o) => {
   if ((n > 0) !== (o > 0) && nvlInstance.value) { fitView(); groupHulls.redraw() }
-})
-
-// 색 기준(라벨↔건강) 전환 시 이미 그려진 노드 색을 즉시 갱신
-watch(() => props.colorMode, () => {
-  updateNodeStyles()
 })
 
 // 사용자 스타일(색/크기/두께) 변경(GraphStylePanel → graphStyleStorage) → 이미 그려진 노드·관계의

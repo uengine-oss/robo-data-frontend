@@ -17,16 +17,20 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
-import { isContainerNode, CALLABLE_LABELS } from '@/shared/utils/nodeClassify'
+import { buildPanelGraphProjection } from '@/features/code-analysis/panelGraphProjection'
+import { computeTableOwners } from '@/features/code-analysis/areaGraph'
+import { isContainerNode, CALLABLE_LABELS, CONTAINER_LABELS } from '@/shared/utils/nodeClassify'
 import { isLinkHidden, isNodeHidden, isSystemNode } from '@/shared/utils/graphVisibility'
 import type { GraphData, GraphLink, GraphNode } from '@/shared/types'
 
 /**
  * 캔버스 프리셋 — 일반 그래프와 다른 표시 규칙을 적용하는 모드.
  *   - 'module-interaction' : MODULE/TABLE 만 노출, 둘 사이 가상 링크 합성(루틴 R/W를 모듈로 압축).
- * (spec 021: 건강 보기는 테이블 제거 → 프리셋 폐기, risk_level 루틴만 속성로드로 표시.)
+ * (spec 059: 건강 보기 프리셋 'health-rw' 삭제 — 화면 전체를 위험색으로 칠해 정작 봐야 할 결합이
+ *  묻혔다. 실제 건강 악화를 보여주는 화면은 별도 UI/UX 로 다시 설계한다.
+ *  영역을 노드로 접는 'area-relation' 프리셋도 폐기 — 영역은 노드가 아니라 헐(테두리)이다.)
  */
-export type CanvasPreset = 'module-interaction' | 'health-rw' | null
+export type CanvasPreset = 'module-interaction' | null
 
 /** 노드별 계층 조상(패키지) — 헐/클러스터(spec 021·022) 그룹핑용.
  * (fileKey/fileLabel/packageLabel 제거 — 유일 소비자였던 '영역(구조)' 보기 삭제, 2026-07-16.) */
@@ -55,6 +59,9 @@ export const useCanvasStore = defineStore('canvas', () => {
 
   /** 캔버스에 표시되는 노드 ID 집합. 여기 있는 것만 NvlGraph 에 넘어간다. */
   const canvasNodeIds = ref<Set<string>>(new Set())
+
+  /** 펼침 상태(spec 059) — 모듈간 상호작용 보기에서 어느 모듈을 열어 놨는가. */
+  const expandedModuleIds = ref<Set<string>>(new Set())
 
   /** 활성 프리셋. null 이면 일반 모드. */
   const presetMode = ref<CanvasPreset>(null)
@@ -115,29 +122,6 @@ export const useCanvasStore = defineStore('canvas', () => {
       funcToModule.set(funcNode.id, moduleNode.id)
     }
     return { funcToModule, childToParent }
-  }
-
-  /**
-   * 구문 노드 → 소유 **루틴** id 해소기(건강 보기용). PARENT_OF 를 거슬러 올라가 funcToModule
-   * 키(=루틴)를 처음 만나면 그 루틴을 반환. 못 찾으면 null. memoize.
-   * (모듈간의 resolveModule 은 루틴의 *그릇*을 반환 — 여기선 루틴 자체가 필요해 별도.)
-   */
-  function makeRoutineResolver(funcToModule: Map<string, string>, childToParent: Map<string, string>) {
-    const cache = new Map<string, string | null>()
-    return function resolveRoutine(nodeId: string): string | null {
-      const path: string[] = []
-      const seen = new Set<string>()
-      let cur: string | undefined = nodeId
-      let result: string | null = null
-      while (cur !== undefined && !seen.has(cur)) {
-        const memo = cache.get(cur)
-        if (memo !== undefined) { result = memo; break }
-        if (funcToModule.has(cur)) { result = cur; break }   // cur 자체가 루틴
-        seen.add(cur); path.push(cur); cur = childToParent.get(cur)
-      }
-      for (const id of path) cache.set(id, result)
-      return result
-    }
   }
 
   function buildModuleInteractionGraph(): GraphData {
@@ -281,69 +265,60 @@ export const useCanvasStore = defineStore('canvas', () => {
       })
     }
 
+    // ── 펼친 모듈의 루틴 드러내기 (spec 059 US3) ────────────────────────────
+    // 기본은 모듈 단위로 접힌 상태다. 사용자가 더블클릭한 모듈만 그 안의 루틴을 드러내고,
+    // 그 루틴이 실제로 닿는 관계(CALLS / 테이블 R/W)를 함께 그린다. 전체 펼치기는 없다 —
+    // 한 번에 다 펼치면 지금 고치려는 헤어볼로 되돌아간다.
+    for (const moduleId of expandedModuleIds.value) {
+      if (!presentIds.has(moduleId)) continue
+      const routineIds: string[] = []
+      for (const link of projectStore.linkMap.values()) {
+        if (link.type !== 'HAS_MEMBER' || link.source !== moduleId) continue
+        const routine = projectStore.nodeMap.get(link.target)
+        if (!routine) continue
+        if (!(routine.labels || []).some(l => CALLABLE_LABELS.has(l))) continue
+        if (!presentIds.has(routine.id)) { nodes.push(routine); presentIds.add(routine.id) }
+        routineIds.push(routine.id)
+        // 모듈 → 자기 루틴: 소속을 보여주는 선. 같은 영역 안이라 흐리게 그려진다.
+        links.push({
+          id: `expand:HAS_MEMBER:${moduleId}->${routine.id}`,
+          source: moduleId,
+          target: routine.id,
+          type: 'HAS_MEMBER',
+          properties: { virtual: true },
+        })
+      }
+
+      // 드러난 루틴이 닿는 곳 — 이미 화면에 있는 대상과만 잇는다(새 노드를 추가로 끌어오지 않는다).
+      const routineSet = new Set(routineIds)
+      for (const link of projectStore.linkMap.values()) {
+        const fromRoutine = routineSet.has(link.source)
+        if (!fromRoutine) continue
+        if (link.type === 'CALLS') {
+          const calleeModule = resolveModule(link.target)
+          if (calleeModule && presentIds.has(calleeModule) && calleeModule !== moduleId) {
+            links.push({
+              id: `expand:CALLS:${link.source}->${calleeModule}`,
+              source: link.source, target: calleeModule, type: 'CALLS',
+              properties: { virtual: true },
+            })
+          }
+          continue
+        }
+        if (!FUNCTION_TO_TABLE_REL.has(link.type)) continue
+        if (!presentIds.has(link.target)) continue
+        links.push({
+          id: `expand:${link.type}:${link.source}->${link.target}`,
+          source: link.source, target: link.target, type: link.type,
+          properties: { ...(link.properties || {}), virtual: true },
+        })
+      }
+    }
+
     return { nodes, links }
   }
 
-  /**
-   * 건강 보기 가상 그래프(spec 022) — **위험(risk_level) 루틴 + 그들이 닿는 모든 관계**를 보여준다.
-   * 위험한 코드가 어떤 테이블을 R/W 하고 어떤 루틴을 호출하는지(호출 사용처) 한눈에.
-   *   위험 루틴 -[READS/WRITES]-> TABLE  (구문→루틴 해소 후 루틴 단위로 집계)
-   *   위험 루틴 -[CALLS]-> 루틴         (한쪽이라도 위험이면 포함)
-   * 관계가 없는 고립 위험 루틴도 포함(빠짐없이). 색은 colorMode='health'(위험도)로 칠해진다.
-   */
-  function buildHealthGraph(): GraphData {
-    const { funcToModule, childToParent } = buildModuleIndexes()
-    const resolveRoutine = makeRoutineResolver(funcToModule, childToParent)
-    const isRisk = (id: string): boolean => {
-      const r = projectStore.nodeMap.get(id)?.properties?.risk_level
-      return r === 'low' || r === 'medium' || r === 'high'
-    }
 
-    const ids = new Set<string>()
-    const links: GraphLink[] = []
-
-    // 위험 루틴의 R/W (구문 발 → 소유 루틴으로 끌어올림, 루틴×테이블×타입 dedup)
-    const seenRW = new Set<string>()
-    for (const link of projectStore.linkMap.values()) {
-      if (!FUNCTION_TO_TABLE_REL.has(link.type)) continue
-      const routine = resolveRoutine(link.source)
-      if (!routine || !isRisk(routine)) continue
-      const table = projectStore.nodeMap.get(link.target)
-      if (!table || !hasLabel(table, 'TABLE')) continue
-      const key = `${link.type} ${routine} ${table.id}`
-      if (seenRW.has(key)) continue
-      seenRW.add(key)
-      ids.add(routine); ids.add(table.id)
-      links.push({
-        id: `vh:${link.type}:${routine}->${table.id}`,
-        source: routine, target: table.id, type: link.type,
-        properties: { ...(link.properties || {}), virtual: true },
-      })
-    }
-
-    // 위험 루틴의 CALL (양끝 루틴 해소, 한쪽이라도 위험이면 포함)
-    const seenCall = new Set<string>()
-    for (const link of projectStore.linkMap.values()) {
-      if (link.type !== 'CALLS') continue
-      const from = resolveRoutine(link.source), to = resolveRoutine(link.target)
-      if (!from || !to || from === to) continue
-      if (!isRisk(from) && !isRisk(to)) continue
-      const key = `${from} ${to}`
-      if (seenCall.has(key)) continue
-      seenCall.add(key)
-      ids.add(from); ids.add(to)
-      links.push({ id: `vh:CALLS:${from}->${to}`, source: from, target: to, type: 'CALLS', properties: { virtual: true } })
-    }
-
-    // 고립 위험 루틴도 포함(관계 없어도 빠짐없이)
-    for (const node of projectStore.nodeMap.values()) {
-      if (isRisk(node.id)) ids.add(node.id)
-    }
-
-    const nodes: GraphNode[] = []
-    for (const id of ids) { const n = projectStore.nodeMap.get(id); if (n) nodes.push(n) }
-    return { nodes, links: links.filter(l => ids.has(l.source) && ids.has(l.target)) }
-  }
 
   /**
    * 계층 조상 맵 (spec 021) — 노드별 {파일, 패키지} 그룹 키/라벨. 중첩 헐의 단일 도출처(DRY).
@@ -374,6 +349,40 @@ export const useCanvasStore = defineStore('canvas', () => {
     return map
   })
 
+  /**
+   * 테이블 → 소속 영역(패키지) 키 (spec 059).
+   *
+   * 테이블은 여러 영역이 함께 쓰는 공용 자산이지만 화면에 그리려면 소속이 하나 있어야 한다.
+   * 예전에는 모든 테이블을 `__tables__` 한 구역에 몰아넣었는데, 그 구역이 선을 화면 가로로 길게
+   * 늘여 정작 봐야 할 결합을 가렸다. 그래서 **자기를 가장 많이 쓰는 영역의 테두리 안**으로 녹인다.
+   *
+   * 주인 판정(사업 결정 2026-07-21): **쓰기가 가장 많은 영역**. 쓰기가 같으면 읽기가 많은 쪽.
+   * 그래도 앞선 영역이 유일하지 않으면 주인을 정하지 않는다 — 데이터가 말해주지 않는 소유권을
+   * 만들어내지 않는다(실측: 테이블 22개 중 20개는 갈리고 2개는 완전 동률).
+   *
+   * R/W 의 출발점은 루틴일 수도(Framework) 중첩 구문일 수도(DBMS) 있어 PARENT_OF 를 거슬러
+   * 소유 루틴을 찾는다. 이 한 식이 두 전략을 함께 덮으므로 전략 분기가 없다.
+   */
+  const tableAreaMap = computed<Map<string, string | null>>(() => {
+    const hmap = hierarchyMap.value
+    const owners = computeTableOwners({
+      nodes: [...projectStore.nodeMap.values()],
+      links: [...projectStore.linkMap.values()],
+      routineLabels: CALLABLE_LABELS,
+      tableLabel: 'TABLE',
+      // 루틴 → 영역: 계층맵이 이미 파일→패키지를 해소해 둔다(사본 0).
+      areaOfRoutine: routineId => hmap.get(routineId)?.packageKey ?? null,
+    })
+    const result = new Map<string, string | null>()
+    for (const [tableId, own] of owners) result.set(tableId, own.ownerArea)
+    return result
+  })
+
+  /** 헐·클러스터가 쓰는 테이블 소속 키. 주인이 없거나 아무도 안 쓰면 null(그룹 미배정). */
+  function tableAreaKey(tableId: string): string | null {
+    return tableAreaMap.value.get(tableId) ?? null
+  }
+
   /** NvlGraph 에 전달할 부분집합. 프리셋이 활성화되면 가상 그래프를 반환. */
   // 캔버스가 따라갈 링크 — linkMap(날것 전부)에서 기본 숨김 타입을 거른다. "숨김 요소 표시"면
   // 거르지 않고 메타·보조 링크까지 전부(neo4j 그대로). graphData 와 동일한 단일 정의(graphVisibility).
@@ -386,12 +395,24 @@ export const useCanvasStore = defineStore('canvas', () => {
     return out
   }
 
+  /** 패널 칩이 활성일 때만 관계 allowlist를 만든다. 일반 캔버스는 기존 끝점 기반 관계 표시를 유지한다. */
+  const panelProjection = computed(() => {
+    if (loadedLabels.value.size === 0 && loadedRelTypes.value.size === 0) return null
+    const eligibleNodes: GraphNode[] = []
+    for (const node of projectStore.nodeMap.values()) {
+      if (!isSystemNode(node)) eligibleNodes.push(node)
+    }
+    return buildPanelGraphProjection(
+      eligibleNodes,
+      visibleLinks(),
+      loadedLabels.value,
+      loadedRelTypes.value,
+    )
+  })
+
   const canvasGraphData = computed<GraphData>(() => {
     if (presetMode.value === 'module-interaction') {
       return excludeSystemGraph(buildModuleInteractionGraph())
-    }
-    if (presetMode.value === 'health-rw') {
-      return excludeSystemGraph(buildHealthGraph())
     }
 
     // 캔버스는 "숨김 요소 표시" 토글과 무관 — 항상 사용자가 올린 부분집합(canvasNodeIds)만 렌더.
@@ -403,8 +424,13 @@ export const useCanvasStore = defineStore('canvas', () => {
       if (ids.has(node.id)) nodes.push(node)
     }
     const links: GraphLink[] = []
+    const allowedPanelLinkIds = panelProjection.value?.linkIds
     for (const link of visibleLinks()) {
-      if (ids.has(link.source) && ids.has(link.target)) links.push(link)
+      if (
+        ids.has(link.source)
+        && ids.has(link.target)
+        && (!allowedPanelLinkIds || allowedPanelLinkIds.has(link.id))
+      ) links.push(link)
     }
     return excludeSystemGraph({ nodes, links })
   })
@@ -462,6 +488,7 @@ export const useCanvasStore = defineStore('canvas', () => {
   function clearCanvas(): void {
     canvasNodeIds.value = new Set()
     presetMode.value = null
+    collapseAll()
   }
 
   /**
@@ -511,6 +538,30 @@ export const useCanvasStore = defineStore('canvas', () => {
     if (mode !== null) {
       canvasNodeIds.value = new Set()
     }
+    collapseAll()   // 보기 전환 시 이전 펼침 잔상 0 (spec 059)
+  }
+
+  /** 모든 펼침 해제. 보기 전환·캔버스 비우기에서 공통으로 쓴다. */
+  function collapseAll(): void {
+    expandedModuleIds.value = new Set()
+  }
+
+  /**
+   * 층 한 단계 펼치기(spec 059 FR-009~012) — 지목한 대상 하나만 연다.
+   * 영역이면 그 영역의 모듈을, 모듈이면 그 모듈의 루틴을, 루틴이면 그 루틴이 닿는 대상을 드러낸다.
+   * 새 루틴을 열면 이전 루틴은 자동으로 접힌다(단수 상태).
+   * 이미 열린 대상을 다시 누르면 접는다.
+   */
+  function expandLayer(nodeId: string): void {
+    const node = projectStore.nodeMap.get(nodeId)
+    if (!node) return
+    const labels = (node.labels || []).map(l => l.toUpperCase())
+    // 모듈만 펼침 대상이다. 영역은 노드가 아니라 테두리(헐)이고, 루틴 아래(구문)는 캔버스에
+    // 올리지 않는다 — 한 번에 다 펼치면 지금 고치려는 헤어볼로 되돌아간다.
+    if (!labels.some(l => CONTAINER_LABELS.has(l))) return
+    const next = new Set(expandedModuleIds.value)
+    next.has(nodeId) ? next.delete(nodeId) : next.add(nodeId)
+    expandedModuleIds.value = next
   }
 
   /**
@@ -541,16 +592,60 @@ export const useCanvasStore = defineStore('canvas', () => {
    * 여러 개 누르면 누적(union). 보기모드(preset)는 해제한다(섞임·경고 방지).
    */
   function rebuildPanelLoad(): void {
-    const ids = new Set<string>()
+    canvasNodeIds.value = new Set(panelProjection.value?.nodeIds ?? [])
+  }
+  /**
+   * 층 칩(영역/모듈/루틴) 토글 — spec 059.
+   *
+   * 층은 언어마다 이름이 다른 종류 라벨(FILE/CLASS/PACKAGE_BODY…)을 하나로 묶어 부르는 이름이다.
+   * 판정 집합은 nodeClassify 단일 정의처가 소유하고, 여기서는 그 집합을 **실제 라벨들로 펼쳐**
+   * 기존 라벨 로드 기계에 그대로 넘긴다 — 새 투영 경로를 만들지 않는다(DRY).
+   */
+  const LAYER_LABELS: Record<string, ReadonlySet<string>> = {
+    영역: new Set(['PACKAGE']),
+    모듈: CONTAINER_LABELS,
+    루틴: CALLABLE_LABELS,
+  }
+
+  /** 화면에 실제로 존재하는 층만 셈한다. 없는 층은 칩을 만들지 않는다. */
+  function layerCounts(): Map<string, number> {
+    const counts = new Map<string, number>()
     for (const node of projectStore.nodeMap.values()) {
       if (isSystemNode(node)) continue
-      if ((node.labels || []).some(l => loadedLabels.value.has(l))) ids.add(node.id)
+      const labels = (node.labels || []).map(l => l.toUpperCase())
+      for (const [layer, members] of Object.entries(LAYER_LABELS)) {
+        if (labels.some(l => members.has(l))) counts.set(layer, (counts.get(layer) ?? 0) + 1)
+      }
     }
-    for (const link of visibleLinks()) {
-      if (loadedRelTypes.value.has(link.type)) { ids.add(link.source); ids.add(link.target) }
-    }
-    canvasNodeIds.value = ids
+    return counts
   }
+
+  /** 그 층이 지금 로드돼 있는가 — 구성 라벨이 하나라도 켜져 있으면 활성으로 본다. */
+  function isLayerLoaded(layer: string): boolean {
+    const members = LAYER_LABELS[layer]
+    if (!members) return false
+    for (const label of loadedLabels.value) {
+      if (members.has(label.toUpperCase())) return true
+    }
+    return false
+  }
+
+  function toggleLayerLoad(layer: string): void {
+    const members = LAYER_LABELS[layer]
+    if (!members) return
+    presetMode.value = null
+    const next = new Set(loadedLabels.value)
+    const turnOff = isLayerLoaded(layer)
+    for (const node of projectStore.nodeMap.values()) {
+      for (const label of node.labels || []) {
+        if (!members.has(label.toUpperCase())) continue
+        turnOff ? next.delete(label) : next.add(label)
+      }
+    }
+    loadedLabels.value = next
+    rebuildPanelLoad()
+  }
+
   function toggleLabelLoad(label: string): void {
     presetMode.value = null
     const s = new Set(loadedLabels.value)
@@ -578,6 +673,9 @@ export const useCanvasStore = defineStore('canvas', () => {
     loadedRelTypes,
     toggleLabelLoad,
     toggleRelLoad,
+    toggleLayerLoad,
+    isLayerLoaded,
+    layerCounts,
     clearPanelLoad,
     addNodeToCanvas,
     expandNodeOnCanvas,
@@ -589,5 +687,9 @@ export const useCanvasStore = defineStore('canvas', () => {
     setPreset,
     isolateLabel,
     hierarchyMap,
+    tableAreaKey,
+    expandedModuleIds,
+    expandLayer,
+    collapseAll,
   }
 })
