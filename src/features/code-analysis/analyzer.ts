@@ -99,63 +99,67 @@ function convertNeo4jRelationship(
   }
 }
 
-/** 분석 진행 7단계(analyzer analysis_flow step1~step7) — 표시 순서대로. */
+/** Analyzer 최종 8단계 — 표시 순서대로. */
 const PHASES = [
   'DDL 파싱',
   'AST 적재',
-  '코드베이스 스캔',
+  '외부 파일 적재',
+  '프로젝트 스캔',
   '관계 연결',
   '분석 컨텍스트 구성',
   '코드 분석',
   '후처리',
 ] as const
 
-/** analyzer leaf step(node_done.node) → 7단계 인덱스. 키는 실제 emit 노드명. */
+/** analyzer leaf step(node_done.node) → 8단계 인덱스. 키는 실제 emit 노드명. */
 const STEP_TO_PHASE: Record<string, number> = {
   parse_ddl_step: 0,
   load_ast_step: 1,
-  scan_codebase_step: 2,
-  link_deterministic_step: 3,
-  link_calls_by_name_step: 3,
-  link_residual_patterns_step: 3,
-  link_dbms_tables_step: 3,
-  link_calls_by_ast_step: 3,
-  build_context_step: 4,
-  fetch_table_samples_step: 4,
-  analyze_code_step: 5,
-  summarize_module_step: 6,
-  enrich_table_description_step: 6,
-  enrich_lineage_from_catalog_step: 6,
-  build_components_step: 6,
-  health_metrics_step: 6,
-  embed_step: 6,
+  load_external_step: 2,
+  scan_codebase_step: 3,
+  scan_external_step: 3,
+  link_deterministic_step: 4,
+  link_calls_by_name_step: 4,
+  link_residual_patterns_step: 4,
+  link_dbms_tables_step: 4,
+  link_calls_by_ast_step: 4,
+  link_external_step: 4,
+  build_context_step: 5,
+  fetch_table_samples_step: 5,
+  analyze_code_step: 6,
+  summarize_module_step: 7,
+  enrich_table_description_step: 7,
+  enrich_lineage_from_catalog_step: 7,
+  build_components_step: 7,
+  health_metrics_step: 7,
+  build_glossary_step: 7,
+  embed_step: 7,
 }
 
 /** 분석 파이프라인 leaf 실행 순서(전략별) — 단계 진행 표시의 단일 진실.
  *  "가장 최근 완료 leaf 의 *다음* leaf" 가 곧 지금 진행 중 단계 → 완료된 단계가 active 로 안 남고
  *  다음 단계가 진행중으로 표시됨. 다중 leaf 단계(관계연결/후처리)에서 overshoot 없음. */
 const ORDERED_LEAVES_FRAMEWORK = [
-  'parse_ddl_step', 'load_ast_step', 'scan_codebase_step',
-  'link_deterministic_step', 'link_calls_by_name_step', 'link_residual_patterns_step',
+  'parse_ddl_step', 'load_ast_step', 'load_external_step',
+  'scan_codebase_step', 'scan_external_step',
+  'link_deterministic_step', 'link_calls_by_name_step', 'link_residual_patterns_step', 'link_external_step',
   'build_context_step', 'fetch_table_samples_step', 'analyze_code_step',
   'summarize_module_step', 'enrich_table_description_step', 'build_components_step',
-  'health_metrics_step', 'embed_step',
+  'health_metrics_step', 'build_glossary_step', 'embed_step',
 ] as const
 const ORDERED_LEAVES_DBMS = [
-  'parse_ddl_step', 'load_ast_step',
-  'link_dbms_tables_step', 'link_calls_by_ast_step',
+  'parse_ddl_step', 'load_ast_step', 'load_external_step', 'scan_external_step',
+  'link_dbms_tables_step', 'link_calls_by_ast_step', 'link_external_step',
   'build_context_step', 'fetch_table_samples_step', 'analyze_code_step',
   'summarize_module_step', 'enrich_table_description_step', 'enrich_lineage_from_catalog_step',
-  'build_components_step', 'health_metrics_step', 'embed_step',
+  'build_components_step', 'health_metrics_step', 'build_glossary_step', 'embed_step',
 ] as const
 
 /** leaf 실행 순서에서 다음에 실행할(=현재 진행 중) leaf step 이름. 전부 완료면 null. */
 function nextRunningLeaf(doneLeaves: Set<string>, strategy: string | undefined): string | null {
   const order = strategy === 'dbms' ? ORDERED_LEAVES_DBMS : ORDERED_LEAVES_FRAMEWORK
-  let maxDoneIdx = -1
-  for (let i = 0; i < order.length; i++) if (doneLeaves.has(order[i])) maxDoneIdx = i
-  const nextIdx = maxDoneIdx + 1                    // 미상/스킵에 견고 — 최고 완료 인덱스 다음
-  return nextIdx < order.length ? order[nextIdx] : null
+  // 병렬 load와 후처리 group은 완료 순서가 바뀔 수 있으므로 앞선 미완료 leaf를 고른다.
+  return order.find(leaf => !doneLeaves.has(leaf)) ?? null
 }
 
 /** 완료 leaf 집합 → 지금 진행 중 단계 인덱스(완료 leaf 다음 leaf 의 단계). 전부 완료면 PHASES.length. */
@@ -168,12 +172,15 @@ function runningPhaseIndex(doneLeaves: Set<string>, strategy: string | undefined
 const STEP_SUBLABEL: Record<string, string> = {
   parse_ddl_step: '테이블 정의 읽는 중',
   load_ast_step: '코드 구조 불러오는 중',
+  load_external_step: '외부 파일 읽는 중',
   scan_codebase_step: '소스 훑어보는 중',
+  scan_external_step: '외부 파일 형식 확인 중',
   link_deterministic_step: '확실한 관계 잇는 중',
   link_calls_by_name_step: '함수 호출 분석 중',
   link_residual_patterns_step: '남은 관계 보완 중',
   link_dbms_tables_step: '테이블 사용 연결 중',
   link_calls_by_ast_step: '호출 구조 분석 중',
+  link_external_step: '외부 파일 연결하는 중',
   build_context_step: '분석 맥락 만드는 중',
   fetch_table_samples_step: '테이블 예시 수집 중',
   analyze_code_step: 'AI가 코드 의미 분석 중',
@@ -182,6 +189,7 @@ const STEP_SUBLABEL: Record<string, string> = {
   enrich_lineage_from_catalog_step: '데이터 흐름 보강 중',
   build_components_step: '컴포넌트 묶는 중',
   health_metrics_step: '품질 지표 계산 중',
+  build_glossary_step: '용어 사전 만드는 중',
   embed_step: '검색 색인 만드는 중',
 }
 
@@ -190,23 +198,32 @@ const LABEL_KIND_KO: Record<string, string> = {
   FUNCTION: '함수', METHOD: '메서드', PROCEDURE: '프로시저', TRIGGER: '트리거',
   FILE: '파일', PACKAGE: '패키지', MODULE: '모듈', GLOBAL_VARIABLE: '전역변수',
   TABLE: '테이블', COLUMN: '컬럼',
+  PROJECT_FILE: '외부 파일', SQL_STATEMENT: 'SQL 구문', CONFIG_SECTION: '설정',
+  ARTIFACT_CHUNK: '아티팩트', CHUNK: '외부 청크',
+  DOCUMENT: '문서', DOC_SECTION: '문서 구역', DOC_CHUNK: '문서 청크',
+  UNRESOLVED_REF: '미해결 참조', CANDIDATE_LINK: '후보 연결',
 }
 
 /** processing_event.step → 그 단계에 맞는 사용자 동작 문구. 미등록 step 은 '처리 중' 폴백. */
 const STEP_VERB: Record<string, string> = {
-  'step5.build_context': '분석 중',
-  'step6.analyze_code': '분석 중',
-  'step6.module_pre_analysis': '살펴보는 중',
-  'step7.summarize_module': '정리 중',
-  'step7.enrich_table_description': '설명 채우는 중',
-  'step7.build_components': '묶는 중',
+  'step3.load_external': '읽는 중',
+  'step4.scan_external': '형식 확인 중',
+  'step5.link_external': '연결 중',
+  'step6.build_context': '분석 중',
+  'step7.analyze_code': '분석 중',
+  'step7.module_pre_analysis': '살펴보는 중',
+  'step8.summarize_module': '정리 중',
+  'step8.enrich_table_description': '설명 채우는 중',
+  'step8.build_components': '묶는 중',
 }
 
 /** 종류(한국어) → 콘솔 이모지. 미등록은 🔹. */
 const KIND_EMOJI: Record<string, string> = {
   '함수': '🧠', '메서드': '🧠', '프로시저': '🧠', '트리거': '🧠', '코드': '🧠', '코드 묶음': '🧠',
   '모듈': '📦', '패키지': '📦', '파일': '📄', '테이블': '🗂️', '컬럼': '🗂️',
-  '전역변수': '🔧', '구성요소': '🧩',
+  '전역변수': '🔧', '구성요소': '🧩', '외부 파일': '📎', 'SQL 구문': '🧾',
+  '설정': '⚙️', '아티팩트': '🧱', '외부 청크': '📌', '문서': '📚',
+  '문서 구역': '📑', '문서 청크': '📄', '미해결 참조': '⚠️', '후보 연결': '🔗',
 }
 
 /** 노드 properties + labels 에서 사람이 읽기 쉬운 이름 추출 */
@@ -217,6 +234,10 @@ function resolveNodeName(
 ): string {
   const name = properties['name']
   if (name) return String(name)
+  const key = properties['key']
+  if (key) return String(key)
+  const title = properties['title']
+  if (title) return String(title)
   const kind = extractSubLabel(labels) || (properties['type'] as string) || ''
   const line = properties['start_line']
   if (kind) return line != null && line !== 0 ? `${kind} [${line}]` : kind
@@ -674,6 +695,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   /** entity_kind → 노드 라벨을 못 찾을 때 쓸 폴백 한글 종류. 미등록은 '항목'. */
   const PROCESSING_KIND_KO: Record<string, string> = {
     CodeNode: '코드', Batch: '코드 묶음', Module: '모듈', Table: '테이블', Component: '구성요소',
+    ProjectFile: '외부 파일', ExternalChunk: '외부 청크', DocumentNode: '문서',
   }
 
   /**
@@ -738,7 +760,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     const unit = rawKind === 'Batch' ? '건' : '개'
     const emoji = KIND_EMOJI[kind] ?? '🔹'
     // "무엇을" 처리 중인지 — 방금 대상의 사람이름(스트림으로 nodeMap 에 이미 적재됨). 없으면 생략.
-    const name = (node?.properties?.name as string) || ''
+    const name = node ? resolveNodeName(node.properties, node.labels, node.id) : ''
     const tail = name ? ` — '${name}'` : ''
     addMessage('message', `${emoji} ${kind} ${count}${unit} ${verb}${tail}`)
   }
@@ -764,7 +786,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     clearGraphEvents()
     resetProgressTracking()
     // % 추정용 예상 leaf 개수(전략별). 바는 추정(완료 시 100% 보정), 단계 상태는 currentPhaseIndex.
-    expectedLeafCount.value = analyzeMeta.value.strategy === 'dbms' ? 13 : 14
+    expectedLeafCount.value = analyzeMeta.value.strategy === 'dbms' ? 17 : 18
     doneLeafCount.value = 0
     addMessage('message', '🔍 코드 분석을 시작했어요 — 차근차근 진행할게요. 잠시만 기다려 주세요 🙂')
 

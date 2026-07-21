@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": [
+    "../../src/vite-env.d.ts",
+    "../../src/features/code-analysis/analyzer.ts",
+    "../../src/shared/utils/graphVisibility.ts"
+  ],
+  "references": []
+}
