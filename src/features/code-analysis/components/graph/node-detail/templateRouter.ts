@@ -11,7 +11,7 @@
  *   - DBMS DML : SELECT/INSERT/UPDATE/DELETE/MERGE/UNION/...
  *   - DBMS    : PROCEDURE/FUNCTION/TRIGGER (DBMS 의 코드 단위)
  *   - 공통     : Table/Column/Schema/DBLink/Rule/Example/Question/Actor
- *   - 기타     : ARTIFACT_CHUNK/CONFIG_SECTION/SQL_STATEMENT
+ *   - 기타     : EXTERNAL_CHUNK (spec 078 외부 의미 청크)
  *
  * sub-label (`type` 속성) 추가 분기:
  *   - MODULE.FILE / MODULE.DEFINE → 파일 카드 (모듈 아닌 물리 파일)
@@ -37,7 +37,7 @@ export type TemplateType =
 const ATTACHED_LABELS = new Set(['RULE', 'EXAMPLE', 'QUESTION', 'Actor'])
 // 변수/상수·데이터타입 집합은 `nodeClassify` 가 단일 진실 — 여기서 다시 정의하지 않는다
 // (종전엔 여기·nodeIdentity 가 각자 목록을 들어 서로 달랐다 — spec 045 FR-012).
-const NON_CODE_LABELS = new Set(['ARTIFACT_CHUNK', 'CONFIG_SECTION'])
+const NON_CODE_LABELS = new Set(['EXTERNAL_CHUNK'])
 const DML_LABELS = new Set([
   'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'MERGE', 'UNION',
   'EXECUTE_IMMEDIATE', 'CTE', 'FETCH',
@@ -79,7 +79,6 @@ export function pickTemplate(node: GraphNode): TemplateType {
 
   // 6. SQL DML
   if (DML_LABELS.has(primary)) return 'sqlStatement'
-  if (primary === 'SQL_STATEMENT') return 'sqlStatement'
 
   // 7. 변수/상수 (타입집합)
   if (labels.some(l => VARIABLE_LABELS.has(l))) return 'variable'

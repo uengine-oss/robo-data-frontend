@@ -60,25 +60,30 @@ assert.equal(analyzer.STEP_TO_PHASE.link_external_step, 4)
 assert.equal(analyzer.STEP_SUBLABEL.load_external_step, '외부 파일 읽는 중')
 assert.equal(analyzer.STEP_SUBLABEL.link_external_step, '외부 파일 연결하는 중')
 
-assert.equal(analyzer.resolveNodeName({ key: 'shop.Order.find' }, ['SQL_STATEMENT'], 'opaque:1'), 'shop.Order.find')
-assert.equal(analyzer.resolveNodeName({ title: '주문 정책' }, ['DOCUMENT'], 'opaque:2'), '주문 정책')
+// spec 078 — 외부 청크는 name(첫 key)으로 표시된다.
+assert.equal(analyzer.resolveNodeName({ name: 'getOrderDetail' }, ['EXTERNAL_CHUNK'], 'opaque:1'), 'getOrderDetail')
 assert.equal(analyzer.resolveNodeName({}, [], 'opaque:3'), 'opaque:3')
-for (const label of ['PROJECT_FILE', 'SQL_STATEMENT', 'CONFIG_SECTION', 'ARTIFACT_CHUNK', 'DOCUMENT']) {
+for (const label of ['PROJECT_FILE', 'EXTERNAL_CHUNK']) {
   const kind = analyzer.LABEL_KIND_KO[label]
   assert.ok(kind, `${label} needs a display kind`)
   assert.ok(analyzer.KIND_EMOJI[kind], `${label} needs an icon`)
 }
-
-for (const label of [
-  'PROJECT_FILE', 'SQL_STATEMENT', 'CONFIG_SECTION', 'ARTIFACT_CHUNK', 'CHUNK',
+// 폐기된 075 라벨은 표시 사전에 남아 있으면 안 된다.
+for (const removed of [
+  'SQL_STATEMENT', 'CONFIG_SECTION', 'ARTIFACT_CHUNK', 'CHUNK',
   'DOCUMENT', 'DOC_SECTION', 'DOC_CHUNK', 'UNRESOLVED_REF', 'CANDIDATE_LINK',
 ]) {
+  assert.equal(analyzer.LABEL_KIND_KO[removed], undefined, `${removed} must be removed`)
+}
+
+// 외부 노드는 기본 숨김, showHidden으로만 노출.
+for (const label of ['PROJECT_FILE', 'EXTERNAL_CHUNK']) {
   assert.equal(visibility.isNodeHidden({ id: label, labels: [label], properties: {} }), true, label)
 }
-for (const type of ['CALLS_SQL', 'USES_CONFIG', 'REFER_TO', 'MENTIONS', 'HAS_CHUNK', 'HAS_PART', 'HAS_SECTION']) {
-  assert.equal(visibility.isLinkHidden(type), true, type)
+// REFER_TO/HAS_CHUNK는 타입 숨김이 아니다 — endpoint(외부 노드) 가시성으로 걸러진다.
+// 따라서 Catalog의 TABLE-target REFER_TO 표시가 깨지지 않는다.
+for (const type of ['REFER_TO', 'HAS_CHUNK', 'READS', 'WRITES']) {
+  assert.equal(visibility.isLinkHidden(type), false, type)
 }
-assert.equal(visibility.isLinkHidden('READS'), false)
-assert.equal(visibility.isLinkHidden('WRITES'), false)
 
 console.log('[OK] external graph frontend contract')

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * SqlStatementCard.vue
- * DBMS DML (SELECT/INSERT/UPDATE/DELETE/MERGE/UNION 등) + Framework SQL_STATEMENT.
+ * DBMS DML (SELECT/INSERT/UPDATE/DELETE/MERGE/UNION 등) 구문 카드.
  */
 
 import { computed, ref } from 'vue'

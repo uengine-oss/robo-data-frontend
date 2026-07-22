@@ -4,8 +4,9 @@
  *
  * 백엔드 관계 타입 매트릭스:
  *   - 데이터 입력 (테이블 읽기)  : FROM / READS / REFER_TO / REFERS_TO
+ *     (REFER_TO 는 TABLE 계보와 외부 청크(spec 078) 공용 — 대상 라벨로 구분)
  *   - 데이터 출력 (테이블 쓰기)  : WRITES
- *   - 호출                       : CALLS / USES / CALLS_SQL
+ *   - 호출                       : CALLS / USES
  *   - 부착                       : HAS_MEMBER (그릇→루틴·데이터, 종류=노드 라벨) /
  *                                  HAS_COLUMN / HAS_RULE / HAS_EXAMPLE / HAS_QUESTION
  *   - FK                         : FK_TO_TABLE / FK_TO_COLUMN
@@ -35,7 +36,7 @@ export const OUTPUT_RELS: ReadonlySet<string> = new Set(['WRITES'])
 
 /** 호출 — 이 노드가 어느 함수/모듈을 부르는가. */
 export const CALL_RELS: ReadonlySet<string> = new Set([
-  'CALLS', 'USES', 'CALLS_SQL', 'USES_CONFIG',
+  'CALLS', 'USES',
 ])
 
 /** 부착 (HAS_*) — 이 노드가 자식으로 가진 노드들.

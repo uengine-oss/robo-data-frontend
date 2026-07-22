@@ -198,10 +198,7 @@ const LABEL_KIND_KO: Record<string, string> = {
   FUNCTION: '함수', METHOD: '메서드', PROCEDURE: '프로시저', TRIGGER: '트리거',
   FILE: '파일', PACKAGE: '패키지', MODULE: '모듈', GLOBAL_VARIABLE: '전역변수',
   TABLE: '테이블', COLUMN: '컬럼',
-  PROJECT_FILE: '외부 파일', SQL_STATEMENT: 'SQL 구문', CONFIG_SECTION: '설정',
-  ARTIFACT_CHUNK: '아티팩트', CHUNK: '외부 청크',
-  DOCUMENT: '문서', DOC_SECTION: '문서 구역', DOC_CHUNK: '문서 청크',
-  UNRESOLVED_REF: '미해결 참조', CANDIDATE_LINK: '후보 연결',
+  PROJECT_FILE: '외부 파일', EXTERNAL_CHUNK: '외부 청크',
 }
 
 /** processing_event.step → 그 단계에 맞는 사용자 동작 문구. 미등록 step 은 '처리 중' 폴백. */
@@ -221,9 +218,7 @@ const STEP_VERB: Record<string, string> = {
 const KIND_EMOJI: Record<string, string> = {
   '함수': '🧠', '메서드': '🧠', '프로시저': '🧠', '트리거': '🧠', '코드': '🧠', '코드 묶음': '🧠',
   '모듈': '📦', '패키지': '📦', '파일': '📄', '테이블': '🗂️', '컬럼': '🗂️',
-  '전역변수': '🔧', '구성요소': '🧩', '외부 파일': '📎', 'SQL 구문': '🧾',
-  '설정': '⚙️', '아티팩트': '🧱', '외부 청크': '📌', '문서': '📚',
-  '문서 구역': '📑', '문서 청크': '📄', '미해결 참조': '⚠️', '후보 연결': '🔗',
+  '전역변수': '🔧', '구성요소': '🧩', '외부 파일': '📎', '외부 청크': '📌',
 }
 
 /** 노드 properties + labels 에서 사람이 읽기 쉬운 이름 추출 */

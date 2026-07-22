@@ -37,9 +37,8 @@ export const HIDDEN_NODE_LABELS: ReadonlySet<string> = new Set([
   // Keep the default graph routine/table-focused; reveal these via showHidden.
   'IF', 'ELSE', 'LOOP', 'SWITCH', 'CASE', 'TRY', 'CATCH',
   'FUNCTION_CALL', 'NEW_INSTANCE', 'IMPORT', 'INCLUDE',
-  // External-file support graph — showHidden에서 원문 근거를 점검할 때만 노출.
-  'PROJECT_FILE', 'SQL_STATEMENT', 'CONFIG_SECTION', 'ARTIFACT_CHUNK', 'CHUNK',
-  'DOCUMENT', 'DOC_SECTION', 'DOC_CHUNK', 'UNRESOLVED_REF', 'CANDIDATE_LINK',
+  // External-file graph (spec 078) — showHidden에서 원문 근거를 점검할 때만 노출.
+  'PROJECT_FILE', 'EXTERNAL_CHUNK',
 ])
 
 /**
@@ -54,8 +53,8 @@ export const HIDDEN_LINK_TYPES: ReadonlySet<string> = new Set([
   'REFERENCES', 'INIT_BY',
   'HAS_RULE', 'HAS_EXAMPLE', 'HAS_QUESTION',
   'AFFECTS_TABLE', 'BRANCH',
-  'CALLS_SQL', 'USES_CONFIG', 'REFER_TO', 'MENTIONS',
-  'HAS_CHUNK', 'HAS_PART', 'HAS_SECTION',
+  // REFER_TO/HAS_CHUNK(spec 078)는 타입 숨김이 아니라 endpoint 노드 가시성으로 걸러진다 —
+  // 외부 청크가 숨겨져 있으면 링크도 안 보이고, TABLE-target REFER_TO는 그대로 표시된다.
 ])
 
 export function isNodeHidden(node: GraphNode): boolean {
