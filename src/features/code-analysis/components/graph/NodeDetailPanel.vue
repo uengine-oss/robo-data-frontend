@@ -12,9 +12,16 @@ import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import type { GraphNode, GraphLink, SearchCluster } from '@/shared/types'
 import { getNodeColor } from '@/shared/config/graphStyles'  // 통계용 — sortedNodeStats/Rel 색
-import { technicalNodeName, logicalNodeName } from '@/shared/utils/graphDisplay'
 import { kindOf } from '@/shared/utils/nodeLabels'  // 배지=종류(자기자신 라벨)만, 실제 노드색과 일치
-import { useSemanticSearchStore } from '@/features/code-analysis/stores/semanticSearch'
+import { useSemanticSearchStore } from '@/workflows/code-analysis'
+import {
+  filterNodesByIdentity,
+  nodeEndpointLabel,
+  nodeSearchPrimary,
+  nodeSearchSecondary,
+  projectRelationshipEndpoints,
+  projectRelationshipProperties,
+} from '@/features/code-analysis/nodeDetailProjection'
 import NodeDetailContent from './node-detail/NodeDetailContent.vue'
 
 // ============================================================================
@@ -53,12 +60,6 @@ interface Props {
   activeFilters?: string[]  // 캔버스에 로드된 노드 라벨(isolate)
   activeRelFilters?: string[]  // 캔버스에 로드된 관계 타입(isolate)
   allNodes?: GraphNode[]   // 전체 노드 목록 (검색용)
-}
-
-interface PropertyItem {
-  key: string
-  value: string
-  isMultiLine: boolean
 }
 
 // ============================================================================
@@ -160,71 +161,22 @@ const isSearchFocused = ref(false)
  * 이 선은 여러 원본 관계를 하나로 합친 것이라 **무엇 때문에 두 영역이 묶였는지**를 보여줘야
  * 한다(FR-007). 표에 없는 키는 원래 이름을 그대로 둔다 — 모르는 속성이 조용히 사라지지 않게.
  */
-const REL_PROPERTY_LABELS: Record<string, string> = {
-  count: '묶인 관계 수',
-  via_tables: '원인 테이블',
-  via_routines: '원인 루틴',
-  crosses_area: '영역을 넘음',
-  virtual: '합쳐진 선',
-  via_count: '경유 개수',
-  via_sample: '경유 예시',
-}
-
-/** 배열은 쉼표로, 참/거짓은 예/아니오로 — 원문 JSON 을 그대로 들이밀지 않는다. */
-function formatRelValue(value: unknown): string {
-  if (Array.isArray(value)) return value.length ? value.join(', ') : '(없음)'
-  if (typeof value === 'boolean') return value ? '예' : '아니오'
-  if (typeof value === 'object' && value !== null) return JSON.stringify(value, null, 2)
-  return String(value)
-}
-
-const relationshipProperties = computed<PropertyItem[]>(() => {
-  // 노드가 있으면 관계 속성은 절대 표시하지 않음
-  if (props.node) return []
-  if (!props.relationship) return []
-  
-  const propsList: PropertyItem[] = [{
-    key: '<id>',
-    value: props.relationship.id,
-    isMultiLine: false
-  }]
-  
-  if (props.relationship.properties) {
-    const propEntries = Object.entries(props.relationship.properties)
-      .map(([key, value]) => ({
-        key: REL_PROPERTY_LABELS[key] ?? key,
-        value: formatRelValue(value),
-        isMultiLine: typeof value === 'object' && !Array.isArray(value),
-      }))
-    propsList.push(...propEntries)
-  }
-  
-  return propsList
-})
+const relationshipProperties = computed(() => projectRelationshipProperties(
+  props.node,
+  props.relationship,
+))
 
 /** 관계 선택 시 표시할 raw 속성 목록(노드는 NodeDetailContent 카드로 렌더하므로 여기서 안 씀). */
 const properties = computed(() => relationshipProperties.value)
 
 /** 관계 클릭 시 양끝 노드 해소(spec 021) — allNodes 에서 source/target id 로 찾는다. */
-const relEndpoints = computed(() => {
-  const rel = props.relationship
-  if (!rel) return null
-  const nodes = props.allNodes ?? []
-  return {
-    from: nodes.find(n => n.id === rel.source),
-    to: nodes.find(n => n.id === rel.target),
-    fromId: rel.source,
-    toId: rel.target,
-  }
-})
+const relEndpoints = computed(() => projectRelationshipEndpoints(
+  props.relationship,
+  props.allNodes,
+))
 
 /** 끝점 노드 표시명 — `기술명 — 논리명`(논리명 있으면). 캔버스 밖이면 id 꼬리. */
-function endpointLabel(n: GraphNode | undefined, fallbackId: string): string {
-  if (!n) return fallbackId.includes(':') ? (fallbackId.split(':').pop() || fallbackId) : fallbackId
-  const tech = technicalNodeName(n)
-  const log = logicalNodeName(n)
-  return log && log !== tech ? `${tech} — ${log}` : tech
-}
+const endpointLabel = nodeEndpointLabel
 
 
 // ============================================================================
@@ -266,15 +218,7 @@ const sortedRelStats = computed(() => {
 
 /** 노드 이름 검색 결과 */
 const searchResults = computed(() => {
-  const query = nodeSearchQuery.value.trim().toLowerCase()
-  if (!query || !props.allNodes || props.allNodes.length === 0) return []
-  
-  return props.allNodes
-    .filter(node => {
-      const name = node.properties?.name?.toString().toLowerCase() || ''
-      const elementId = node.id?.toString().toLowerCase() || ''
-      return name.includes(query) || elementId.includes(query)
-    })
+  return filterNodesByIdentity(props.allNodes, nodeSearchQuery.value)
 })
 
 /** 검색 결과가 있는지 여부 */
@@ -419,37 +363,11 @@ function clearSearch(): void {
 /**
  * 검색 결과에 표시할 추가 정보 (테이블명, 스키마 등)
  */
-function getNodeSubInfo(node: GraphNode): string {
-  const props = node.properties || {}
-
-  // 소속(부모)은 id 계층에 인코딩됨 — COLUMN: "테이블.컬럼", FUNCTION: "패키지.모듈.함수".
-  // 마지막 '.' 앞이 소속. (식별자=id 통일, 소속 속성은 미저장)
-  const id = node.id?.toString() || ''
-  const lastDot = id.lastIndexOf('.')
-  if (lastDot > 0) return id.slice(0, lastDot)
-
-  // 폴백: 명시 속성(스키마/파일)
-  const parts: string[] = []
-  if (props.schema_name) parts.push(props.schema_name.toString())
-  if (props.file_path) parts.push(String(props.file_path).split(/[\\/]/).pop() || '')
-  return parts.filter(Boolean).join(' • ')
-}
-
 /** 검색 결과 1차 표시 — 논리명 우선(없으면 물리명). 길면 CSS ellipsis */
-function searchPrimary(node: GraphNode): string {
-  const p = node.properties || {}
-  return (p.logical_name || p.name || node.id || 'Unknown').toString()
-}
+const searchPrimary = nodeSearchPrimary
 
 /** 검색 결과 2차 줄 — (논리명을 1차로 썼으면) 물리명 · 소속. 길면 CSS ellipsis */
-function searchSecondary(node: GraphNode): string {
-  const p = node.properties || {}
-  const parts: string[] = []
-  if (p.logical_name && p.name && p.logical_name !== p.name) parts.push(p.name.toString())
-  const sub = getNodeSubInfo(node)
-  if (sub) parts.push(sub)
-  return parts.join(' · ')
-}
+const searchSecondary = nodeSearchSecondary
 
 
 </script>

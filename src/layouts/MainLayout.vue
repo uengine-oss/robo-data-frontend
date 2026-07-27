@@ -1,36 +1,62 @@
 <script setup lang="ts">
-import { computed, onMounted, inject } from 'vue'
+import { computed, defineAsyncComponent, inject, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import TopToolbar from '@/shared/components/TopToolbar.vue'
-import SideNav from '@/shared/components/SideNav.vue'
-import { NavigatorPanel } from '@/features/code-analysis'
-import FloatingProgressPanel from '@/shared/components/FloatingProgressPanel.vue'
+import TopToolbar from '@/app/layout/TopToolbar.vue'
+import SideNav from '@/app/navigation/SideNav.vue'
 import { RouterView } from 'vue-router'
-import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
-import { useSessionStore } from '@/shared/stores/session'
-import { useNavigatorStore } from '@/shared/stores/navigator'
+import {
+  FloatingProgressPanel,
+  useAnalyzerStore,
+  useNavigatorStore,
+} from '@/workflows/code-analysis'
+import { useAppNavigationStore } from '@/app/navigation/state'
 import { IconChevronRight } from '@/shared/icons'
+import { logger } from '@/shared/utils/logger'
+
+const NavigatorPanel = defineAsyncComponent(async () => (
+  await import('@/features/code-analysis/navigation')
+).NavigatorPanel)
 
 // host(robo-architect)에 임베드되면 architect 상단바를 쓰므로 analyzer 자체 TopToolbar 는 숨긴다.
 const isEmbedded = inject<boolean>('isEmbedded', false)
 
 const projectStore = useAnalyzerStore()
-const sessionStore = useSessionStore()
+const navigationStore = useAppNavigationStore()
 const navigatorStore = useNavigatorStore()
-const { activeTab } = storeToRefs(sessionStore)
+const { activeFeatureId } = storeToRefs(navigationStore)
 const { isPanelOpen: isNavOpen } = storeToRefs(navigatorStore)
 
 /** Navigator 는 「코드 그래프」 탭에서만 렌더. */
-const showNavigator = computed(() => activeTab.value === 'graph')
+const showNavigator = computed(() => activeFeatureId.value === 'graph')
+const ANALYSIS_PROGRESS_TABS = new Set(['upload', 'graph'])
+const showAnalysisProgress = computed(() => ANALYSIS_PROGRESS_TABS.has(activeFeatureId.value))
 
-// 앱 초기화 시 Neo4j에서 기존 그래프 데이터 로드
-onMounted(async () => {
-  try {
-    await projectStore.loadExistingGraphData()
-  } catch (error) {
-    console.warn('초기 그래프 데이터 로드 실패:', error)
-  }
-})
+let graphLoadPromise: Promise<void> | null = null
+let hasLoadedGraph = false
+
+async function ensureExistingGraphData(): Promise<void> {
+  if (hasLoadedGraph) return
+  if (graphLoadPromise) return graphLoadPromise
+
+  graphLoadPromise = (async () => {
+    try {
+      const result = await projectStore.loadExistingGraphData()
+      hasLoadedGraph = result !== 'failed'
+    } catch (error) {
+      logger.warn('기존 분석 그래프를 불러오지 못했습니다.', error)
+    } finally {
+      graphLoadPromise = null
+    }
+  })()
+
+  return graphLoadPromise
+}
+
+// Analyzer 그래프는 이를 실제 소비하는 화면에서만 로드한다.
+watch(activeFeatureId, featureId => {
+  if (!ANALYSIS_PROGRESS_TABS.has(featureId)) return
+  void ensureExistingGraphData()
+}, { immediate: true })
 </script>
 
 <template>
@@ -58,13 +84,13 @@ onMounted(async () => {
       </button>
 
       <!-- 메인 콘텐츠 -->
-      <main class="main-content">
+      <main class="main-content" tabindex="-1">
         <RouterView />
       </main>
     </div>
     
     <!-- 플로팅 진행 상태 패널 (전역) -->
-    <FloatingProgressPanel />
+    <FloatingProgressPanel v-if="showAnalysisProgress" />
   </div>
 </template>
 
@@ -83,6 +109,8 @@ onMounted(async () => {
   display: flex;
   overflow: hidden;
   position: relative;
+  min-width: 0;
+  min-height: 0;
 }
 
 .main-content {
@@ -90,6 +118,23 @@ onMounted(async () => {
   display: flex;
   overflow: hidden;
   background: var(--color-bg);
+  min-width: 0;
+  min-height: 0;
+
+  &:focus {
+    outline: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .main-body :deep(.navigator-panel) {
+    position: absolute;
+    inset: 0 auto 0 52px;
+    z-index: 55;
+    width: min(300px, calc(100% - 64px)) !important;
+    max-width: calc(100% - 64px);
+    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.35);
+  }
 }
 
 /* 네비게이터 닫힘 시 재열기 = SideNav 오른쪽 상단의 작은 둥근 토글 버튼(아키텍트식 ‹›).

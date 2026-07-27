@@ -13,8 +13,10 @@ import App from './App.vue'
 import router from './router'
 import './styles/main.scss'
 import { initializeAppSettings } from '@/shared/config/appSettings'
-import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
-import { useSessionStore, type Neo4jConnection } from '@/shared/stores/session'
+import { useAnalyzerStore } from '@/workflows/code-analysis'
+import { useRuntimeStore, type Neo4jConnection } from '@/shared/stores/runtime'
+import { FEATURE_NAVIGATION_KEY } from '@/shared/navigation/featureNavigation'
+import { createFeatureNavigationPort, useAppNavigationStore } from '@/app/navigation/state'
 
 let app: VueApp | null = null
 
@@ -38,6 +40,10 @@ export function mount(
   const pinia = createPinia()  // 이 앱 전용 Pinia 인스턴스 (host 와 격리)
   app.use(pinia)
   app.use(router)              // 이 앱 전용 Router 인스턴스 (host 와 격리)
+  app.provide(
+    FEATURE_NAVIGATION_KEY,
+    createFeatureNavigationPort(useAppNavigationStore(pinia)),
+  )
 
   // 경로 모드: host 가 넘긴 로컬 폴더를 store 에 주입 (analyzer 는 "경로를 받았나"만 본다).
   if (opts.projectRoot) {
@@ -46,7 +52,7 @@ export function mount(
 
   // Neo4j override: host(Electron)가 넘긴 연결을 session 에 주입 → getHeaders 가 X-Neo4j-* 헤더로 전달.
   if (opts.neo4j) {
-    useSessionStore(pinia).setNeo4jConnection(opts.neo4j)
+    useRuntimeStore(pinia).setNeo4jConnection(opts.neo4j)
   }
 
   app.mount(el)

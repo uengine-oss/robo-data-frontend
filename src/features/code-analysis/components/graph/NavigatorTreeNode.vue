@@ -6,8 +6,8 @@
  */
 import { computed } from 'vue'
 import { useCanvasStore } from '@/features/code-analysis/graphCanvas'
-import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
-import { useNavigatorStore, type NavigatorTreeItem } from '@/shared/stores/navigator'
+import { useAnalyzerStore } from '@/workflows/code-analysis'
+import { useNavigatorStore, type NavigatorTreeItem } from '@/workflows/code-analysis'
 import { classifyNode } from '@/shared/utils/nodeClassify'
 
 interface Props {

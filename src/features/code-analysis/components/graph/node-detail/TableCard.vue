@@ -9,7 +9,7 @@
 
 import { computed, ref } from 'vue'
 import type { GraphNode } from '@/shared/types'
-import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
+import { useAnalyzerStore } from '@/workflows/code-analysis'
 import { getRelationshipGroups, getAttachedByType } from '@/shared/utils/nodeRelationships'
 import NodeDetailBase from './NodeDetailBase.vue'
 import TextViewer from '@/shared/components/TextViewer.vue'

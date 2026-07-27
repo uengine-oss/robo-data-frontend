@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { IconX, IconTrash, IconPlus, IconAlertTriangle } from '@/shared/icons'
+import { useDialogFocusLifecycle } from '@/shared/composables/useDialogFocusLifecycle'
 
 export type DataAction = 'delete' | 'append' | 'cancel'
 export type NameCaseOption = 'original' | 'uppercase' | 'lowercase'
@@ -17,6 +18,8 @@ const emit = defineEmits<{
 
 // 대소문자 변환 옵션
 const nameCaseOption = ref<NameCaseOption>('original')
+const dialogRef = ref<HTMLElement | null>(null)
+const initialChoiceRef = ref<HTMLInputElement | null>(null)
 
 function handleAction(action: DataAction) {
   emit('confirm', action, nameCaseOption.value)
@@ -25,20 +28,34 @@ function handleAction(action: DataAction) {
 function handleClose() {
   emit('close')
 }
+
+useDialogFocusLifecycle({
+  active: () => props.isOpen,
+  dialog: dialogRef,
+  requestClose: handleClose,
+  initialFocus: () => initialChoiceRef.value,
+})
 </script>
 
 <template>
   <Teleport to="body">
     <Transition name="modal">
       <div v-if="isOpen" class="modal-overlay" @click.self="handleClose">
-        <div class="modal-container">
+        <div
+          ref="dialogRef"
+          class="modal-container"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="data-confirm-title"
+          tabindex="-1"
+        >
           <!-- Header -->
           <div class="modal-header">
-            <div class="modal-title">
+            <h2 id="data-confirm-title" class="modal-title">
               <span class="modal-icon">📊</span>
               <span>기존 데이터 감지</span>
-            </div>
-            <button class="modal-close" @click="handleClose">
+            </h2>
+            <button type="button" class="modal-close" aria-label="기존 데이터 처리 닫기" @click="handleClose">
               <IconX :size="18" />
             </button>
           </div>
@@ -60,7 +77,7 @@ function handleClose() {
             <div class="section-label">메타데이터 대소문자 변환</div>
             <div class="case-options">
               <label class="case-option" :class="{ active: nameCaseOption === 'original' }">
-                <input type="radio" v-model="nameCaseOption" value="original" />
+                <input ref="initialChoiceRef" type="radio" v-model="nameCaseOption" value="original" />
                 <span class="case-icon">Aa</span>
                 <span class="case-label">원본 유지</span>
               </label>
@@ -145,6 +162,23 @@ function handleClose() {
   max-width: 95vw;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   overflow: hidden;
+  max-height: calc(100dvh - 32px);
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-body {
+  overflow-y: auto;
+}
+
+.modal-title {
+  margin: 0;
+}
+
+.modal-container:focus-visible,
+.modal-container :focus-visible {
+  outline: 2px solid var(--color-accent, #fab005);
+  outline-offset: 2px;
 }
 
 /* Modal Transition */
@@ -262,6 +296,7 @@ function handleClose() {
 }
 
 .case-option {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -275,7 +310,16 @@ function handleClose() {
   transition: all 0.2s;
   
   input {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  &:focus-within {
+    outline: 2px solid var(--color-accent, #38bdf8);
+    outline-offset: 2px;
   }
   
   &:hover {
@@ -425,7 +469,20 @@ function handleClose() {
     }
   }
 }
+
+@media (max-width: 560px) {
+  .modal-overlay {
+    align-items: flex-start;
+    padding: 16px;
+  }
+
+  .modal-container {
+    width: 100%;
+    max-width: none;
+  }
+
+  .case-options {
+    flex-direction: column;
+  }
+}
 </style>
-
-
-

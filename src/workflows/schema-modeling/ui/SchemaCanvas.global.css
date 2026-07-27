@@ -1,0 +1,127 @@
+/* VueFlow imports */
+@import '@vue-flow/core/dist/style.css';
+@import '@vue-flow/core/dist/theme-default.css';
+@import '@vue-flow/controls/dist/style.css';
+@import '@vue-flow/minimap/dist/style.css';
+
+/* VueFlow overrides */
+.vue-flow {
+  background: var(--color-bg, #1a1b26) !important;
+}
+
+.vue-flow__minimap {
+  background: var(--color-bg-secondary, #25262b) !important;
+  border: 1px solid var(--color-border, #373a40) !important;
+  border-radius: var(--radius-lg, 8px) !important;
+}
+
+.vue-flow__controls {
+  background: var(--color-bg-secondary, #25262b) !important;
+  border: 1px solid var(--color-border, #373a40) !important;
+  border-radius: var(--radius-lg, 8px) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+}
+
+.vue-flow__controls-button {
+  background: transparent !important;
+  border: none !important;
+  color: var(--color-text, #c1c2c5) !important;
+}
+
+@media (max-width: 720px) {
+  .schema-canvas .vue-flow__minimap {
+    display: none !important;
+  }
+}
+
+.vue-flow__controls-button:hover {
+  background: var(--color-bg-tertiary, #373a40) !important;
+}
+
+.vue-flow__controls-button svg {
+  fill: var(--color-text, #c1c2c5) !important;
+}
+
+.vue-flow__edge-textbg {
+  fill: var(--color-bg, #1a1b26) !important;
+}
+
+.vue-flow__edge-text {
+  fill: var(--color-text, #c1c2c5) !important;
+}
+
+.vue-flow__node.table-node--selected {
+  z-index: 10 !important;
+}
+
+.vue-flow__edge-path {
+  stroke-width: 2 !important;
+}
+
+.vue-flow__edge.animated path {
+  stroke-dasharray: 5 !important;
+  animation: flowEdge 0.5s linear infinite !important;
+}
+
+@keyframes flowEdge {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
+.vue-flow__connection-line {
+  stroke: var(--color-accent, #228be6) !important;
+  stroke-width: 2 !important;
+  stroke-dasharray: 5 !important;
+}
+
+.vue-flow__handle:hover {
+  background: var(--color-accent, #228be6) !important;
+  transform: scale(1.5) !important;
+}
+
+/* 새로 추가된 엣지 애니메이션 */
+.vue-flow__edge.edge-newly-added path {
+  stroke: #51cf66 !important;
+  stroke-width: 3 !important;
+  animation: edge-draw 1s ease-out forwards, edge-pulse 0.8s ease-in-out 3;
+  filter: drop-shadow(0 0 6px rgba(81, 207, 102, 0.6));
+}
+
+.vue-flow__edge.edge-newly-added .vue-flow__edge-text {
+  animation: label-appear 0.5s ease-out 0.5s forwards;
+  opacity: 0;
+}
+
+@keyframes edge-draw {
+  0% {
+    stroke-dasharray: 1000;
+    stroke-dashoffset: 1000;
+  }
+  100% {
+    stroke-dasharray: 1000;
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes edge-pulse {
+  0%, 100% {
+    stroke-width: 3px;
+    filter: drop-shadow(0 0 6px rgba(81, 207, 102, 0.6));
+  }
+  50% {
+    stroke-width: 5px;
+    filter: drop-shadow(0 0 12px rgba(81, 207, 102, 0.9));
+  }
+}
+
+@keyframes label-appear {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

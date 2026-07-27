@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Form dialog lifecycle contract</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { mountFormDialogLifecycleHarness } from './form-dialog-lifecycle-harness.ts'
+
+      const root = document.querySelector('#app')
+      if (!root) throw new Error('Harness root is missing')
+      window.__unmountFormDialogLifecycleHarness = mountFormDialogLifecycleHarness(root)
+    </script>
+  </body>
+</html>

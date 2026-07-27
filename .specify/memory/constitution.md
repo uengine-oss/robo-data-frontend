@@ -17,15 +17,24 @@ New features MUST register as a tab, not add a URL route.
 **Rationale**: the app is designed to embed (Electron / Module Federation host) where URL routing
 is unavailable or owned by the host; one route keeps embedding and deep-state consistent.
 
-### II. Feature-Folder Modularity (기능 폴더 모듈성)
+### II. Backend-Aligned Responsibility Groups (백엔드 책임 그룹)
 
-Each capability lives in `src/features/<name>/` (its own `.vue` UI, Pinia store, `api`/`service`,
-types) and is registered in `src/shared/config/features.ts` (id, label, menu group, lazy import,
-`hidden` flag). A feature MUST be self-contained; cross-feature use goes through explicit imports,
-not reaching into another feature's internals.
+Frontend code MUST be grouped by the backend responsibility that owns the contract under
+`src/domains/<backend>/`. Each group owns its API contracts, application logic, state, and UI
+sub-capabilities. Similar screen names MUST NOT be used to merge distinct backend owners, and one
+backend's code MUST NOT be scattered across unrelated top-level feature folders.
 
-**Rationale**: a 14-feature platform stays maintainable only if each feature is an independent,
-lazily-loaded slice.
+Flows that intentionally coordinate more than one backend live under `src/workflows/<flow>/` and
+may consume only the public entrypoint of each domain. A domain MUST NOT reach into another
+domain's internals. `src/shared/` is limited to infrastructure or UI proven to serve multiple
+domains and MUST NOT import a domain or workflow.
+
+User-facing tabs remain registered in the feature registry and lazy-loaded, but the registry is a
+navigation concern rather than the source-code ownership model.
+
+**Rationale**: the platform is implemented by multiple teams and backed by separately owned
+services. Developers must be able to identify the contract owner from the top-level folder while
+cross-service orchestration remains explicit instead of being hidden in stores or components.
 
 ### III. Gateway-Routed, Session-Headed API (게이트웨이 경유 + 세션 헤더)
 
@@ -66,4 +75,10 @@ New features go through `/speckit-specify → /speckit-plan`; each `plan.md` MUS
 Constitution Check verifying the principles above. A principle is amended only by editing this file
 and bumping the version, with the rationale recorded.
 
-**Version**: 1.0.0 | **Ratified**: 2026-06-15 | **Last Amended**: 2026-06-15
+## Amendment History
+
+- **1.1.0 (2026-07-22)**: Replaced screen-oriented feature-folder ownership with backend-aligned
+  domain groups and explicit cross-backend workflows. Navigation tabs remain unchanged. This
+  amendment is required by spec 060 and supersedes Principle II only; all other principles remain.
+
+**Version**: 1.1.0 | **Ratified**: 2026-06-15 | **Last Amended**: 2026-07-22

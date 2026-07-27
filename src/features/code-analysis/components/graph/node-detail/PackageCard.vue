@@ -6,7 +6,7 @@
 
 import { computed } from 'vue'
 import type { GraphNode, GraphLink } from '@/shared/types'
-import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
+import { useAnalyzerStore } from '@/workflows/code-analysis'
 import NodeDetailBase from './NodeDetailBase.vue'
 
 interface Props { node: GraphNode }

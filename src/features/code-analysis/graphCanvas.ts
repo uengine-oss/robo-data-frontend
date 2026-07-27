@@ -16,7 +16,7 @@
 
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
+import { useAnalyzerStore } from '@/workflows/code-analysis'
 import { buildPanelGraphProjection } from '@/features/code-analysis/panelGraphProjection'
 import { computeTableOwners } from '@/features/code-analysis/areaGraph'
 import { isContainerNode, CALLABLE_LABELS, CONTAINER_LABELS } from '@/shared/utils/nodeClassify'
@@ -205,7 +205,7 @@ export const useCanvasStore = defineStore('canvas', () => {
       const fromMod = resolveModule(link.source)
       const toMod = resolveModule(link.target)
       if (!fromMod || !toMod || fromMod === toMod) continue
-      const key = `${fromMod} ${toMod}`
+      const key = `${fromMod}\u0000${toMod}`
       let cv = callVirtuals.get(key)
       if (!cv) { cv = { fromMod, toMod, viaFuncIds: new Set() }; callVirtuals.set(key, cv) }
       cv.viaFuncIds.add(link.source)

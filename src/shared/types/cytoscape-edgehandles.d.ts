@@ -1,7 +1,7 @@
 declare module 'cytoscape-edgehandles' {
   import cytoscape from 'cytoscape'
   
-  interface EdgehandlesOptions {
+  export interface EdgehandlesOptions {
     preview?: boolean
     hoverDelay?: number
     handleNodes?: string
@@ -25,7 +25,7 @@ declare module 'cytoscape-edgehandles' {
     complete?: (sourceNode: cytoscape.NodeSingular, targetNode: cytoscape.NodeSingular, addedEdge: cytoscape.EdgeSingular) => void
   }
   
-  interface EdgehandlesInstance {
+  export interface EdgehandlesInstance {
     enable: () => void
     disable: () => void
     enableDrawMode: () => void
@@ -34,6 +34,18 @@ declare module 'cytoscape-edgehandles' {
     stop: () => void
     destroy: () => void
   }
+
+  export type EdgehandlesEventHandler = (event: cytoscape.EventObject) => void
+  export type EdgehandlesCompleteHandler = (
+    event: cytoscape.EventObject,
+    sourceNode: cytoscape.NodeSingular,
+    targetNode: cytoscape.NodeSingular,
+    addedElements: cytoscape.CollectionReturnValue,
+  ) => void
+  export type EdgehandlesTargetHandler = (
+    event: cytoscape.EventObject,
+    targetNode: cytoscape.NodeSingular,
+  ) => void
   
   const edgehandles: cytoscape.Ext
   export default edgehandles

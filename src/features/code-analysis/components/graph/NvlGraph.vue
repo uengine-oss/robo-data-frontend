@@ -27,7 +27,7 @@ import {
 } from '@/shared/config/graphStyles'
 import { colorLabelOf } from '@/shared/utils/nodeLabels'
 import { storageVersion } from '@/shared/utils/graphStyleStorage'
-import { useNavigatorStore } from '@/shared/stores/navigator'
+import { useNavigatorStore } from '@/workflows/code-analysis'
 import { storeToRefs } from 'pinia'
 import { useGroupHulls, type HullLevel } from './useGroupHulls'
 

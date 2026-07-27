@@ -24,11 +24,6 @@ export const STORAGE_KEYS = {
   APP_TITLE: 'appTitle',
   UML_DEPTH: 'umlDepth',
 
-  // What-If 시뮬레이션
-  WHATIF_SESSIONS: 'whatif_sessions',
-  WHATIF_CURRENT_SESSION: 'whatif_current_session',
-  WHATIF_PROFILES: 'whatif_profiles',
-
   // Text2SQL
   RECENT_QUERIES: 'text2sql_recent_queries',
 

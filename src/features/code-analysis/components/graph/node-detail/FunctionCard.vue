@@ -8,7 +8,7 @@ import { computed } from 'vue'
 import type { GraphNode } from '@/shared/types'
 import { technicalNodeName } from '@/shared/utils/graphDisplay'
 import { getSemanticReport } from '@/shared/utils/nodeRelationships'
-import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
+import { useAnalyzerStore } from '@/workflows/code-analysis'
 import NodeDetailBase from './NodeDetailBase.vue'
 import { AsyncCodeViewer as CodeViewer } from '@/shared/components/codeViewerAsync'
 

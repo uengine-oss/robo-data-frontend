@@ -89,7 +89,7 @@ const mapData = computed(() => {
   
   if (!data || data.length === 0) return []
   
-  return data.map((item, idx) => {
+  return data.flatMap((item, idx) => {
     let coords: [number, number] | null = null
     let name = ''
     let value = 1
@@ -116,13 +116,11 @@ const mapData = computed(() => {
       value = Number(item[config.valueField]) || 1
     }
     
-    if (!coords) {
-      coords = [127.3845 + (Math.random() - 0.5) * 2, 36.3504 + (Math.random() - 0.5) * 2]
-    }
+    if (!coords) return []
     
     const colorSet = markerColors[idx % markerColors.length]
     
-    return {
+    return [{
       name,
       value: [...coords, value],
       rawData: item,
@@ -131,7 +129,7 @@ const mapData = computed(() => {
         shadowColor: colorSet.glow,
         shadowBlur: 15
       }
-    }
+    }]
   })
 })
 

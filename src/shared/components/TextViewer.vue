@@ -75,7 +75,7 @@ const blocks = computed<Block[]>(() => {
     :style="maxHeightStyle ? { maxHeight: maxHeightStyle, overflowY: 'auto' } : undefined"
   >
     <template v-if="hasContent && format === 'auto'">
-      <template v-for="(b, i) in blocks" :key="i">
+      <template v-for="b in blocks" :key="`${b.kind}:${b.text}`">
         <h5 v-if="b.kind === 'header'" class="tv-header">{{ b.text }}</h5>
         <p v-else-if="b.kind === 'para'" class="tv-para">{{ b.text }}</p>
         <div v-else class="tv-bullet">

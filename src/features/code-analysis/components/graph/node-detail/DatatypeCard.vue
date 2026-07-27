@@ -13,7 +13,7 @@
 
 import { computed } from 'vue'
 import type { GraphNode } from '@/shared/types'
-import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
+import { useAnalyzerStore } from '@/workflows/code-analysis'
 import { getRelationshipGroups, getMembersByLabels, DATA_MEMBER_LABELS } from '@/shared/utils/nodeRelationships'
 import NodeDetailBase from './NodeDetailBase.vue'
 import { AsyncCodeViewer as CodeViewer } from '@/shared/components/codeViewerAsync'

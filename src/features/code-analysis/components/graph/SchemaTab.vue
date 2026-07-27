@@ -5,19 +5,18 @@
  * 캔버스 전용(FR-006): Mermaid ER·뷰 스위처 제거. SchemaView 가 자급(테이블 목록·캔버스 포함).
  */
 import { onMounted } from 'vue'
-import { SchemaView } from '@/features/schema'
-import { useSessionStore } from '@/shared/stores/session'
-import { useSchemaCanvasStore } from '@/features/schema/schemaCanvas'
+import { SchemaView, useSchemaCanvasStore } from '@/workflows/schema-modeling'
+import { useFeatureNavigation } from '@/shared/navigation/featureNavigation'
 
-const sessionStore = useSessionStore()
+const featureNavigation = useFeatureNavigation()
 const schemaCanvasStore = useSchemaCanvasStore()
 
 // 상단 검색에서 전달된 스키마 검색어 처리.
 onMounted(() => {
-  const pendingQuery = sessionStore.consumeSchemaSearch()
-  if (pendingQuery) {
-    schemaCanvasStore.searchQuery = pendingQuery
-    schemaCanvasStore.performSemanticSearch(pendingQuery)
+  const pendingSearch = featureNavigation.consume<{ query: string }>('schema')
+  if (pendingSearch) {
+    schemaCanvasStore.searchQuery = pendingSearch.query
+    schemaCanvasStore.performSemanticSearch(pendingSearch.query)
   }
 })
 </script>

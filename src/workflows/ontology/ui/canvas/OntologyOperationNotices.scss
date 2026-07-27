@@ -1,0 +1,72 @@
+.ontology-operation-stack button:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+.ontology-operation-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+
+  span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  button {
+    flex: none;
+    min-height: 30px;
+    padding: 5px 10px;
+    border: 1px solid currentColor;
+    border-radius: 6px;
+    color: inherit;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  &.error {
+    color: #fca5a5;
+    background: rgba(239, 68, 68, 0.1);
+  }
+
+  &.warning {
+    color: #fcd34d;
+    background: rgba(245, 158, 11, 0.1);
+  }
+
+  &.success {
+    color: #86efac;
+    background: rgba(34, 197, 94, 0.1);
+  }
+}
+
+@media (max-width: 640px) {
+  .ontology-operation-status {
+    align-items: stretch;
+    flex-direction: column;
+
+    button {
+      width: 100%;
+    }
+  }
+}
+
+
+.ontology-operation-stack {
+  display: grid;
+  gap: 6px;
+  padding: 8px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.ontology-operation-stack {
+    padding: 8px 10px;
+  }

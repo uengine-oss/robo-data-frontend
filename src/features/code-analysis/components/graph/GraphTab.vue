@@ -4,13 +4,19 @@
  * 그래프 및 UML 다이어그램 탭 - 개선된 플로팅 UI
  */
 
-import { ref, reactive, computed, watch, onMounted } from 'vue'
-import { useAnalyzerStore } from '@/features/code-analysis/analyzer'
+import { ref, computed, watch, onMounted } from 'vue'
+import { useAnalyzerStore } from '@/workflows/code-analysis'
 import { useCanvasStore } from '@/features/code-analysis/graphCanvas'
-import { useNavigatorStore } from '@/shared/stores/navigator'
+import { useNavigatorStore } from '@/workflows/code-analysis'
 import { storeToRefs } from 'pinia'
 import NvlGraph from './NvlGraph.vue'
-import type { HullLevel } from './useGroupHulls'
+import {
+  createGraphClusterKey,
+  createGraphClusterLabel,
+  createGraphHullLevels,
+  type GraphViewMode,
+} from '@/features/code-analysis/graphViewModel'
+import { useGraphTypeFilter } from './useGraphTypeFilter'
 import NodeDetailPanel from './NodeDetailPanel.vue'
 import GraphStylePanel from './GraphStylePanel.vue'
 import type { GraphNode, GraphLink } from '@/shared/types'
@@ -54,41 +60,18 @@ const progressPanelCollapsed = ref(false) // 진행 패널 축소 상태
 // (spec 021: 'table-flow' 제거 — 노드 폭발. 'area-struct'(영역·구조) 제거 — 모듈간과 구조 중복.
 //  spec 059: '건강' 제거 — 화면 전체를 위험색으로 칠해 정작 봐야 할 결합이 묻혔다. 실제 건강
 //  악화를 보여주는 화면은 별도 UI/UX 로 다시 설계한다(우선순위 낮음, 사용자 결정 2026-07-21).)
-type ViewMode = 'default' | 'module' | 'area'
-const viewMode = ref<ViewMode>('default')
+const viewMode = ref<GraphViewMode>('default')
 
 /**
  * 중첩 영역(헐) 레벨 — NvlGraph :hullLevels 소비(spec 021).
  *  - 실제 업무 단위(area) = [component_id 단일 레벨]
  *  - 그 외             = [] (표시 안 함). 모듈간은 별도(Phase4)에서 패키지 1겹.
  */
-const hullLevels = computed<HullLevel[]>(() => {
-  if (viewMode.value === 'area') {
-    return [{
-      keyOf: (n) => {
-        const v = n.properties?.component_id
-        return v === undefined || v === null || v === '' ? null : String(v)
-      },
-      labelOf: () => '',   // 이름은 앵커 캡션이 보여줌(헐 라벨 중복 제거)
-      padding: 30,
-    }]
-  }
-  if (viewMode.value === 'module') {
-    // 모듈간: 패키지 1겹으로 루틴을 감싸 영역 테두리를 그린다. external 은 '__external__' 그룹.
-    const hmap = canvasStore.hierarchyMap
-    return [{
-      keyOf: (n) => {
-        // spec 059: 테이블을 '__tables__' 별도 구역으로 빼지 않는다 — 그 구역이 선을 화면 가로로
-        // 늘여 결합을 가렸다. 테이블은 **자기를 가장 많이 쓰는 영역 안으로 녹인다**.
-        if ((n.labels || []).includes('TABLE')) return canvasStore.tableAreaKey(n.id)
-        return hmap.get(n.id)?.packageKey ?? null
-      },
-      labelOf: () => '',
-      padding: 22,
-    }]
-  }
-  return []
-})
+const hullLevels = computed(() => createGraphHullLevels(
+  viewMode.value,
+  canvasStore.hierarchyMap,
+  nodeId => canvasStore.tableAreaKey(nodeId),
+))
 
 /**
  * 클러스터 분리 키(spec 022) — NvlGraph :clusterKeyOf 소비. 노드를 이 키로 묶어 화면에서 떨어뜨림.
@@ -96,46 +79,21 @@ const hullLevels = computed<HullLevel[]>(() => {
  *  - 협력군집: component_id(미보유='__ungrouped__') → 군집/기타 분리
  *  - 그 외: null(분리 안 함 — 영역구조는 중첩이라 분리 불필요, 건강은 단일)
  */
-const clusterKeyOf = computed<((n: GraphNode) => string | null) | null>(() => {
-  if (viewMode.value === 'module') {
-    const hmap = canvasStore.hierarchyMap
-    return (n) => (n.labels || []).includes('TABLE')
-      ? canvasStore.tableAreaKey(n.id)
-      : (hmap.get(n.id)?.packageKey ?? null)
-  }
-  if (viewMode.value === 'area') {
-    return (n) => {
-      const v = n.properties?.component_id
-      return (v === undefined || v === null || v === '') ? '__ungrouped__' : String(v)
-    }
-  }
-  return null
-})
+const clusterKeyOf = computed(() => createGraphClusterKey(
+  viewMode.value,
+  canvasStore.hierarchyMap,
+  nodeId => canvasStore.tableAreaKey(nodeId),
+))
 
 /**
  * 클러스터 키 → 앵커(대표 노드) 라벨(spec 022). clusterKeyOf 와 짝 — NvlGraph 가 각 클러스터
  * 중심에 이 라벨의 앵커 노드를 둔다. 키는 노드 id(패키지)·합성키('__external__'/'__ungrouped__')·
  * component_id 가 섞이므로 보기별로 사람이 읽을 이름으로 푼다.
  */
-const clusterLabelOf = computed<((key: string) => string) | null>(() => {
-  if (viewMode.value === 'module') {
-    return (key) =>
-      key === '__external__' ? 'external (외부 호출)'
-        : (projectStore.nodeMap.get(key)?.properties?.name as string) || '모듈'
-  }
-  if (viewMode.value === 'area') {
-    return (key) => {
-      if (key === '__ungrouped__') return '기타'
-      for (const n of projectStore.nodeMap.values()) {
-        if (String(n.properties?.component_id ?? '') === key) {
-          return (n.properties?.component_name as string) || `군집 ${key}`
-        }
-      }
-      return `군집 ${key}`
-    }
-  }
-  return null
-})
+const clusterLabelOf = computed(() => createGraphClusterLabel(
+  viewMode.value,
+  projectStore.nodeMap,
+))
 
 
 /**
@@ -143,21 +101,8 @@ const clusterLabelOf = computed<((key: string) => string) | null>(() => {
  * 빈 집합 = 전체 표시. 끄면 그 타입만 렌더서 사라진다(데이터는 유지).
  * 노드·관계 두 축이 **같은 토글 기계**를 공유 — 공통 팩토리(중복 0, spec 038).
  */
-function createTypeFilter() {
-  const hidden = ref<string[]>([])
-  function toggle(type: string): void {
-    const set = new Set(hidden.value)
-    if (set.has(type)) set.delete(type)
-    else set.add(type)
-    hidden.value = [...set]
-  }
-  const isShown = (type: string): boolean => !hidden.value.includes(type)
-  const count = computed(() => hidden.value.length)
-  // reactive 로 반환 — 템플릿에서 relFilter.hidden 이 ref 그대로 안 새고 배열로 언랩된다.
-  return reactive({ hidden, toggle, isShown, count })
-}
-const relFilter = createTypeFilter()    // 관계 타입 끄고/켜기
-const nodeFilter = createTypeFilter()   // 노드 타입 끄고/켜기
+const relFilter = useGraphTypeFilter()
+const nodeFilter = useGraphTypeFilter()
 /** 활성 필터 총 개수(노드+관계) — 필터 ▾ 버튼 배지. */
 const hiddenFilterCount = computed(() => relFilter.count + nodeFilter.count)
 const showFilterMenu = ref(false)
@@ -184,15 +129,15 @@ const showViewMenu = ref(false)
  * 보기 모드 선택 — 단일선택. 이미 선택된 모드면 default 로 끔(토글오프).
  * 모드 진입 시 그 모드가 무언가를 보이게 캔버스를 보장(업무 단위는 빈 캔버스면 해당 속성 노드 자동 로드).
  */
-function selectViewMode(mode: Exclude<ViewMode, 'default'>): void {
-  const next: ViewMode = viewMode.value === mode ? 'default' : mode
+function selectViewMode(mode: Exclude<GraphViewMode, 'default'>): void {
+  const next: GraphViewMode = viewMode.value === mode ? 'default' : mode
   applyViewMode(next)
   // 단일선택이라 고르면 메뉴를 닫는다(관계필터는 아래에서 별도 — 닫지 않음).
   showViewMenu.value = false
 }
 
 /** 보기 모드 적용 — 프리셋/캔버스 populate 까지 일괄 처리(단일 결정처). */
-function applyViewMode(mode: ViewMode): void {
+function applyViewMode(mode: GraphViewMode): void {
   viewMode.value = mode
   // 이전 프리셋(모듈간 가상그래프) 해제 — 다른 모드로 갈 때 항상 클리어.
   if (canvasPresetMode.value) canvasStore.setPreset(null)

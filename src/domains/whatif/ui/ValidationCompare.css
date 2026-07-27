@@ -1,0 +1,1315 @@
+.validation-compare {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.section-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--color-accent);
+  margin: 0;
+}
+
+.subsection-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-text-bright);
+  margin: 0 0 1rem 0;
+}
+
+.subsection-title.toggle {
+  cursor: pointer;
+}
+
+.subsection-title.toggle:hover {
+  color: var(--color-accent);
+}
+
+/* 검증 요약 */
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.875rem;
+  margin-bottom: 1.5rem;
+}
+
+.summary-stat {
+  padding: 1rem;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  text-align: center;
+}
+
+.summary-stat.good {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.summary-stat.warning {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-text-bright);
+}
+
+.summary-stat.good .stat-value { color: #10b981; }
+.summary-stat.warning .stat-value { color: #f59e0b; }
+
+.stat-label {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  margin-top: 0.2rem;
+}
+
+/* 모델 비교 */
+.compare-desc {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  margin-bottom: 1rem;
+}
+
+.comparison-warning {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.1);
+  color: #fbbf24;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.compare-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  border: none;
+  border-radius: 10px;
+  color: white;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.compare-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4);
+}
+
+.compare-btn.rerun {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+}
+
+.compare-btn.rerun:hover:not(:disabled) {
+  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+  box-shadow: 0 6px 20px rgba(245, 158, 11, 0.4);
+}
+
+.compare-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.compare-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 좌우 비교 카드 */
+.side-by-side-compare {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.model-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 768px) {
+  .model-compare-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.model-card {
+  flex: 1;
+  padding: 1.25rem;
+  background: var(--color-bg-tertiary);
+  border: 2px solid var(--color-border);
+  border-radius: 12px;
+  transition: all 0.3s ease;
+}
+
+.model-card.actual {
+  border-color: rgba(16, 185, 129, 0.5);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, transparent 100%);
+}
+
+.model-card.actual .model-badge.baseline {
+  background: #10b981;
+}
+
+.model-card.ontology {
+  border-color: rgba(0, 217, 255, 0.4);
+  background: linear-gradient(135deg, rgba(0, 217, 255, 0.05) 0%, transparent 100%);
+}
+
+.model-card.mindsdb {
+  border-color: rgba(139, 92, 246, 0.4);
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.05) 0%, transparent 100%);
+}
+
+.model-card.mindsdb .model-badge.mindsdb-badge {
+  background: linear-gradient(135deg, #8b5cf6, #6366f1);
+}
+
+.model-card.ttm {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(236, 72, 153, 0.05) 100%);
+}
+
+.model-card.ttm.unavailable {
+  opacity: 0.6;
+  border-color: rgba(100, 116, 139, 0.3);
+  background: linear-gradient(135deg, rgba(100, 116, 139, 0.05) 0%, transparent 100%);
+}
+
+.model-badge {
+  font-size: 0.65rem;
+  padding: 0.2rem 0.5rem;
+  background: linear-gradient(135deg, #f59e0b, #ec4899);
+  border-radius: 10px;
+  color: #fff;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* 진행 상태 패널 */
+.progress-panel {
+  margin-top: 1.5rem;
+  padding: 1.5rem;
+  background: linear-gradient(135deg, rgba(0, 217, 255, 0.08) 0%, rgba(139, 92, 246, 0.08) 100%);
+  border: 1px solid rgba(0, 217, 255, 0.2);
+  border-radius: 12px;
+  animation: fadeIn 0.3s ease;
+}
+
+.progress-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.progress-icon {
+  font-size: 1.5rem;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.progress-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.progress-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.progress-step {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  transition: all 0.3s ease;
+}
+
+.progress-step.completed {
+  color: #10b981;
+}
+
+.progress-step.active {
+  background: rgba(0, 217, 255, 0.15);
+  color: #00d9ff;
+}
+
+.progress-step.pending {
+  color: var(--color-text-tertiary);
+  opacity: 0.6;
+}
+
+.step-indicator {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+}
+
+.loading-dot {
+  animation: blink 1s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.step-text {
+  font-size: 0.9rem;
+}
+
+.progress-bar-container {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #00d9ff 0%, #8b5cf6 50%, #ec4899 100%);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+/* 현재 작업 상세 */
+.current-action {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  border-left: 3px solid #00d9ff;
+}
+
+.action-animation {
+  display: flex;
+  gap: 4px;
+}
+
+.action-animation .dot {
+  width: 8px;
+  height: 8px;
+  background: #00d9ff;
+  border-radius: 50%;
+  animation: bounce 1.4s ease-in-out infinite;
+}
+
+.action-animation .dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.action-animation .dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes bounce {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  40% {
+    transform: translateY(-8px);
+    opacity: 1;
+  }
+}
+
+.action-text {
+  font-size: 0.9rem;
+  color: #00d9ff;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.step-model {
+  margin-left: auto;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: var(--color-text-tertiary);
+}
+
+.progress-step.active .step-model {
+  background: rgba(0, 217, 255, 0.2);
+  color: #00d9ff;
+}
+
+.progress-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.progress-percent {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #00d9ff;
+}
+
+.progress-eta {
+  font-size: 0.8rem;
+  color: var(--color-text-tertiary);
+}
+
+/* 모델 카드 선택 스타일 */
+.model-card {
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.model-card:hover {
+  transform: translateY(-2px);
+}
+
+.model-card.selected {
+  border-width: 3px;
+  box-shadow: 0 0 20px rgba(0, 217, 255, 0.3);
+}
+
+.model-card.ontology.selected {
+  border-color: #00d9ff;
+  box-shadow: 0 0 20px rgba(0, 217, 255, 0.4);
+}
+
+.model-card.ttm.selected {
+  border-color: #f59e0b;
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.4);
+}
+
+/* 모델 탭 */
+.model-tabs {
+  display: flex;
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.model-tab {
+  flex: 1;
+  padding: 1rem 1.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px solid transparent;
+  border-radius: 12px;
+  color: var(--color-text-secondary);
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.model-tab:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text-primary);
+}
+
+.model-tab.active {
+  background: linear-gradient(135deg, rgba(0, 217, 255, 0.15) 0%, rgba(139, 92, 246, 0.15) 100%);
+  border-color: #00d9ff;
+  color: #00d9ff;
+}
+
+.model-tab:first-child.active {
+  border-color: #10b981;
+  color: #10b981;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(0, 217, 255, 0.15) 100%);
+}
+
+.model-tab:last-child.active {
+  border-color: #f59e0b;
+  color: #f59e0b;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(236, 72, 153, 0.15) 100%);
+}
+
+/* 모델 정보 박스 */
+.model-info-box {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.model-info-box.ttm {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(236, 72, 153, 0.05) 100%);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.model-info-box.ontology {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(0, 217, 255, 0.05) 100%);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.model-info-box.mindsdb {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.08) 0%, rgba(99, 102, 241, 0.05) 100%);
+  border-color: rgba(139, 92, 246, 0.3);
+}
+
+.model-info-box .info-icon {
+  font-size: 2rem;
+}
+
+.model-info-box .info-content {
+  flex: 1;
+}
+
+.model-info-box .info-content strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: var(--color-text-primary);
+}
+
+.model-info-box .info-content p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+.model-info-box .info-content p.warning {
+  color: #f59e0b;
+  margin-top: 0.5rem;
+}
+
+/* 시나리오 카드 모델별 스타일 */
+.scenario-summary-card.ttm {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.05) 0%, transparent 100%);
+}
+
+.scenario-summary-card.ontology {
+  border-color: rgba(16, 185, 129, 0.3);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.05) 0%, transparent 100%);
+}
+
+/* 메트릭 아이템 모델별 스타일 */
+.metric-item.highlight.ttm {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(236, 72, 153, 0.1));
+  border-color: rgba(245, 158, 11, 0.5);
+}
+
+.metric-item.highlight.ontology {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(0, 217, 255, 0.1));
+  border-color: rgba(16, 185, 129, 0.5);
+}
+
+.metric-item.highlight.mindsdb {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(99, 102, 241, 0.1));
+  border-color: rgba(139, 92, 246, 0.5);
+}
+
+/* 다음 단계 섹션 */
+.next-step-section {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(0, 217, 255, 0.05) 100%);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.completion-message {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.completion-icon {
+  font-size: 1.5rem;
+}
+
+.completion-text {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #10b981;
+}
+
+.next-step-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1.5rem;
+  background: linear-gradient(135deg, #10b981, #00d9ff);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.next-step-btn:hover {
+  transform: translateX(5px);
+  box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
+}
+
+.next-step-btn svg {
+  transition: transform 0.3s ease;
+}
+
+.next-step-btn:hover svg {
+  transform: translateX(3px);
+}
+
+/* 듀얼 모델 메트릭 */
+.key-metrics.dual-model {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.key-metrics.dual-model .metric-item {
+  flex: 1;
+  min-width: 120px;
+}
+
+.metric-label-top {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+  opacity: 0.8;
+}
+
+/* 모델 정보 행 */
+.models-info-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.models-info-row .model-info-box {
+  flex: 1;
+  position: relative;
+}
+
+.win-badge {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  background: linear-gradient(135deg, #10b981, #00d9ff);
+  border-radius: 10px;
+  color: #fff;
+  font-weight: 600;
+}
+
+.model-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.model-icon {
+  font-size: 1.5rem;
+}
+
+.model-header h4 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--color-text-bright);
+}
+
+.model-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.stat-row .label {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+.stat-row .value {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.model-desc {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.vs-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.vs-divider span {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+/* 승자 표시 */
+.winner-announcement {
+  padding: 1rem 1.5rem;
+  background: var(--color-bg-tertiary);
+  border: 2px solid var(--color-border);
+  border-radius: 12px;
+  margin-bottom: 1.5rem;
+}
+
+.winner-announcement.ontology {
+  border-color: #00d9ff;
+  background: linear-gradient(90deg, rgba(0, 217, 255, 0.1) 0%, transparent 100%);
+}
+
+.winner-announcement.mindsdb {
+  border-color: #8b5cf6;
+  background: linear-gradient(90deg, rgba(139, 92, 246, 0.1) 0%, transparent 100%);
+}
+
+.winner-announcement.ttm {
+  border-color: #f59e0b;
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.1) 0%, transparent 100%);
+}
+
+.winner-announcement.tie {
+  border-color: #f59e0b;
+}
+
+.winner-content {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.winner-icon {
+  font-size: 2rem;
+}
+
+.winner-text {
+  flex: 1;
+}
+
+.winner-title {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.winner-name {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--color-text-bright);
+}
+
+.winner-score {
+  font-size: clamp(0.9rem, 2vw, 1.5rem);
+  font-weight: 700;
+  color: var(--color-accent);
+}
+
+/* ========== 핵심 분석 섹션 ========== */
+.main-analysis {
+  margin-top: 1.5rem;
+}
+
+.scenario-summary-card {
+  background: linear-gradient(135deg, rgba(0, 217, 255, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
+  border: 1px solid rgba(0, 217, 255, 0.3);
+  border-radius: 16px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.scenario-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.scenario-icon {
+  font-size: 2rem;
+}
+
+.scenario-text h5 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.25rem;
+  color: var(--color-text-primary);
+}
+
+.scenario-desc {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+}
+
+.key-metrics {
+  display: flex;
+  justify-content: space-around;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.metric-item {
+  text-align: center;
+}
+
+.metric-item.highlight {
+  background: linear-gradient(135deg, rgba(0, 217, 255, 0.2) 0%, rgba(16, 185, 129, 0.2) 100%);
+  border-radius: 10px;
+  padding: 0.75rem 1.5rem;
+}
+
+.metric-value {
+  display: block;
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.metric-item.highlight .metric-value {
+  color: #00d9ff;
+}
+
+.metric-label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  margin-top: 0.25rem;
+}
+
+/* 메인 차트 섹션 */
+.main-chart-section {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 1024px) {
+  .main-chart-section {
+    grid-template-columns: 1fr;
+  }
+}
+
+.main-chart-container {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 1.25rem;
+}
+
+.main-chart-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0 0 1rem 0;
+  text-align: center;
+}
+
+.main-chart-container canvas {
+  height: 280px !important;
+}
+
+.main-chart-legend {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  margin-top: 1rem;
+  font-size: 0.85rem;
+}
+
+.main-chart-legend .legend-actual {
+  color: #10b981;
+}
+
+.main-chart-legend .legend-predicted {
+  color: #00d9ff;
+}
+
+/* AI 해석 */
+.ai-interpretation {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(236, 72, 153, 0.1) 100%);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 12px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.interpretation-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.ai-icon {
+  font-size: 1.5rem;
+}
+
+.interpretation-header h5 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--color-text-primary);
+}
+
+.interpretation-content {
+  flex: 1;
+}
+
+.interpretation-content p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+  white-space: pre-line;
+}
+
+.interpretation-content .generating {
+  color: var(--color-text-tertiary);
+}
+
+/* 검증 요약 정보 컴팩트 */
+.validation-info.compact {
+  background: var(--color-bg-tertiary);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+/* ========== 세부 분석 (접이식) ========== */
+.detail-analysis {
+  margin-top: 1rem;
+}
+
+.toggle-header {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+}
+
+.toggle-header:hover {
+  color: #00d9ff;
+}
+
+.toggle-header:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--color-accent);
+  outline-offset: 4px;
+}
+
+.detail-count {
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--color-text-tertiary);
+  margin-left: auto;
+}
+
+.detail-content {
+  margin-top: 1rem;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.bar-mape {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+  min-width: 80px;
+  text-align: right;
+}
+
+.bar.negative {
+  background: linear-gradient(90deg, #ef4444 0%, rgba(239, 68, 68, 0.3) 100%) !important;
+}
+
+/* 예측 검증 섹션 */
+.prediction-validation {
+  margin-top: 1.5rem;
+  padding: 1.5rem;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(0, 217, 255, 0.05) 100%);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 12px;
+}
+
+.validation-note {
+  font-size: 0.85rem;
+  color: var(--color-text-tertiary);
+  margin-bottom: 1rem;
+}
+
+.prediction-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  gap: 1.5rem;
+}
+
+.prediction-chart-item {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 1rem;
+}
+
+.prediction-chart-item canvas {
+  height: 200px !important;
+}
+
+.prediction-chart-item .chart-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 0.75rem;
+  text-align: center;
+}
+
+.prediction-chart-item .chart-legend {
+  display: flex;
+  justify-content: center;
+  gap: 1.5rem;
+  margin-top: 0.75rem;
+  font-size: 0.8rem;
+}
+
+.legend-actual {
+  color: #10b981;
+}
+
+.legend-predicted {
+  color: #00d9ff;
+}
+
+/* 검증 정보 */
+.validation-info {
+  margin-top: 1.5rem;
+  padding: 1rem 1.5rem;
+  background: var(--color-bg-tertiary);
+  border-radius: 10px;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.info-label {
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary);
+}
+
+.info-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.info-value.good {
+  color: #10b981;
+}
+
+.info-note {
+  font-size: 0.8rem;
+  color: var(--color-text-tertiary);
+  text-align: center;
+  font-style: italic;
+}
+
+/* 차트 */
+.prediction-charts {
+  margin-top: 1.5rem;
+}
+
+.chart-container {
+  height: 300px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+/* R² 비교 바 */
+.r2-comparison-bars {
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 1rem;
+}
+
+.r2-comparison-bars h5 {
+  margin: 0 0 1rem 0;
+  font-size: 0.9rem;
+  color: var(--color-text-bright);
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.bar-label {
+  width: 120px;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar-container {
+  flex: 1;
+  background: var(--color-bg);
+  border-radius: 4px;
+  padding: 4px;
+}
+
+.bar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.bar {
+  height: 18px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 6px;
+  min-width: 35px;
+  transition: width 0.5s ease;
+}
+
+.bar.ontology {
+  background: linear-gradient(90deg, #00d9ff 0%, #0099cc 100%);
+}
+
+.bar.mindsdb {
+  background: linear-gradient(90deg, #8b5cf6 0%, #6d28d9 100%);
+}
+
+.bar-value {
+  font-size: 0.7rem;
+  color: white;
+  font-weight: 600;
+}
+
+.bar-winner {
+  width: 70px;
+  text-align: center;
+}
+
+.bar-winner span {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+}
+
+.bar-winner .causal {
+  background: rgba(0, 217, 255, 0.2);
+  color: #00d9ff;
+}
+
+.bar-winner .mindsdb {
+  background: rgba(139, 92, 246, 0.2);
+  color: #8b5cf6;
+}
+
+.bar-legend {
+  display: flex;
+  justify-content: center;
+  gap: 1.5rem;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.legend-item {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.legend-item.ontology::before {
+  content: '';
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  background: #00d9ff;
+  border-radius: 2px;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+.legend-item.mindsdb::before {
+  content: '';
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  background: #8b5cf6;
+  border-radius: 2px;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+/* 상세 테이블 */
+.detail-section {
+  margin-top: 1.5rem;
+}
+
+.comparison-table {
+  overflow-x: auto;
+  background: var(--color-bg-tertiary);
+  border-radius: 10px;
+}
+
+.comparison-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.comparison-table th,
+.comparison-table td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.comparison-table th {
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.edge {
+  color: var(--color-text-bright);
+  font-size: 0.85rem;
+}
+
+.good { color: #10b981; }
+.moderate { color: #f59e0b; }
+.low { color: #ef4444; }
+
+.positive { color: #10b981; }
+.negative { color: #ef4444; }
+.neutral { color: var(--color-text-muted); }
+
+.winner-badge {
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.winner-badge.mindsdb {
+  background: rgba(139, 92, 246, 0.2);
+  color: #8b5cf6;
+}
+
+.winner-badge.causal {
+  background: rgba(0, 217, 255, 0.2);
+  color: #00d9ff;
+}
+
+@media (max-width: 768px) {
+  .side-by-side-compare {
+    flex-direction: column;
+  }
+
+  .vs-divider span {
+    transform: rotate(90deg);
+  }
+}

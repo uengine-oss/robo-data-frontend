@@ -12,78 +12,45 @@ import { logger } from '@/shared/utils/logger'
 // Base URL — API Gateway(/api/gateway/*) 단일 진입점. Vite 프록시 → Spring Gateway(9000).
 // ============================================================================
 export const API_GATEWAY_URL = import.meta.env.VITE_API_GATEWAY_URL ?? '/api/gateway'
-export const ANTLR_BASE_URL = `${API_GATEWAY_URL}/antlr`
-export const ROBO_BASE_URL = `${API_GATEWAY_URL}/robo`
-export const TEXT2SQL_BASE_URL = import.meta.env.VITE_TEXT2SQL_API_URL || `${API_GATEWAY_URL}/text2sql`
-export const ONTOLOGY_BASE_URL = `${API_GATEWAY_URL}/ontology`
-export const DATA_FABRIC_BASE_URL = import.meta.env.VITE_DATA_FABRIC_URL ?? `${API_GATEWAY_URL}/data-fabric`
 
 export type StreamCallback = (event: StreamEvent) => void
 export type Headers = Record<string, string>
+export interface HttpErrorContext {
+  serviceName: string
+  unavailableMessage?: string
+}
+export interface SseEvent<T = unknown> {
+  event: string
+  data: T
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
 // ============================================================================
 // HTTP 유틸리티
 // ============================================================================
 
-/**
- * 서비스 다운(404/502/503) 시 안내할 메시지 — URL 매칭 기반 dispatch.
- * if/else-if 체인 대신 테이블로 두어, 서비스 추가 시 한 항목만 늘린다.
- */
 const SERVICE_DOWN_STATUSES = new Set([404, 502, 503])
-const SERVICE_DOWN_GUIDANCE: ReadonlyArray<{ match: string; message: string }> = [
-  {
-    match: '/antlr/',
-    message:
-      '🔧 ANTLR 파서 서비스가 동작하지 않습니다.\n\n' +
-      '다음을 확인해주세요:\n' +
-      '• ANTLR 서비스가 실행 중인지 확인 (포트 8081)\n' +
-      '• API Gateway가 정상 동작하는지 확인 (포트 9000)\n\n' +
-      '서비스 시작 명령어:\n' +
-      'cd antlr-code-parser && mvn spring-boot:run'
-  },
-  {
-    match: '/robo/',
-    message:
-      '🔧 ROBO Analyzer 서비스가 동작하지 않습니다.\n\n' +
-      '다음을 확인해주세요:\n' +
-      '• robo-analyzer 서비스가 실행 중인지 확인 (포트 5502)\n' +
-      '• API Gateway가 정상 동작하는지 확인 (포트 9000)'
-  },
-  {
-    match: '/text2sql/',
-    message:
-      '🔧 Text2SQL 서비스가 동작하지 않습니다.\n\n' +
-      '다음을 확인해주세요:\n' +
-      '• neo4j-text2sql 서비스가 실행 중인지 확인 (포트 8000)\n' +
-      '• API Gateway가 정상 동작하는지 확인 (포트 9000)'
-  },
-  {
-    match: '/whatif/',
-    message:
-      '🔧 What-If 시뮬레이터 서비스가 동작하지 않습니다.\n\n' +
-      '다음을 확인해주세요:\n' +
-      '• What-If 서비스가 실행 중인지 확인 (포트 8005)\n' +
-      '• API Gateway가 정상 동작하는지 확인 (포트 9000)'
-  }
-]
 
 /**
  * HTTP 에러 처리 — 서비스 다운이면 친절 안내, 아니면 서버 JSON 오류에서 메시지 추출.
  * 모든 도메인 api 가 공유하는 단일 에러 핸들러(중복 정의 금지).
  */
-export async function handleHttpError(response: Response): Promise<never> {
+export async function handleHttpError(
+  response: Response,
+  context?: HttpErrorContext,
+): Promise<never> {
   const errorText = await response.text().catch(() => '')
 
-  console.error(`[API Error] ${response.status} ${response.statusText}`)
-  console.error(`[API Error] URL: ${response.url}`)
-  console.error(`[API Error] Response body:`, errorText)
+  logger.error(`[API Error] ${response.status} ${response.statusText}`)
+  logger.error(`[API Error] URL: ${response.url}`)
+  logger.error('[API Error] Response body:', errorText)
 
-  // 1) 서비스 다운(404/502/503) — URL 매칭 안내
-  if (SERVICE_DOWN_STATUSES.has(response.status)) {
-    const guidance = SERVICE_DOWN_GUIDANCE.find(g => response.url.includes(g.match))
-    if (guidance) {
-      throw new Error(guidance.message)
-    }
+  // 서비스별 문구는 URL로 추론하지 않고 owning domain이 명시적으로 제공한다.
+  if (SERVICE_DOWN_STATUSES.has(response.status) && context?.unavailableMessage) {
+    throw new Error(context.unavailableMessage)
   }
 
   // 2) 서버 JSON 오류 응답에서 detail/message 추출
@@ -93,16 +60,26 @@ export async function handleHttpError(response: Response): Promise<never> {
 /** 서버 오류 본문에서 사람이 읽을 메시지 추출 (내부) */
 function parseErrorMessage(errorText: string, status: number): string {
   try {
-    const errorJson = JSON.parse(errorText)
-    if (errorJson.detail) {
+    const parsed: unknown = JSON.parse(errorText)
+    if (!isRecord(parsed)) return errorText || `HTTP ${status}`
+    if (parsed.detail) {
       // FastAPI detail 은 문자열 또는 Pydantic 검증오류 배열([{msg,...}]) — 사람이 읽게 평탄화
-      const detail = Array.isArray(errorJson.detail)
-        ? errorJson.detail.map((e: any) => e?.msg || (typeof e === 'string' ? e : JSON.stringify(e))).join(', ')
-        : (typeof errorJson.detail === 'string' ? errorJson.detail : JSON.stringify(errorJson.detail))
-      return errorJson.error_type ? `[${errorJson.error_type}] ${detail}` : detail
+      const detail = Array.isArray(parsed.detail)
+        ? parsed.detail.map(entry => {
+            if (typeof entry === 'string') return entry
+            if (isRecord(entry) && typeof entry.msg === 'string') return entry.msg
+            return JSON.stringify(entry)
+          }).join(', ')
+        : (typeof parsed.detail === 'string' ? parsed.detail : JSON.stringify(parsed.detail))
+      return typeof parsed.error_type === 'string' ? `[${parsed.error_type}] ${detail}` : detail
     }
-    if (errorJson.message) {
-      return errorJson.message
+    if (typeof parsed.message === 'string') {
+      return parsed.message
+    }
+    if (parsed.error) {
+      return typeof parsed.error === 'string'
+        ? parsed.error
+        : JSON.stringify(parsed.error)
     }
   } catch {
     // JSON 아님 — 원문 또는 상태코드로 폴백
@@ -114,16 +91,19 @@ function parseErrorMessage(errorText: string, status: number): string {
 export async function postJson<T>(
   url: string,
   body: unknown,
-  headers: Headers
+  headers: Headers,
+  context?: HttpErrorContext,
+  signal?: AbortSignal,
 ): Promise<T> {
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...headers },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal,
   })
 
   if (!response.ok) {
-    await handleHttpError(response)
+    await handleHttpError(response, context)
   }
 
   return response.json()
@@ -133,11 +113,12 @@ export async function postJson<T>(
 export async function postFormData<T>(
   url: string,
   formData: FormData,
-  headers: Headers
+  headers: Headers,
+  context?: HttpErrorContext,
 ): Promise<T> {
-  console.log(`[API] POST ${url}`)
-  console.log('[API] Headers:', headers)
-  console.log('[API] Full URL:', window.location.origin + url)
+  logger.debug(`[API] POST ${url}`)
+  logger.debug('[API] Headers:', headers)
+  logger.debug('[API] Full URL:', window.location.origin + url)
 
   try {
     const requestHeaders = { ...headers }
@@ -150,19 +131,19 @@ export async function postFormData<T>(
       body: formData
     })
 
-    console.log(`[API] Response status: ${response.status} ${response.statusText}`)
-    console.log(`[API] Response headers:`, Object.fromEntries(response.headers.entries()))
+    logger.debug(`[API] Response status: ${response.status} ${response.statusText}`)
+    logger.debug('[API] Response headers:', Object.fromEntries(response.headers.entries()))
 
     if (!response.ok) {
-      await handleHttpError(response)
+      await handleHttpError(response, context)
     }
 
     return response.json()
   } catch (error) {
-    console.error('[API] Network error:', error)
+    logger.error('[API] Network error:', error)
 
     if (error instanceof TypeError && error.message.includes('fetch')) {
-      const serviceLabel = url.includes('/robo/') ? 'ROBO Analyzer' : 'ANTLR Server'
+      const serviceLabel = context?.serviceName ?? 'API'
       throw new Error(
         `서버에 연결할 수 없습니다. ${serviceLabel} 서비스가 실행 중인지 확인해주세요.\n` +
         `원본 오류: ${error.message}`
@@ -181,11 +162,13 @@ export async function postFormData<T>(
 }
 
 /** SSE 스트림 fetch (event:/data: 라인 파싱) */
-export async function streamSseFetch(
+export async function streamSseFetch<T = unknown>(
   url: string,
   headers: Headers,
-  onEvent: (event: { event: string; data: any }) => void,
-  signal?: AbortSignal
+  onEvent: (event: SseEvent<T>) => void,
+  parseData: (value: unknown, eventName: string) => T,
+  signal?: AbortSignal,
+  context?: HttpErrorContext,
 ): Promise<void> {
   const response = await fetch(url, {
     method: 'GET',
@@ -194,7 +177,7 @@ export async function streamSseFetch(
   })
 
   if (!response.ok) {
-    await handleHttpError(response)
+    await handleHttpError(response, context)
   }
 
   const reader = response.body?.getReader()
@@ -210,16 +193,13 @@ export async function streamSseFetch(
   const flushEvent = () => {
     if (currentDataLines.length === 0) return
     const rawData = currentDataLines.join('\n')
-    let data: any
+    let parsed: unknown
     try {
-      data = JSON.parse(rawData)
-    } catch (e) {
-      logger.warn('[stream] SSE 데이터 파싱 실패 — 이 이벤트는 건너뜁니다:', rawData, e)
-      currentEvent = 'message'
-      currentDataLines = []
-      return
+      parsed = JSON.parse(rawData)
+    } catch {
+      throw new Error(`SSE '${currentEvent}' 이벤트의 JSON 형식이 올바르지 않습니다.`)
     }
-    onEvent({ event: currentEvent, data })
+    onEvent({ event: currentEvent, data: parseData(parsed, currentEvent) })
     currentEvent = 'message'
     currentDataLines = []
   }
@@ -274,7 +254,8 @@ export async function streamFetch(
   body: unknown,
   headers: Headers,
   onEvent: StreamCallback,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  context?: HttpErrorContext,
 ): Promise<void> {
   const response = await fetch(url, {
     method: 'POST',
@@ -284,7 +265,7 @@ export async function streamFetch(
   })
 
   if (!response.ok) {
-    await handleHttpError(response)
+    await handleHttpError(response, context)
   }
 
   const reader = response.body?.getReader()
@@ -293,6 +274,35 @@ export async function streamFetch(
   }
 
   await processStream(reader, onEvent)
+}
+
+/** 도메인이 자기 서비스의 오류 문맥을 소유하면서 공통 transport를 재사용하는 경계. */
+export function createHttpClient(context: HttpErrorContext) {
+  return {
+    handleError: (response: Response) => handleHttpError(response, context),
+    postJson: <T>(
+      url: string,
+      body: unknown,
+      headers: Headers,
+      signal?: AbortSignal,
+    ) => postJson<T>(url, body, headers, context, signal),
+    postFormData: <T>(url: string, body: FormData, headers: Headers) =>
+      postFormData<T>(url, body, headers, context),
+    streamSse: <T = unknown>(
+      url: string,
+      headers: Headers,
+      onEvent: (event: SseEvent<T>) => void,
+      parseData: (value: unknown, eventName: string) => T,
+      signal?: AbortSignal,
+    ) => streamSseFetch(url, headers, onEvent, parseData, signal, context),
+    stream: (
+      url: string,
+      body: unknown,
+      headers: Headers,
+      onEvent: StreamCallback,
+      signal?: AbortSignal,
+    ) => streamFetch(url, body, headers, onEvent, signal, context),
+  }
 }
 
 /** 스트림 데이터 처리 (내부) */

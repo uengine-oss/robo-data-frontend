@@ -4,6 +4,8 @@ export interface UseDragOptions {
   initialX?: number
   initialY?: number
   boundToWindow?: boolean
+  minX?: number
+  minY?: number
 }
 
 export interface UseDragReturn {
@@ -18,11 +20,13 @@ export function useDrag(options: UseDragOptions = {}): UseDragReturn {
   const {
     initialX = 0,
     initialY = 0,
-    boundToWindow = true
+    boundToWindow = true,
+    minX = 0,
+    minY = 0,
   } = options
 
-  const x = ref(initialX)
-  const y = ref(initialY)
+  const x = ref(Math.max(minX, initialX))
+  const y = ref(Math.max(minY, initialY))
   const isDragging = ref(false)
   
   let startX = 0
@@ -57,8 +61,8 @@ export function useDrag(options: UseDragOptions = {}): UseDragReturn {
     if (boundToWindow) {
       // 화면 안에 최소 100px 은 보이도록 clamp (CSS left/top 기반 좌표).
       const PAD = 100
-      newX = Math.max(0, Math.min(window.innerWidth - PAD, newX))
-      newY = Math.max(0, Math.min(window.innerHeight - PAD, newY))
+      newX = Math.max(minX, Math.min(window.innerWidth - PAD, newX))
+      newY = Math.max(minY, Math.min(window.innerHeight - PAD, newY))
     }
 
     x.value = newX
@@ -72,8 +76,8 @@ export function useDrag(options: UseDragOptions = {}): UseDragReturn {
   }
 
   function resetPosition() {
-    x.value = initialX
-    y.value = initialY
+    x.value = Math.max(minX, initialX)
+    y.value = Math.max(minY, initialY)
   }
 
   onUnmounted(() => {
@@ -89,4 +93,3 @@ export function useDrag(options: UseDragOptions = {}): UseDragReturn {
     resetPosition
   }
 }
-

@@ -100,42 +100,56 @@ const SCENES = [
 ]
 
 /**
- * 챕터 제목을 화면 중앙 아래에 잠깐 띄운다(사용자 지시 2026-07-21).
+ * 챕터 자막을 **왼쪽 하단**에 부드럽게 띄웠다가 지운다(사용자 지시 2026-07-21).
+ * 계속 유지하지 않는다 — 화면을 가리지 않고, 지금 무엇을 보는지만 알려주고 물러난다.
  *
- * ffmpeg drawtext 대신 DOM 오버레이를 쓴다 — 한글 폰트 경로에 의존하지 않고, 화면 폭에 맞춰
- * 자동으로 줄어들어 **삐져나오지 않는다**. 그래프를 가리지 않도록 하단에 두고 곧 사라진다.
+ * ffmpeg drawtext 대신 DOM 오버레이를 쓴다: 한글 폰트 경로에 의존하지 않고, 화면 폭 기준
+ * `max-width` 로 잘려 **삐져나오지 않는다**.
  */
 async function showChapter(page, index, title, subtitle) {
   await page.evaluate(({ index, title, subtitle, ms }) => {
     document.querySelector('#e2e-chapter')?.remove()
+
+    // 왼쪽 하단이되 **캔버스 기준**이다. 화면 왼쪽 끝에 두면 Navigator 트리 위에 겹쳐 읽히지 않는다
+    // (실측). 캔버스 위치를 읽어 그 안쪽에 붙인다 — 패널 폭이 바뀌어도 따라간다.
+    const canvas = document.querySelector('canvas')
+    const box = canvas ? canvas.getBoundingClientRect() : { left: 0, bottom: window.innerHeight, width: window.innerWidth }
+    const left = Math.round(box.left + 36)
+    const bottom = Math.round(window.innerHeight - box.bottom + 36)
+
     const el = document.createElement('div')
     el.id = 'e2e-chapter'
     el.style.cssText = [
-      'position:fixed', 'left:50%', 'bottom:8%', 'transform:translateX(-50%)',
+      'position:fixed', `left:${left}px`, `bottom:${bottom}px`,
       'z-index:99999', 'pointer-events:none',
-      'max-width:78vw', 'box-sizing:border-box',
-      'padding:18px 34px', 'border-radius:14px',
-      'background:rgba(16,18,22,0.88)', 'border:1px solid rgba(255,255,255,0.10)',
-      'box-shadow:0 10px 40px rgba(0,0,0,0.45)',
-      'font-family:system-ui,"Malgun Gothic",sans-serif', 'text-align:center',
-      'opacity:0', 'transition:opacity 480ms ease',
+      `max-width:${Math.round(box.width * 0.6)}px`, 'box-sizing:border-box',
+      'padding:14px 20px', 'border-radius:10px',
+      // 그래프 위에 얹히므로 은은한 배경으로 대비를 확보한다. 완전 불투명은 화면을 가린다.
+      'background:linear-gradient(90deg,rgba(12,14,18,0.86),rgba(12,14,18,0.62))',
+      'border-left:3px solid #5b8def',
+      'font-family:system-ui,"Malgun Gothic",sans-serif',
+      'opacity:0', 'transform:translateY(10px)',
+      'transition:opacity 620ms ease, transform 620ms ease',
     ].join(';')
     el.innerHTML =
-      `<div style="font-size:13px;letter-spacing:.16em;color:#7f8b9c;margin-bottom:8px">`
+      `<div style="font-size:11px;letter-spacing:.18em;color:#8fa3c0;font-weight:600;margin-bottom:6px">`
       + `CHAPTER ${String(index).padStart(2, '0')}</div>`
-      + `<div style="font-size:34px;font-weight:700;color:#f2f4f8;line-height:1.25;`
-      + `white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${title}</div>`
+      + `<div style="font-size:27px;font-weight:700;color:#f4f6fa;line-height:1.3">${title}</div>`
       + (subtitle
-        ? `<div style="font-size:15px;color:#9aa6b6;margin-top:10px;line-height:1.5">${subtitle}</div>`
+        ? `<div style="font-size:14px;color:#aab6c6;margin-top:6px;line-height:1.5">${subtitle}</div>`
         : '')
     document.body.appendChild(el)
-    requestAnimationFrame(() => { el.style.opacity = '1' })
+    requestAnimationFrame(() => {
+      el.style.opacity = '1'
+      el.style.transform = 'translateY(0)'
+    })
     setTimeout(() => {
       el.style.opacity = '0'
-      setTimeout(() => el.remove(), 520)
+      el.style.transform = 'translateY(-6px)'
+      setTimeout(() => el.remove(), 700)
     }, ms)
   }, { index, title, subtitle, ms: CHAPTER_MS })
-  await page.waitForTimeout(CHAPTER_MS + 700)   // 제목이 완전히 사라진 뒤 대사가 시작된다
+  await page.waitForTimeout(CHAPTER_MS + 900)   // 완전히 사라진 뒤 대사가 시작된다
 }
 
 async function gotoGraphTab(page) {

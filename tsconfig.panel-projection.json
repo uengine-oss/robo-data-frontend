@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "src/features/code-analysis/panelGraphProjection.ts",
+    "src/shared/types/index.ts"
+  ],
+  "references": []
+}

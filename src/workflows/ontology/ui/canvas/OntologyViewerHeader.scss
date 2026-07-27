@@ -1,0 +1,846 @@
+.viewer-header .dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.viewer-header button:focus-visible,
+.viewer-header select:focus-visible,
+.viewer-header input:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+.light-mode .viewer-header .dialog-overlay {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+
+.viewer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  /* 스키마 에디터와 통일된 배경 (glassmorphism 제거) */
+  background: rgba(30, 30, 40, 0.4);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.viewer-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.viewer-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.agent-monitor-connection-error {
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--color-warning, #f59e0b);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+  position: relative;
+}
+
+/* 온톨로지 목록 드롭다운 */
+.ontology-list-dropdown {
+  position: relative;
+}
+
+.ontology-list-dropdown .action-btn {
+  position: relative;
+}
+
+.dropdown-arrow {
+  margin-left: 4px;
+  font-size: 0.75rem;
+  opacity: 0.7;
+  transition: transform 0.2s ease;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 320px;
+  max-width: 400px;
+  max-height: 500px;
+  background: rgba(20, 20, 30, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  overflow: hidden;
+  animation: slideDown 0.2s ease;
+}
+
+.dropdown-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 20px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.dropdown-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.dropdown-state {
+  display: grid;
+  gap: 10px;
+  margin: 10px;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.dropdown-state.error {
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.dropdown-state.warning {
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(251, 191, 36, 0.35);
+}
+
+.dropdown-state.info {
+  color: #bfdbfe;
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(96, 165, 250, 0.35);
+}
+
+.dropdown-state.success {
+  color: #bbf7d0;
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(74, 222, 128, 0.35);
+}
+
+.dropdown-state button {
+  justify-self: start;
+  padding: 5px 10px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.dropdown-state button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dropdown-state button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.dropdown-list {
+  max-height: 500px;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.dropdown-item {
+  padding: 12px 16px;
+  margin-bottom: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  cursor: default;
+  transition: all 0.2s ease;
+}
+
+.dropdown-item:hover:not(.editing) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(99, 102, 241, 0.4);
+  transform: translateX(4px);
+}
+
+.dropdown-item.active {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+.dropdown-item.editing {
+  border-color: rgba(99, 102, 241, 0.5);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.dropdown-item-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.dropdown-item-name {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.dropdown-item-name:focus-visible,
+.dropdown-state button:focus-visible,
+.edit-name-btn-small:focus-visible,
+.delete-schema-btn:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+.dropdown-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.delete-schema-btn {
+  margin-left: auto;
+  padding: 2px 6px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  font-size: 0.875rem;
+  border-radius: 4px;
+}
+
+.delete-schema-btn:hover {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.15);
+}
+
+.node-count-small {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.updated-at-small {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.edit-name-btn-small {
+  padding: 2px 6px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  transition: all 0.2s ease;
+  opacity: 0;
+}
+
+.dropdown-item:hover .edit-name-btn-small,
+.edit-name-btn-small:focus-visible {
+  opacity: 1;
+}
+
+.edit-name-btn-small:disabled,
+.delete-schema-btn:disabled,
+.schema-load-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.edit-name-btn-small:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.action-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(99, 179, 237, 0.4);
+}
+
+.action-btn.primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+}
+
+.action-btn.primary:hover {
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+  transform: translateY(-1px);
+}
+
+.action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+.layout-select {
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  font-size: 0.8125rem;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* 헤더에 배치된 레이아웃 드롭다운 */
+.header-layout-select {
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  font-size: 0.8125rem;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  height: 36px;
+}
+
+.header-layout-select:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.dropdown-arrow-small {
+  font-size: 0.65rem;
+  margin-left: 2px;
+}
+
+.action-btn.small {
+  padding: 8px 16px;
+  font-size: 0.75rem;
+}
+
+.action-btn.small.secondary {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.action-btn.small.secondary:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.action-btn.success {
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  border: none;
+  box-shadow: 0 4px 15px rgba(34, 197, 94, 0.3);
+}
+
+.action-btn.success:hover:not(:disabled) {
+  box-shadow: 0 6px 20px rgba(34, 197, 94, 0.4);
+  transform: translateY(-1px);
+}
+
+.action-btn.success:disabled {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-light);
+  opacity: 0.5;
+}
+
+.causal-brush-actions .action-btn.primary {
+  background: var(--color-accent, #228be6);
+  color: #fff;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.causal-brush-actions .action-btn.primary:hover {
+  filter: brightness(1.1);
+}
+
+.causal-brush-actions .action-btn.secondary {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+/* 온톨로지 삭제 확인 다이얼로그 */
+.delete-confirm-dialog {
+  width: 420px;
+  padding: 24px;
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+
+.delete-confirm-dialog h3 {
+  margin: 0 0 16px;
+  font-size: 1.125rem;
+  color: var(--color-text);
+}
+
+.delete-confirm-message {
+  margin: 0 0 8px;
+  font-size: 0.9375rem;
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+.delete-confirm-dialog .delete-schema-name {
+  display: block;
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-md);
+  color: var(--color-error, #dc2626);
+  font-size: 1rem;
+  word-break: break-word;
+}
+
+.delete-confirm-warning {
+  margin: 0 0 20px;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.delete-confirm-error {
+  margin: -8px 0 20px;
+  padding: 10px 12px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  border-radius: var(--radius-md);
+  color: #fecaca;
+  background: rgba(239, 68, 68, 0.12);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.delete-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.delete-confirm-btn {
+  padding: 8px 18px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-error, #dc2626);
+  color: white;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.delete-confirm-btn:hover {
+  opacity: 0.9;
+}
+
+.delete-confirm-btn:disabled,
+.delete-confirm-actions .cancel-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.schema-name-input {
+  font-size: 1rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(99, 102, 241, 0.2);
+  border: 2px solid rgba(99, 102, 241, 0.5);
+  border-radius: 6px;
+  padding: 4px 8px;
+  width: 100%;
+  max-width: 300px;
+  outline: none;
+}
+
+.schema-name-input:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.schema-inline-error {
+  margin: 4px 0 8px;
+  color: #fecaca;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.light-mode .viewer-header {
+  background: rgba(255, 255, 255, 0.85) !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+}
+
+.light-mode .viewer-header h2 {
+  color: #1e293b !important;
+}
+
+/* 라이트 모드 필터 바 */
+.light-mode .action-btn {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+  color: #334155 !important;
+}
+
+.light-mode .action-btn:hover {
+  background: rgba(255, 255, 255, 1) !important;
+  border-color: #667eea !important;
+}
+
+.light-mode .action-btn.primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  color: white !important;
+}
+
+.light-mode .dropdown-menu {
+  background: rgba(255, 255, 255, 0.98);
+  border-color: #cbd5e1;
+}
+
+.light-mode .dropdown-loading,
+.light-mode .dropdown-empty {
+  color: #64748b;
+}
+
+.light-mode .dropdown-item {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.light-mode .dropdown-item:hover:not(.editing) {
+  background: #f1f5f9;
+  border-color: #818cf8;
+}
+
+.light-mode .dropdown-item-name {
+  color: #1e293b;
+}
+
+.light-mode .dropdown-item-meta,
+.light-mode .node-count-small,
+.light-mode .updated-at-small,
+.light-mode .edit-name-btn-small,
+.light-mode .delete-schema-btn {
+  color: #64748b;
+}
+
+.light-mode .dropdown-state.error {
+  color: #991b1b;
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.light-mode .dropdown-state.warning {
+  color: #92400e;
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.light-mode .dropdown-state.info {
+  color: #1e40af;
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.light-mode .dropdown-state.success {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.light-mode .schema-inline-error,
+.light-mode .delete-confirm-error {
+  color: #991b1b;
+}
+
+.light-mode .delete-confirm-error {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.light-mode .action-btn.small.secondary {
+  background: rgba(0, 0, 0, 0.05) !important;
+  border: 1px solid rgba(0, 0, 0, 0.15) !important;
+  color: #475569 !important;
+}
+
+.light-mode .action-btn.small.secondary:hover {
+  background: rgba(0, 0, 0, 0.08) !important;
+  border-color: rgba(0, 0, 0, 0.2) !important;
+}
+
+.light-mode .layout-select,
+.light-mode .header-layout-select {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border: 1px solid rgba(0, 0, 0, 0.1) !important;
+  color: #334155 !important;
+}
+
+.light-mode .header-layout-select:hover {
+  background: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.2) !important;
+}
+
+.light-mode .action-btn.success {
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%) !important;
+  color: white !important;
+}
+
+/* Agent Monitor styles */
+.agent-monitor-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.whatif-toggle-btn {
+  background: rgba(99, 102, 241, 0.15) !important;
+  border-color: rgba(99, 102, 241, 0.4) !important;
+  color: #a5b4fc !important;
+}
+
+.whatif-toggle-btn:hover {
+  background: rgba(99, 102, 241, 0.3) !important;
+  border-color: rgba(99, 102, 241, 0.7) !important;
+}
+
+.whatif-toggle-btn.active {
+  background: #6366f1 !important;
+  color: #fff !important;
+  border-color: #6366f1 !important;
+}
+
+.viewer-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 8px;
+  }
+
+.viewer-title {
+    min-height: 30px;
+  }
+
+.viewer-header h2 {
+    font-size: 1.05rem;
+    white-space: nowrap;
+  }
+
+.agent-monitor-status {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+.header-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    gap: 6px;
+  }
+
+.header-actions > *,
+  .header-actions .action-btn,
+  .header-actions .layout-select {
+    width: 100%;
+    min-width: 0;
+  }
+
+.header-actions .action-btn {
+    justify-content: center;
+    padding: 8px 7px;
+    overflow: hidden;
+    font-size: 0.75rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+.header-actions .layout-select {
+    padding: 7px 24px 7px 8px;
+    font-size: 0.75rem;
+    text-overflow: ellipsis;
+  }
+
+.ontology-list-dropdown .dropdown-menu {
+    left: auto;
+    right: 0;
+    width: min(330px, calc(100vw - 68px));
+    min-width: 0;
+    max-width: none;
+    max-height: min(500px, calc(100dvh - 180px));
+  }
+
+
+.relation-editor-dialog .dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dialog-footer-right {
+  display: flex;
+  gap: 10px;
+}
+
+/* 다이얼로그 */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.causal-brush-header .close-btn.small {
+  padding: 4px 8px;
+  font-size: 0.875rem;
+}
+
+.dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+
+.dialog-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--color-text-bright);
+}
+
+.close-btn {
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  font-size: 1.25rem;
+  color: var(--color-text-light);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.close-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-error);
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+}
+
+.cancel-btn {
+  padding: 8px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.cancel-btn:hover {
+  background: var(--color-bg-hover);
+}
+
+.light-mode .dialog-overlay {
+  background: rgba(0, 0, 0, 0.4) !important;
+}
+
+.light-mode .dialog-header {
+  background: rgba(248, 250, 252, 0.95) !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+}
+
+.light-mode .dialog-header h3 {
+  color: #1e293b !important;
+}
+
+.light-mode .close-btn {
+  color: #64748b !important;
+}
+
+.light-mode .close-btn:hover {
+  color: #1e293b !important;
+  background: rgba(0, 0, 0, 0.05) !important;
+}
+
+/* 온톨로지 생성 다이얼로그 - 다이얼로그 푸터 라이트 모드 */
+.light-mode .dialog-footer {
+  background: #f8fafc !important;
+  border-top: 1px solid rgba(0, 0, 0, 0.08) !important;
+}
+
+.light-mode .cancel-btn {
+  color: #475569 !important;
+  border-color: #cbd5e1 !important;
+  background: #ffffff !important;
+}
+
+.light-mode .cancel-btn:hover {
+  background: #f1f5f9 !important;
+}
+
+.light-mode :deep(.schema-based-generator .cancel-btn) {
+  color: #475569 !important;
+  border-color: #cbd5e1 !important;
+}

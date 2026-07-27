@@ -8,7 +8,9 @@
     "build": "vue-tsc --noEmit && vite build",
     "build:docker": "vite build",
     "preview": "vite preview",
-    "type-check": "vue-tsc --noEmit"
+    "type-check": "vue-tsc --noEmit",
+    "test:panel-projection": "node scripts/test-panel-relationship-projection.mjs",
+    "type-check:panel-projection": "tsc -p tsconfig.panel-projection.json"
   },
   "dependencies": {
     "@neo4j-nvl/base": "^1.0.0",
