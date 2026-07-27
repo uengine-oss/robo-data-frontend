@@ -35,7 +35,7 @@ import type {
 import { useRuntimeStore } from '@/shared/stores/runtime'
 import { analyzerApi } from '@/domains/analyzer'
 import { catalogGraphApi } from '@/domains/catalog'
-import { parserApi } from '@/domains/parser'
+import { parserApi, type ParserRequestMetadata } from '@/domains/parser'
 import { isNodeHidden, isLinkHidden, isSystemNode } from '@/shared/utils/graphVisibility'
 import {
   convertNeo4jNode,
@@ -66,7 +66,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const runtimeStore = useRuntimeStore()
 
   // ----- 프로젝트 메타데이터 -----
-  const sourceType = ref<SourceType>('java')
+  const sourceType = ref<SourceType | null>(null)
   const ddl = ref<string[]>([])
   const nameCaseOption = ref<'original' | 'uppercase' | 'lowercase'>('original')
   // Electron 경로 모드: host(architect)가 넘긴 로컬 폴더 절대경로. null이면 브라우저 업로드 모드.
@@ -342,7 +342,6 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const showDataConfirmModal = ref(false)
   const pendingNodeCount = ref(0)
   const pendingUploadFiles = ref<File[]>([])
-  const pendingUploadMeta = ref<BackendRequestMetadata | null>(null)
   const pendingAction = ref<'upload' | 'restart' | null>(null)
 
   // ----- 파이프라인 제어 (진행 상태는 분석 NDJSON 스트림의 phase_event 단일 채널) -----
@@ -357,14 +356,24 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     ddl: ddl.value,
   }))
 
-  const analyzeMeta = computed<BackendRequestMetadata>(() => ({
-    strategy: (sourceType.value === 'oracle' || sourceType.value === 'postgresql') ? 'dbms' : 'framework',
-    target: sourceType.value,
-    nameCase: nameCaseOption.value,
-    datasource: datasourceName.value,
-    inferFkRelations: inferFkRelations.value,
-    project_root: projectRoot.value || undefined,   // 경로 모드면 antlr·robo 둘 다 이 경로 사용
+  const parserMeta = computed<ParserRequestMetadata>(() => ({
+    project_root: projectRoot.value || undefined,
   }))
+
+  const analyzeMeta = computed<BackendRequestMetadata>(() => {
+    const target = sourceType.value
+    if (!target) {
+      throw new Error('ANTLR 자동 언어 감지 결과가 없어 분석을 시작할 수 없습니다.')
+    }
+    return {
+      strategy: (target === 'oracle' || target === 'postgresql') ? 'dbms' : 'framework',
+      target,
+      nameCase: nameCaseOption.value,
+      datasource: datasourceName.value,
+      inferFkRelations: inferFkRelations.value,
+      project_root: projectRoot.value || undefined,
+    }
+  })
 
   /** host가 projectRoot를 넘겼는가 = Electron 경로 모드(업로드 없이 로컬 폴더 분석). */
   const isPathMode = computed(() => !!projectRoot.value)
@@ -376,13 +385,12 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   // ----- 개별 단계 함수 -----
 
-  async function doUpload(files: File[], meta: BackendRequestMetadata) {
+  async function doUpload(files: File[]) {
     currentStep.value = '[1단계] 파일 업로드 중...'
     addMessage('message', `📤 파일 ${files.length}개를 안전하게 올리는 중이에요...`)
 
-    const result = await parserApi.uploadFiles(meta, files, runtimeStore.getHeaders())
+    const result = await parserApi.uploadFiles(parserMeta.value, files, runtimeStore.getHeaders())
 
-    sourceType.value = meta.target as SourceType
     uploadedFiles.value = result.files
     uploadedDdlFiles.value = result.ddlFiles
 
@@ -397,7 +405,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     addMessage('message', '🔧 코드 구조를 찬찬히 살펴보는 중이에요...')
 
     await parserApi.parseStream(
-      analyzeMeta.value,
+      parserMeta.value,
       runtimeStore.getHeaders(),
       (event) => {
         switch (event.type) {
@@ -711,20 +719,19 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     }
   }
 
-  async function uploadFiles(files: File[], meta: BackendRequestMetadata) {
+  async function uploadFiles(files: File[]) {
     addMessage('message', '🔍 이전에 분석한 데이터가 있는지 확인하는 중이에요...')
     const { hasData, nodeCount } = await checkExistingData()
 
     if (hasData) {
       pendingNodeCount.value = nodeCount
       pendingUploadFiles.value = files
-      pendingUploadMeta.value = meta
       pendingAction.value = 'upload'
       showDataConfirmModal.value = true
       return
     }
 
-    await executeUploadPipeline(files, meta)
+    await executeUploadPipeline(files)
   }
 
   async function handleDataConfirmAction(
@@ -739,7 +746,6 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     if (action === 'cancel') {
       addMessage('message', currentAction === 'restart' ? '⏹️ 인제스천이 취소되었습니다.' : '⏹️ 업로드가 취소되었습니다.')
       pendingUploadFiles.value = []
-      pendingUploadMeta.value = null
       pendingAction.value = null
       return
     }
@@ -753,7 +759,6 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
       } catch (error) {
         addMessage('error', `❌ 기존 데이터 삭제 실패: ${error}`)
         pendingUploadFiles.value = []
-        pendingUploadMeta.value = null
         pendingAction.value = null
         throw error
       }
@@ -770,25 +775,24 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
       await executeRestartPipeline()
     } else {
       const files = pendingUploadFiles.value
-      const meta = pendingUploadMeta.value
       pendingUploadFiles.value = []
-      pendingUploadMeta.value = null
       pendingAction.value = null
 
-      if (files.length > 0 && meta) {
-        await executeUploadPipeline(files, meta)
+      if (files.length > 0) {
+        await executeUploadPipeline(files)
       }
     }
   }
 
-  async function executeUploadPipeline(files: File[], meta: BackendRequestMetadata) {
+  async function executeUploadPipeline(files: File[]) {
     isProcessing.value = true
     currentPhaseIndex.value = -1
     currentPhaseProgress.value = 0
     clearMessages()
 
     try {
-      await doUpload(files, meta)
+      sourceType.value = null
+      await doUpload(files)
       await doParse()
       if (!await doAnalyze()) return
 
@@ -831,6 +835,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   }
 
   async function executeRestartPipeline(): Promise<void> {
+    sourceType.value = null
     isProcessing.value = true
     currentPhaseIndex.value = -1
     currentPhaseProgress.value = 0

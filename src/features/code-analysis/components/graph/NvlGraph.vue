@@ -30,6 +30,7 @@ import { storageVersion } from '@/shared/utils/graphStyleStorage'
 import { useNavigatorStore } from '@/workflows/code-analysis'
 import { storeToRefs } from 'pinia'
 import { useGroupHulls, type HullLevel } from './useGroupHulls'
+import { planSevereClusterSeparation, type PositionedCluster } from './clusterGeometry'
 
 // ============================================================================
 // 타입 정의
@@ -112,6 +113,8 @@ const ANCHOR_SIZE = 46           // 멤버보다 약간 크게(허브). 이름�
 // 앵커↔멤버 헬퍼 링크(허브 스포크) — 배경에 가깝게 옅게 칠해 거의 안 보이게.
 const ANCHOR_LINK_PREFIX = '__anchorlink__:'
 const ANCHOR_LINK_COLOR = '#32353c'
+const SEVERE_CLUSTER_OVERLAP_RATIO = 0.35
+const CLUSTER_GAP_CSS_PX = 24
 
 // ============================================================================
 // Props & Emits
@@ -164,6 +167,22 @@ const containerRef = ref<HTMLElement>()
 const nvlInstance = shallowRef<NVL | null>(null)
 const isInitializing = ref(false)
 let needsFit = false   // 라이브 물리 정착(onLayoutDone) 시 1회 프레임할지 — 최초/뷰전환에만 true
+let clusterLayoutGeneration = 0
+let separatedClusterGeneration = -1
+
+interface ClusterSeparationSnapshot {
+  generation: number
+  adjustedPairCount: number
+  severeBefore: number
+  severeAfter: number
+  maxOverlapBefore: number
+  maxOverlapAfter: number
+  maxTranslation: number
+  settleP95MovementCss: number
+}
+
+const clusterSeparationSnapshot = ref<ClusterSeparationSnapshot | null>(null)
+const clusterSeparationStatus = ref<'idle' | 'pending' | 'measured' | 'skipped-unstable'>('idle')
 
 // 그룹 영역(바운디드 컨텍스트) 오버레이. 변환·hull·동기화는 useGroupHulls 가 캡슐화하고,
 // 여기서는 라이프사이클 배선만 한다(단일 책임 분리).
@@ -337,7 +356,14 @@ async function initNvl(): Promise<void> {
     {
       // 라이브 물리: 매 틱 헐 추종, 정착(onLayoutDone) 시 최초/뷰전환에만 1회 프레임(드래그 후엔 안 튐).
       onLayoutStep: () => groupHulls.redraw(),
-      onLayoutDone: () => { if (needsFit) fitView(); groupHulls.redraw() }
+      onLayoutDone: () => {
+        if (needsFit) {
+          separateSevereClusterOverlaps()
+          fitView()
+          needsFit = false
+        }
+        groupHulls.redraw()
+      }
     }
   )
 
@@ -364,12 +390,167 @@ function scheduleFit(): void {
   needsFit = true
   if (fitTimer) clearTimeout(fitTimer)
   let tries = 0
-  const tick = () => {
+  let settleChecks = 0
+  let stableSamples = 0
+  let settleP95MovementCss = Number.POSITIVE_INFINITY
+  let previousPositions: Map<string, { x: number; y: number }> | null = null
+
+  const finish = () => {
     if (!needsFit || !nvlInstance.value) return
+    separateSevereClusterOverlaps(
+      Number.isFinite(settleP95MovementCss) ? settleP95MovementCss : 0,
+    )
+    fitView()
+    needsFit = false
+    fitTimer = undefined
+  }
+
+  const waitForSettlement = () => {
+    const nvl = nvlInstance.value
+    if (!needsFit || !nvl) {
+      fitTimer = undefined
+      return
+    }
+    const current = new Map(
+      nvl.getNodePositions().map(position => [
+        position.id,
+        { x: position.x, y: position.y },
+      ]),
+    )
+    let movements: number[] = []
+    if (previousPositions && previousPositions.size === current.size) {
+      for (const [id, position] of current) {
+        const previous = previousPositions.get(id)
+        if (!previous) {
+          movements = []
+          break
+        }
+        movements.push(Math.hypot(position.x - previous.x, position.y - previous.y))
+      }
+    }
+    previousPositions = current
+    movements.sort((first, second) => first - second)
+    const p95World = movements[Math.floor(movements.length * 0.95)]
+      ?? Number.POSITIVE_INFINITY
+    settleP95MovementCss = p95World
+      * nvl.getScale()
+      / (window.devicePixelRatio || 1)
+    // NVL의 살아 있는 force는 저진폭 이동을 계속 보고할 수 있다. 화면상 2px 미만이면
+    // 현재 보기의 정상적인 미세 이동으로 보고, 큰 출렁임만 정착을 지연시킨다.
+    stableSamples = settleP95MovementCss <= 2 ? stableSamples + 1 : 0
+    settleChecks += 1
+    if (!nvl.isLayoutMoving() || stableSamples >= 3) {
+      finish()
+      return
+    }
+    if (settleChecks >= 80) {
+      // 불안정한 force 위에 좌표를 덮어쓰면 이후 출렁임이 생긴다. 이 경우 보정 자체를 안전하게 생략한다.
+      clusterSeparationStatus.value = 'skipped-unstable'
+      fitView()
+      needsFit = false
+      fitTimer = undefined
+      logger.debug('[NvlGraph] cluster overlap adjustment skipped: layout did not settle')
+      return
+    }
+    fitTimer = setTimeout(waitForSettlement, 450)
+  }
+
+  const tick = () => {
+    if (!needsFit || !nvlInstance.value) {
+      fitTimer = undefined
+      return
+    }
     fitView(); groupHulls.redraw()
-    if (++tries < 5) fitTimer = setTimeout(tick, 450)
+    if (++tries < 5) {
+      fitTimer = setTimeout(tick, 450)
+      return
+    }
+    if (props.clusterKeyOf) {
+      fitTimer = setTimeout(waitForSettlement, 450)
+      return
+    }
+    finish()
   }
   fitTimer = setTimeout(tick, 450)
+}
+
+/**
+ * 현재 force 결과를 보존한 채 심하게 겹친 군집만 한 번 통째로 평행 이동한다.
+ * 노드를 pin하거나 free layout으로 바꾸지 않으며, 같은 layout generation에는 재실행하지 않는다.
+ */
+function separateSevereClusterOverlaps(settleP95MovementCss = 0): boolean {
+  const nvl = nvlInstance.value
+  const keyOf = props.clusterKeyOf
+  if (!nvl || !keyOf || separatedClusterGeneration === clusterLayoutGeneration) return false
+
+  separatedClusterGeneration = clusterLayoutGeneration
+  const positionById = new Map(
+    nvl.getNodePositions().map(position => [position.id, position]),
+  )
+  const grouped = new Map<string, PositionedCluster>()
+  for (const node of props.graphData.nodes) {
+    if (!nodeMap.has(node.id)) continue
+    const position = positionById.get(node.id)
+    if (!position) continue
+    const key = keyOf(node) ?? '__ungrouped__'
+    let cluster = grouped.get(key)
+    if (!cluster) {
+      cluster = { key, points: [] }
+      grouped.set(key, cluster)
+    }
+    cluster.points.push({ id: node.id, x: position.x, y: position.y })
+  }
+
+  for (const [anchorId] of anchorMembers) {
+    const key = anchorId.slice(ANCHOR_PREFIX.length)
+    const position = positionById.get(anchorId)
+    const cluster = grouped.get(key)
+    if (position && cluster) {
+      cluster.points.push({ id: anchorId, x: position.x, y: position.y })
+    }
+  }
+
+  const worldGap = CLUSTER_GAP_CSS_PX
+    * (window.devicePixelRatio || 1)
+    / Math.max(nvl.getScale(), 0.0001)
+  const plan = planSevereClusterSeparation([...grouped.values()], {
+    severeOverlapRatio: SEVERE_CLUSTER_OVERLAP_RATIO,
+    gap: worldGap,
+  })
+  const severeBefore = plan.before.filter(
+    overlap => overlap.ratioToSmaller >= SEVERE_CLUSTER_OVERLAP_RATIO,
+  ).length
+  const severeAfter = plan.after.filter(
+    overlap => overlap.ratioToSmaller >= SEVERE_CLUSTER_OVERLAP_RATIO,
+  ).length
+  const maxTranslation = Math.max(
+    0,
+    ...plan.translations.map(translation => Math.hypot(translation.dx, translation.dy)),
+  )
+  clusterSeparationSnapshot.value = {
+    generation: clusterLayoutGeneration,
+    adjustedPairCount: plan.adjustedPairCount,
+    severeBefore,
+    severeAfter,
+    maxOverlapBefore: plan.before[0]?.ratioToSmaller ?? 0,
+    maxOverlapAfter: plan.after[0]?.ratioToSmaller ?? 0,
+    maxTranslation,
+    settleP95MovementCss,
+  }
+  clusterSeparationStatus.value = 'measured'
+
+  const positions = plan.positions.filter(
+    (position): position is typeof position & { id: string } => typeof position.id === 'string',
+  )
+  if (maxTranslation <= 0.01 || positions.length === 0) return false
+
+  nvl.setNodePositions(positions, false)
+  logger.debug('[NvlGraph] severe cluster overlap one-shot adjustment', {
+    ...clusterSeparationSnapshot.value,
+    threshold: SEVERE_CLUSTER_OVERLAP_RATIO,
+  })
+  groupHulls.redraw()
+  return true
 }
 
 /**
@@ -416,7 +597,11 @@ function layoutClusters(): void {
   const keyOf = props.clusterKeyOf
   const nvl = nvlInstance.value
   if (!nvl) return
-  if (!keyOf) { clearAnchors(); return }
+  if (!keyOf) {
+    clusterSeparationStatus.value = 'idle'
+    clearAnchors()
+    return
+  }
 
   const groups = new Map<string, string[]>()
   for (const node of props.graphData.nodes) {
@@ -426,8 +611,16 @@ function layoutClusters(): void {
     if (ids) ids.push(node.id)
     else groups.set(key, [node.id])
   }
-  if (groups.size === 0) { clearAnchors(); return }
+  if (groups.size === 0) {
+    clusterSeparationStatus.value = 'idle'
+    clearAnchors()
+    return
+  }
 
+  clusterLayoutGeneration += 1
+  separatedClusterGeneration = -1
+  clusterSeparationSnapshot.value = null
+  clusterSeparationStatus.value = 'pending'
   const labelOf = props.clusterLabelOf
   rebuildAnchors([...groups.entries()].map(([key, ids]) => ({
     key, memberIds: ids, label: labelOf ? labelOf(key) : key,
@@ -475,6 +668,7 @@ function clearAnchors(): void {
   }
   anchorMembers.clear()
   anchorLinkIds = []
+  separatedClusterGeneration = -1
 }
 
 function destroyNvl(): void {
@@ -617,9 +811,25 @@ function setupInteractions(): void {
   click.updateCallback('onNodeRightClick', (node: { id: string } | null, _hits: any, evt: MouseEvent) => {
     if (!node?.id) return
     evt.preventDefault()
+    const host = containerRef.value
+    if (!host) return
+    const hostRect = host.getBoundingClientRect()
     contextMenuNodeId.value = node.id
-    contextMenuPosition.value = { x: evt.clientX, y: evt.clientY }
+    contextMenuPosition.value = {
+      x: evt.clientX - hostRect.left,
+      y: evt.clientY - hostRect.top,
+    }
     contextMenuVisible.value = true
+    nextTick(() => {
+      const currentHost = containerRef.value
+      const menu = contextMenuRef.value
+      if (!currentHost || !menu || !contextMenuVisible.value) return
+      const edge = 8
+      contextMenuPosition.value = {
+        x: Math.max(edge, Math.min(contextMenuPosition.value.x, currentHost.clientWidth - menu.offsetWidth - edge)),
+        y: Math.max(edge, Math.min(contextMenuPosition.value.y, currentHost.clientHeight - menu.offsetHeight - edge)),
+      }
+    })
   })
 
   click.updateCallback('onRelationshipClick', (relationship: { id: string } | null) => {
@@ -886,7 +1096,8 @@ defineExpose({
   nodeStats,
   relationshipStats,
   nodeCount: () => nodeMap.size,
-  relationshipCount: () => relationshipMap.size
+  relationshipCount: () => relationshipMap.size,
+  getClusterSeparationSnapshot: () => clusterSeparationSnapshot.value,
 })
 </script>
 
@@ -895,6 +1106,14 @@ defineExpose({
     class="nvl-graph"
     :class="{ 'drag-over': isDragOver }"
     ref="containerRef"
+    :data-cluster-adjustments="clusterSeparationSnapshot?.adjustedPairCount ?? ''"
+    :data-cluster-separation-status="clusterSeparationStatus"
+    :data-cluster-severe-before="clusterSeparationSnapshot?.severeBefore ?? ''"
+    :data-cluster-severe-after="clusterSeparationSnapshot?.severeAfter ?? ''"
+    :data-cluster-max-overlap-before="clusterSeparationSnapshot?.maxOverlapBefore ?? ''"
+    :data-cluster-max-overlap-after="clusterSeparationSnapshot?.maxOverlapAfter ?? ''"
+    :data-cluster-max-translation="clusterSeparationSnapshot?.maxTranslation ?? ''"
+    :data-cluster-settle-p95-css="clusterSeparationSnapshot?.settleP95MovementCss ?? ''"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
     @drop="onDrop"
@@ -968,7 +1187,7 @@ defineExpose({
 }
 
 .context-menu {
-  position: fixed;
+  position: absolute;
   z-index: 1000;
   background: var(--color-bg-secondary, #1e1f23);
   border: 1px solid var(--color-border, #373a40);

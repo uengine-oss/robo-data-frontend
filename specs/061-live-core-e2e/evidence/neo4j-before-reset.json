@@ -1,0 +1,175 @@
+{
+  "database": "neo4j",
+  "nodes": 1841,
+  "relationships": 2873,
+  "labels": [
+    {
+      "label": "ANALYZER_OWNED",
+      "count": 1841
+    },
+    {
+      "label": "APPLICATION_SERVICE",
+      "count": 3
+    },
+    {
+      "label": "CATCH",
+      "count": 101
+    },
+    {
+      "label": "CLASS",
+      "count": 30
+    },
+    {
+      "label": "COMMAND",
+      "count": 30
+    },
+    {
+      "label": "CONSTANT_FIELD",
+      "count": 91
+    },
+    {
+      "label": "DOMAIN_SERVICE",
+      "count": 31
+    },
+    {
+      "label": "ELSE",
+      "count": 34
+    },
+    {
+      "label": "EXAMPLE",
+      "count": 68
+    },
+    {
+      "label": "EXTERNAL",
+      "count": 28
+    },
+    {
+      "label": "EXTERNAL_CHUNK",
+      "count": 33
+    },
+    {
+      "label": "FACTORY",
+      "count": 4
+    },
+    {
+      "label": "FIELD",
+      "count": 129
+    },
+    {
+      "label": "FUNCTION",
+      "count": 14
+    },
+    {
+      "label": "HELPER",
+      "count": 200
+    },
+    {
+      "label": "IF",
+      "count": 113
+    },
+    {
+      "label": "INITIALIZER",
+      "count": 16
+    },
+    {
+      "label": "INTERFACE",
+      "count": 28
+    },
+    {
+      "label": "LOOP",
+      "count": 20
+    },
+    {
+      "label": "METHOD",
+      "count": 784
+    },
+    {
+      "label": "MODULE",
+      "count": 14
+    },
+    {
+      "label": "PACKAGE",
+      "count": 6
+    },
+    {
+      "label": "PROJECT_FILE",
+      "count": 66
+    },
+    {
+      "label": "QUERY",
+      "count": 159
+    },
+    {
+      "label": "QUESTION",
+      "count": 208
+    },
+    {
+      "label": "REPOSITORY",
+      "count": 19
+    },
+    {
+      "label": "RULE",
+      "count": 47
+    },
+    {
+      "label": "TRANSLATOR",
+      "count": 4
+    },
+    {
+      "label": "TRY",
+      "count": 55
+    },
+    {
+      "label": "VALIDATOR",
+      "count": 1
+    }
+  ],
+  "relationshipTypes": [
+    {
+      "type": "BELONGS_TO",
+      "count": 58
+    },
+    {
+      "type": "CALLS",
+      "count": 338
+    },
+    {
+      "type": "HAS_CHUNK",
+      "count": 33
+    },
+    {
+      "type": "HAS_EXAMPLE",
+      "count": 68
+    },
+    {
+      "type": "HAS_MEMBER",
+      "count": 1018
+    },
+    {
+      "type": "HAS_QUESTION",
+      "count": 208
+    },
+    {
+      "type": "HAS_RULE",
+      "count": 47
+    },
+    {
+      "type": "INIT_BY",
+      "count": 15
+    },
+    {
+      "type": "PARENT_OF",
+      "count": 323
+    },
+    {
+      "type": "REFERENCES",
+      "count": 745
+    },
+    {
+      "type": "REFER_TO",
+      "count": 20
+    }
+  ],
+  "nodeFingerprint": "6bb7cdb0fd53f678a766bd1ab041ea33c4b850cbc3f411255d388e06d9ed44d8",
+  "relationshipFingerprint": "382b73802580ede761b63408e0076a0740bd87baff58221640c72604e8b72139"
+}

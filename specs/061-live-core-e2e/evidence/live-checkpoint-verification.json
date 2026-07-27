@@ -1,0 +1,43 @@
+{
+  "status": "passed",
+  "runId": "20260727_022319_7959740ee333",
+  "database": "neo4j",
+  "analysisDurationSeconds": 314.4,
+  "harnessDisposition": "The original result's only failure was superseded multipart capture; upload-payload-checkpoint.json validates the same final UI payload without mutation.",
+  "streams": {
+    "parsingEvents": 51,
+    "parsedExactFiles": 12,
+    "analyzeEvents": 16918,
+    "phaseEvents": 20,
+    "completedPhaseNodes": 18,
+    "nodeEvents": 3692,
+    "uniqueNodeIds": 3552,
+    "relationshipEvents": 12080,
+    "uniqueRelationshipTriples": 10831,
+    "processingEvents": 1045,
+    "fatalErrors": 0,
+    "consoleEligibleEvents": 1053,
+    "lastConsoleEventBeforeCompleteMs": 2473
+  },
+  "neo4j": {
+    "nodes": 3555,
+    "relationships": 10833,
+    "streamedNodeIdsMatched": 3552,
+    "streamedRelationshipTriplesMatched": 10831,
+    "nodePropertyMismatches": 0,
+    "relationshipPropertyMismatches": 0
+  },
+  "visualEvidence": [
+    "03-stream-start-1920x1080.png",
+    "04-console-live-1920x1080.png",
+    "05-navigator-graph-live-1920x1080.png",
+    "06-analysis-complete-dblclick-1920x1080.png"
+  ],
+  "navigatorDoubleClick": "passed before the superseded multipart assertion",
+  "browserErrors": {
+    "pageErrors": 0,
+    "consoleErrors": 0,
+    "requestFailures": 0,
+    "httpFailures": 0
+  }
+}

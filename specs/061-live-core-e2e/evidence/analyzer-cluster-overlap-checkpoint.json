@@ -1,0 +1,28 @@
+{
+  "status": "passed",
+  "separation": {
+    "status": "measured",
+    "adjustedPairCount": 0,
+    "severeBefore": 0,
+    "severeAfter": 0,
+    "maxOverlapBefore": 0,
+    "maxOverlapAfter": 0,
+    "maxTranslation": 0,
+    "settleP95MovementCss": 1.9301737861889638
+  },
+  "scale": 0.3087826782358206,
+  "maxIdleMovement": 49.11563746535363,
+  "idleP95CssPerSample": 1.3777507273590026,
+  "nativeClusterDrag": {
+    "movedWorldDistance": 197.1321388912184,
+    "scaleBefore": 0.3087826782358206,
+    "scaleAfter": 0.3087826782358206,
+    "pinnedNodes": 0,
+    "repeatedCorrection": false
+  },
+  "screenshotPath": "D:\\work\\robo\\project\\robo-data-frontend\\specs\\061-live-core-e2e\\evidence\\screenshots\\checkpoint\\12-analyzer-business-unit-view-1920x1080.png",
+  "pageErrors": [],
+  "consoleErrors": [],
+  "requestFailures": [],
+  "httpFailures": []
+}

@@ -1,6 +1,5 @@
 import type {
   AnalyzeEvent,
-  BackendRequestMetadata,
   FileUploadResponse,
   ParseResponse,
 } from '@/shared/types'
@@ -20,6 +19,11 @@ export interface ParserClientDependencies {
   log?: (...values: unknown[]) => void
 }
 
+export interface ParserRequestMetadata {
+  targetFolder?: string
+  project_root?: string
+}
+
 export function createParserClient({
   baseUrl,
   normalizeUploadPath,
@@ -30,12 +34,14 @@ export function createParserClient({
 }: ParserClientDependencies) {
   return {
     async uploadFiles(
-      metadata: BackendRequestMetadata,
+      metadata: ParserRequestMetadata,
       files: File[],
       headers: Headers,
     ): Promise<FileUploadResponse> {
       const formData = new FormData()
-      formData.append('metadata', JSON.stringify(metadata))
+      if (metadata.targetFolder) {
+        formData.append('metadata', JSON.stringify({ targetFolder: metadata.targetFolder }))
+      }
 
       log('[API] uploadFiles - 업로드할 파일 목록:')
       for (const file of files) {
@@ -52,18 +58,20 @@ export function createParserClient({
     },
 
     async parse(
-      metadata: BackendRequestMetadata,
+      metadata: ParserRequestMetadata,
       headers: Headers,
     ): Promise<ParseResponse> {
-      return postJson<ParseResponse>(`${baseUrl}/parsing`, metadata, headers)
+      const request = metadata.project_root ? { project_root: metadata.project_root } : {}
+      return postJson<ParseResponse>(`${baseUrl}/parsing`, request, headers)
     },
 
     async parseStream(
-      metadata: BackendRequestMetadata,
+      metadata: ParserRequestMetadata,
       headers: Headers,
       onEvent: (event: AnalyzeEvent) => void,
     ): Promise<void> {
-      await stream(`${baseUrl}/parsing`, metadata, headers, onEvent)
+      const request = metadata.project_root ? { project_root: metadata.project_root } : {}
+      await stream(`${baseUrl}/parsing`, request, headers, onEvent)
     },
   }
 }

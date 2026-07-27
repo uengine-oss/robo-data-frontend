@@ -19,7 +19,7 @@ export type Strategy = 'dbms' | 'framework'
 
 /** 프로젝트 메타데이터 (프론트엔드용) */
 export interface ProjectMetadata {
-  sourceType: SourceType
+  sourceType: SourceType | null
   /** ddl 폴더 하위 상대경로 목록 (예: 'tables/a.sql') */
   ddl: string[]
 }

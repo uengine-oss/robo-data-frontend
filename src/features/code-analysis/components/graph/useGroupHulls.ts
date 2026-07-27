@@ -26,6 +26,7 @@ import type { NVL } from '@neo4j-nvl/base'
 import type { Ref } from 'vue'
 import type { GraphNode, GraphLink } from '@/shared/types'
 import { getNodeSize, getRelationshipColor } from '@/shared/config/graphStyles'
+import { convexHull, type ClusterPoint as Pt } from './clusterGeometry'
 
 // ============================================================================
 // 타입
@@ -51,8 +52,6 @@ export interface GroupHullConfig {
   levels: HullLevel[]
 }
 
-interface Pt { x: number; y: number }
-
 // ============================================================================
 // 색상 — 임의 그룹 값에 안정적 팔레트 해시 (같은 값 → 항상 같은 색)
 // ============================================================================
@@ -67,26 +66,6 @@ function hashColor(key: string): string {
   let h = 0
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0
   return PALETTE[Math.abs(h) % PALETTE.length]
-}
-
-// 볼록 껍질(convex hull) — Andrew's monotone chain. 군집 "모양에 맞는" 영역의 외곽. 점 ≤2 면 그대로.
-function convexHull(points: Pt[]): Pt[] {
-  if (points.length <= 2) return points.slice()
-  const pts = points.slice().sort((a, b) => (a.x - b.x) || (a.y - b.y))
-  const cross = (o: Pt, a: Pt, b: Pt) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
-  const lower: Pt[] = []
-  for (const p of pts) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop()
-    lower.push(p)
-  }
-  const upper: Pt[] = []
-  for (let i = pts.length - 1; i >= 0; i--) {
-    const p = pts[i]
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop()
-    upper.push(p)
-  }
-  lower.pop(); upper.pop()
-  return lower.concat(upper)
 }
 
 // ============================================================================

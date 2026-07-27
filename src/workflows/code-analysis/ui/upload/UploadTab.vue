@@ -161,7 +161,7 @@ const handleUploadConfirm = async (metadata: {
   projectStore.setInferFkRelations(metadata.inferFkRelations ?? false)
   
   try {
-    await projectStore.uploadFiles(pendingFiles.value, projectStore.analyzeMeta)
+    await projectStore.uploadFiles(pendingFiles.value)
   } catch (cause: unknown) {
     workflowNotice.value = {
       kind: 'error',

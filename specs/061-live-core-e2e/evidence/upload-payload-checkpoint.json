@@ -1,0 +1,28 @@
+{
+  "status": "passed",
+  "mutationBlocked": true,
+  "files": [
+    "ddl/shopmall_schema.sql",
+    "shop_mall/delivery/shipping.c",
+    "shop_mall/inventory/catalog.c",
+    "shop_mall/inventory/inventory.c",
+    "shop_mall/member/member.c",
+    "shop_mall/member/review_point.c",
+    "shop_mall/order/cart.c",
+    "shop_mall/order/order.c",
+    "shop_mall/payment/payment.c",
+    "shop_mall/payment/promotion.c",
+    "shop_mall/payment/settlement.c",
+    "shop_mall/util/common_util.c",
+    "shop_mall/util/shopmall.h"
+  ],
+  "metadata": null,
+  "languageContract": "ANTLR auto-detection; no target or language is sent by the upload UI",
+  "headers": {
+    "accept-language": "ko"
+  },
+  "requestedDatabase": null,
+  "effectiveDatabaseEvidence": "Analyzer run and Neo4j inventory both report database neo4j",
+  "capturedAt": 1785120587103,
+  "url": "/api/gateway/antlr/fileUpload"
+}

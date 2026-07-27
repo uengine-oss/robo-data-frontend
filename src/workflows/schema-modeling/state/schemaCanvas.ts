@@ -96,6 +96,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
 
   // Canvas state
   const nodes = ref<Node<TableNodeData>[]>([])
+  const tableAddOperations = new Map<string, Promise<void>>()
   const edges = ref<Edge[]>([])
 
   // 노드가 변경될 때 엣지 자동 업데이트 (debounced)
@@ -527,51 +528,66 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       requireRelatedSuccess?: boolean
     }
   ) {
+    const nodeId = tableNodeId(table)
     // Check if already on canvas
-    if (nodes.value.some(node => node.id === tableNodeId(table))) {
+    if (nodes.value.some(node => node.id === nodeId)) {
       logger.debug(`[SchemaCanvas] 테이블 ${tableIdentityLabel(table)}은 이미 캔버스에 있습니다`)
       return
     }
 
-    logger.debug(`[SchemaCanvas] 📋 테이블 추가 중: ${table.name} (isPrimary: ${options?.isPrimary ?? true})`)
-
-    // Load columns - 직접 전달된 컬럼이 있으면 사용, 없으면 DB에서 로드
-    let columns: SchemaModelingColumn[]
-    if (options?.columns) {
-      columns = options.columns
-      logger.debug(`[SchemaCanvas] 직접 전달된 컬럼 사용: ${columns.length}개`)
-    } else {
-      columns = await loadTableColumns(table.name, table.schema, table.datasource || '')
+    const inFlight = tableAddOperations.get(nodeId)
+    if (inFlight) {
+      await inFlight
+      return
     }
 
-    // Calculate position
-    const pos = position || calculateNewNodePosition()
+    const operation = (async () => {
+      logger.debug(`[SchemaCanvas] 📋 테이블 추가 중: ${table.name} (isPrimary: ${options?.isPrimary ?? true})`)
 
-    // Create node - 직접 추가한 테이블은 isPrimary=true (기본값)
-    const isPrimary = options?.isPrimary !== false
+      // Load columns - 직접 전달된 컬럼이 있으면 사용, 없으면 DB에서 로드
+      let columns: SchemaModelingColumn[]
+      if (options?.columns) {
+        columns = options.columns
+        logger.debug(`[SchemaCanvas] 직접 전달된 컬럼 사용: ${columns.length}개`)
+      } else {
+        columns = await loadTableColumns(table.name, table.schema, table.datasource || '')
+      }
 
-    const newNode: Node<TableNodeData> = projectSchemaCanvasNode(
-      table,
-      columns,
-      pos,
-      {
-        isPrimary,
-        isObjectType: options?.isObjectType,
-        behaviors: options?.behaviors,
-      },
-    )
+      // Calculate position
+      const pos = position || calculateNewNodePosition()
 
-    nodes.value.push(newNode)
-    logger.debug(`[SchemaCanvas] ✅ 테이블 ${table.name} 추가됨`)
+      // Create node - 직접 추가한 테이블은 isPrimary=true (기본값)
+      const isPrimary = options?.isPrimary !== false
 
-    // Update edges for this table
-    updateEdgesFromRelationships()
+      const newNode: Node<TableNodeData> = projectSchemaCanvasNode(
+        table,
+        columns,
+        pos,
+        {
+          isPrimary,
+          isObjectType: options?.isObjectType,
+          behaviors: options?.behaviors,
+        },
+      )
 
-    // Auto-load related tables (default: true) - ObjectType은 스킵
-    if (options?.autoLoadRelated !== false && !options?.columns) {
-      await loadRelatedTablesFromNeo4j(table, {
-        throwOnFailure: options?.requireRelatedSuccess === true,
-      })
+      nodes.value.push(newNode)
+      logger.debug(`[SchemaCanvas] ✅ 테이블 ${table.name} 추가됨`)
+
+      // Update edges for this table
+      updateEdgesFromRelationships()
+
+      // Auto-load related tables (default: true) - ObjectType은 스킵
+      if (options?.autoLoadRelated !== false && !options?.columns) {
+        await loadRelatedTablesFromNeo4j(table, {
+          throwOnFailure: options?.requireRelatedSuccess === true,
+        })
+      }
+    })()
+    tableAddOperations.set(nodeId, operation)
+    try {
+      await operation
+    } finally {
+      if (tableAddOperations.get(nodeId) === operation) tableAddOperations.delete(nodeId)
     }
   }
 

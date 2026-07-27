@@ -4,10 +4,8 @@ import { createParserClient } from '../../../src/domains/parser/api/client.ts'
 const calls = []
 const logs = []
 const metadata = {
-  strategy: 'dbms',
-  target: 'postgresql',
-  nameCase: 'lowercase',
-  inferFkRelations: true,
+  targetFolder: 'uploaded-source',
+  project_root: 'D:/explicit/project',
 }
 const headers = { 'X-Neo4j-Database': 'contract-db' }
 
@@ -44,17 +42,25 @@ assert.deepEqual(calls.map(({ kind, url }) => [kind, url]), [
   ['json', '/api/gateway/antlr/parsing'],
   ['stream', '/api/gateway/antlr/parsing'],
 ])
-assert.equal(calls[0].body.get('metadata'), JSON.stringify(metadata))
+assert.equal(calls[0].body.get('metadata'), JSON.stringify({ targetFolder: 'uploaded-source' }))
 assert.deepEqual(calls[0].body.getAll('files').map((file) => file.name), [
   'source/table.sql',
   'ddl/t.sql',
 ])
 assert.equal(calls[0].headers, headers)
-assert.equal(calls[1].body, metadata)
+assert.deepEqual(calls[1].body, { project_root: 'D:/explicit/project' })
 assert.equal(calls[1].headers, headers)
-assert.equal(calls[2].body, metadata)
+assert.deepEqual(calls[2].body, { project_root: 'D:/explicit/project' })
 assert.equal(calls[2].headers, headers)
 assert.deepEqual(events, [{ type: 'detected', content: '{"target":"postgresql"}' }])
 assert(logs.some((line) => line.includes('DDL 파일 수: 1개')))
 
-console.log('Parser client contract: upload form + JSON parse + stream parse passed')
+calls.length = 0
+await client.uploadFiles({}, [source], headers)
+await client.parse({}, headers)
+await client.parseStream({}, headers, () => undefined)
+assert.equal(calls[0].body.get('metadata'), null)
+assert.deepEqual(calls[1].body, {})
+assert.deepEqual(calls[2].body, {})
+
+console.log('Parser client contract: parser-only metadata + auto-detection boundary passed')

@@ -1,0 +1,88 @@
+{
+  "status": "passed",
+  "database": "neo4j",
+  "inventoryBefore": {
+    "nodes": 3552,
+    "relationships": 10833
+  },
+  "inventoryAfter": {
+    "nodes": 3552,
+    "relationships": 10833
+  },
+  "live": {
+    "datasource": "shopmall",
+    "health": "healthy",
+    "tables": 22,
+    "responses": [
+      {
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:3000/api/gateway/data-fabric/api/datasources"
+      },
+      {
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:3000/api/gateway/data-fabric/api/datasources/shopmall/health"
+      },
+      {
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:3000/api/gateway/data-fabric/api/datasources/shopmall/tables"
+      }
+    ]
+  },
+  "safety": {
+    "attemptedMutations": [],
+    "createRequests": 0,
+    "deleteRequests": 0
+  },
+  "failureRecovery": {
+    "listResponses": [
+      {
+        "method": "GET",
+        "status": 503,
+        "url": "http://127.0.0.1:3000/api/gateway/data-fabric/api/datasources"
+      },
+      {
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:3000/api/gateway/data-fabric/api/datasources"
+      },
+      {
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:3000/api/gateway/data-fabric/api/datasources/shopmall/health"
+      }
+    ],
+    "tableResponses": [
+      {
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:3000/api/gateway/data-fabric/api/datasources"
+      },
+      {
+        "method": "GET",
+        "status": 503,
+        "url": "http://127.0.0.1:3000/api/gateway/data-fabric/api/datasources/shopmall/tables"
+      },
+      {
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:3000/api/gateway/data-fabric/api/datasources/shopmall/health"
+      },
+      {
+        "method": "GET",
+        "status": 200,
+        "url": "http://127.0.0.1:3000/api/gateway/data-fabric/api/datasources/shopmall/tables"
+      }
+    ],
+    "expectedConsoleErrors": [
+      "Failed to load resource: the server responded with a status of 503 (Service Unavailable)",
+      "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+    ]
+  },
+  "emptyStates": [
+    "datasource list",
+    "selected datasource tables"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "status": "diagnostic_only",
+  "valid_analysis_count": 0,
+  "runId": "20260727_015032_3fde05617bde",
+  "database": "neo4j",
+  "observations": {
+    "datasource": "shopmall",
+    "uploadPayload": "shop_mall source 12 files plus ddl/shopmall_schema.sql",
+    "antlr": "parsed all 12 shop_mall files with EXACT quality",
+    "analyzer": "consumed D:/work/robo/분석대상모음/framework/c/apascrt00010t02_20260406 because its process inherited the repository-local ROBO_DATA_DIR",
+    "termination": "the diagnostic run was explicitly stopped immediately after the identity mismatch was proven",
+    "neo4j": "the invalid graph is reset separately before the valid shopmall run"
+  },
+  "rootCause": "The ANTLR upload server and Analyzer server had independent data-root resolution. The standalone server profile did not inject one shared upload workspace.",
+  "rootFix": "The standalone workspace profile injects PROJECT_ROOT/data into both services. ANTLR honors ROBO_DATA_DIR for server execution while CLI analysis keeps its explicit --data-dir precedence.",
+  "disposition": "This run is not accepted as the required analysis and none of its screenshots or stream counts are completion evidence."
+}

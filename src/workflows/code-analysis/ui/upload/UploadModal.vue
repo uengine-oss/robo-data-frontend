@@ -2,7 +2,6 @@
 import { ref, watch, computed, nextTick, onMounted } from 'vue'
 import UploadTree from './UploadTree.vue'
 import AddMenu from './AddMenu.vue'
-import type { SourceType } from '@/shared/types'
 import type { DetectTypesResponse } from '@/domains/parser'
 import {
   buildUploadTree,
@@ -39,14 +38,12 @@ const modalRef = ref<HTMLElement>()
 const datasourceModalRef = ref<HTMLElement>()
 
 const emit = defineEmits<{
-  confirm: [metadata: { sourceType: SourceType; datasource?: DataSource | null; inferFkRelations?: boolean }]
+  confirm: [metadata: { datasource?: DataSource | null; inferFkRelations?: boolean }]
   cancel: []
   'add-files': [files: File[], reanalyze: boolean]
   'files-updated': [files: File[]]
 }>()
 const files = ref<File[]>([...(props.initialFiles || [])])
-// 소스 타입 placeholder — 분석기(antlr)가 파싱 시 자동 감지해 덮어씀(수동 선택 폐지).
-const sourceType = ref<SourceType>('java')
 
 // 데이터 소스 스토어
 const datasourcesStore = useDatasourcesStore()
@@ -80,9 +77,6 @@ onMounted(async () => {
 watch(showAddDatasourceModal, (isOpen) => {
   if (isOpen) nextTick(() => datasourceModalRef.value?.focus())
 })
-
-// 소스 타입(언어)은 분석기(antlr)가 파싱 시 자동 감지 → 모달 수동 선택·in-modal 감지 폐지(spec 019 analysis-frontend-ux).
-// sourceType 기본값은 placeholder — 파싱 후 analyzer 의 detected 이벤트가 실제 언어로 덮어쓴다.
 
 // 데이터 소스 추가 모달 열기
 function openAddDatasourceModal() {
@@ -223,7 +217,6 @@ const applyPicked = (panel: PanelKind, kind: PickKind, picked: File[], input: HT
 const handleConfirm = () => {
   if (!isValid.value) return
   emit('confirm', {
-    sourceType: sourceType.value,
     datasource: selectedDatasource.value,
     inferFkRelations: inferFkRelations.value
   })
