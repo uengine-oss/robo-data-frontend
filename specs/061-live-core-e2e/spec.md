@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-27
 
-**Status**: In Progress
+**Status**: Complete
 
 **Input**: 대규모 프론트 리팩토링 이후 담당 범위인 Catalog, Data Fabric, Analyzer를 실제
 gateway/backend와 초기화한 `neo4j` 데이터베이스로 검증하고 기준 화면과 대조한다. DataSource

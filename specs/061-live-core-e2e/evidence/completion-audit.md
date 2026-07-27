@@ -89,6 +89,8 @@ nodes while retaining the same 10,833 relationships.
 - Catalog `compileall` passed.
 - Catalog commit:
   `8eabb23 fix: align schema provenance with analyzer graph`.
+- Frontend implementation and evidence commit:
+  `db90524 fix: complete live core refactor verification`.
 - Secret scan found no literal local credentials in the final contracts.
 - `git diff --check` passed in both repositories.
 
