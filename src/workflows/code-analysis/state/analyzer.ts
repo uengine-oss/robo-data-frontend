@@ -886,16 +886,20 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     let ingressSummary: string | undefined
     if (desktopFs?.stageProject) {
       addMessage('message', '📦 선택한 프로젝트를 분석 엔진으로 안전하게 옮기는 중이에요...')
-      const staged = await desktopFs.stageProject({ root: projectRoot.value })
+      let staged
+      try {
+        staged = await desktopFs.stageProject({ root: projectRoot.value })
+      } catch (cause) {
+        const detail = cause instanceof Error ? cause.message : String(cause)
+        addMessage('error', `❌ 프로젝트 반입 실패: ${detail}`)
+        return
+      }
       if (!staged.ok) {
-        throw new Error(staged.error.message)
+        addMessage('error', `❌ 프로젝트 반입 실패: ${staged.error.message}`)
+        return
       }
       usesStagedProjectIngress.value = true
       ingressSummary = `✅ 프로젝트 반입 완료 — 소스 ${staged.data.sourceCount}개 · DDL ${staged.data.ddlCount}개`
-      addMessage(
-        'message',
-        `✅ 프로젝트 반입 완료 — 소스 ${staged.data.sourceCount}개 · DDL ${staged.data.ddlCount}개`
-      )
     } else {
       usesStagedProjectIngress.value = false
     }
