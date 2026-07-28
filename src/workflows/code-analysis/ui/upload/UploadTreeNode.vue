@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { UploadTreeNode } from '@/domains/parser'
+import { IconFileCode } from '@/shared/icons'
 
 interface Props {
   node: UploadTreeNode
@@ -34,13 +35,18 @@ const iconFor = (node: UploadTreeNode) => {
   switch (ext) {
     case 'java': return '☕'
     case 'py': return '🐍'
-    case 'c': case 'h': return '⚙️'
     case 'sql': return '🗄️'
     case 'xml': return '📋'
     case 'json': return '📊'
     case 'properties': return '⚙️'
     default: return '📄'
   }
+}
+
+const isCodeFile = (node: UploadTreeNode) => {
+  if (node.type !== 'file') return false
+  const ext = node.name.split('.').pop()?.toLowerCase()
+  return ext === 'c' || ext === 'h'
 }
 
 const indentStyle = computed(() => ({
@@ -108,7 +114,10 @@ const onDrop = (e: DragEvent) => {
       </button>
       <span v-else class="twisty placeholder"></span>
 
-      <span class="icon">{{ iconFor(node) }}</span>
+      <span class="icon">
+        <IconFileCode v-if="isCodeFile(node)" :size="14" aria-hidden="true" />
+        <template v-else>{{ iconFor(node) }}</template>
+      </span>
       <span class="name" :title="node.relPath">{{ node.name }}</span>
 
       <button v-if="showRemoveButton" class="remove" @click.stop="onRemove" title="제거">×</button>

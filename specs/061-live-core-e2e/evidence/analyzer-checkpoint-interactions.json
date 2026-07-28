@@ -2,73 +2,67 @@
   "status": "passed",
   "database": "neo4j",
   "inventoryBefore": {
-    "nodes": 3552,
-    "relationships": 10833
+    "nodes": 4127,
+    "relationships": 11425
   },
   "inventoryAfter": {
-    "nodes": 3552,
-    "relationships": 10833
+    "nodes": 4127,
+    "relationships": 11425
   },
   "interactions": [
     "Navigator cart FILE drag to canvas",
     "cart FILE canvas double-click expansion",
-    "cart_add_item canvas selection and source detail",
+    "Navigator cart_add_item function double-click, source detail, and downward scroll",
     "canvas-only node removal",
     "Overview TABLE + QUERY + BELONGS_TO projection",
+    "Overview canvas wheel zoom-in: 0.3385574034685724 -> 0.7431242322443712",
     "relationship and node style customization without refit",
     "READS filter off and restoration",
     "name mode toggle: 물리명 -> 논리명",
-    "module and business-unit views with risk-node detail",
-    "semantic search cluster grounded 21 backend node(s) on canvas"
+    "module interaction cohesion/coupling and cross-area relationship risk colors",
+    "semantic search cluster grounded 19 backend node(s) on canvas"
   ],
   "viewModes": [
     {
       "name": "모듈간 상호작용",
       "nodes": 43,
-      "scale": 0.6848904340143673
+      "scale": 0.3113303860614693
     },
     {
       "name": "실제 업무 단위",
       "nodes": 129,
-      "scale": 0.5210863692071175
+      "scale": 0.2201945819618921
     }
   ],
   "clusterSeparation": {
-    "status": "skipped-unstable"
-  },
-  "riskNode": {
-    "id": "code:shop_mall/delivery/shipping.c:zip2",
-    "name": "zip2",
-    "labels": [
-      "FUNCTION",
-      "HELPER",
-      "EMBEDDED",
-      "ANALYZER_OWNED"
-    ],
-    "risk": "low"
+    "status": "measured",
+    "adjustedPairCount": 0,
+    "severeBefore": 0,
+    "severeAfter": 0,
+    "maxOverlapBefore": 0,
+    "maxOverlapAfter": 0,
+    "maxTranslation": 0
   },
   "semanticResult": {
     "nodes": [
+      "code:shop_mall/order/order.c:reserve_stock",
       "code:shop_mall/inventory/catalog.c:catalog_check_stock",
-      "code:shop_mall/order/order.c:rollback_order",
-      "code:shop_mall/inventory/inventory.c:inventory_outbound",
-      "code:shop_mall/inventory/catalog.c:release_stock",
+      "code:shop_mall/inventory/inventory.c:inventory_release_hold",
+      "code:shop_mall/inventory/catalog.c:catalog_cancel_reserve",
       "code:shop_mall/payment/promotion.c:load_event_target",
+      "code:shop_mall/delivery/shipping.c:deduct_stock",
       "code:shop_mall/inventory/inventory.c:inventory_move",
       "code:shop_mall/inventory/inventory.c:load_stock",
-      "code:shop_mall/order/order.c:reserve_stock",
-      "code:shop_mall/inventory/catalog.c:catalog_reserve_for_order",
-      "code:shop_mall/inventory/catalog.c:catalog_cancel_reserve",
-      "code:shop_mall/inventory/catalog.c:load_stock_row",
       "code:shop_mall/inventory/catalog.c:catalog_dispatch",
-      "code:shop_mall/inventory/catalog.c:pick_warehouse",
-      "code:shop_mall/inventory/inventory.c:apply_delta",
-      "code:shop_mall/inventory/inventory.c:inventory_release_hold",
-      "code:shop_mall/order/order.c:checkout_process",
+      "code:shop_mall/inventory/inventory.c:inventory_outbound",
+      "code:shop_mall/inventory/catalog.c:load_stock_row",
       "code:shop_mall/inventory/catalog.c:hold_stock",
-      "code:shop_mall/inventory/inventory.c:log_stock_move",
-      "db:shopmall.order_item",
-      "db:shopmall.orders",
+      "code:shop_mall/inventory/catalog.c:release_stock",
+      "code:shop_mall/inventory/catalog.c:catalog_reserve_for_order",
+      "code:shop_mall/delivery/shipping.c:shipping_request",
+      "code:shop_mall/order/order.c:checkout_process",
+      "code:shop_mall/inventory/inventory.c:inventory_inbound",
+      "code:shop_mall/inventory/inventory.c:inventory_recalc_safe",
       "db:shopmall.product_stock"
     ],
     "phases": [

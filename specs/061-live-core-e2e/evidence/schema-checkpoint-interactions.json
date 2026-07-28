@@ -2,13 +2,13 @@
   "status": "passed",
   "database": "neo4j",
   "inventoryBefore": {
-    "nodes": 3552,
-    "relationships": 10833,
+    "nodes": 4127,
+    "relationships": 11425,
     "fkRelationships": 11
   },
   "inventoryAfter": {
-    "nodes": 3552,
-    "relationships": 10833,
+    "nodes": 4127,
+    "relationships": 11425,
     "fkRelationships": 11
   },
   "schema": {

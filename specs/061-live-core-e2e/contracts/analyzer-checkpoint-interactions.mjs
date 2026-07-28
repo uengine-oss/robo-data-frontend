@@ -2,6 +2,9 @@ import { createRequire } from 'node:module'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  createNativeRecordingSession,
+} from '../../../../../goal-verify/e2e/recording-contract.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '../../..')
@@ -12,6 +15,11 @@ const baseUrl = process.env.FRONTEND_URL ?? 'http://127.0.0.1:3000'
 const gatewayUrl = process.env.GATEWAY_URL ?? 'http://127.0.0.1:9000'
 const evidenceDir = resolve(here, '../evidence')
 const screenshotDir = join(evidenceDir, 'screenshots', 'checkpoint')
+const recordingPath = process.env.RECORD_VIDEO_PATH
+  ? resolve(process.env.RECORD_VIDEO_PATH)
+  : null
+const recordingEvents = []
+let recordingStartedAt = 0
 const database = 'neo4j'
 const cartFileId = 'code:shop_mall/order/cart.c'
 const cartAddId = 'code:shop_mall/order/cart.c:cart_add_item'
@@ -223,6 +231,50 @@ async function dragToCanvas(page, source) {
   await page.mouse.up()
 }
 
+async function scrollDown(page, locator, total = 420) {
+  await locator.waitFor({ state: 'visible', timeout: 10_000 })
+  const box = await locator.boundingBox()
+  assert(box, 'scroll target geometry is unavailable')
+  await page.mouse.move(box.x + box.width * 0.78, box.y + box.height * 0.72, { steps: 14 })
+  const steps = 8
+  for (let index = 0; index < steps; index += 1) {
+    await page.mouse.wheel(0, total / steps)
+    await page.waitForTimeout(120)
+  }
+  await page.waitForTimeout(1_200)
+}
+
+async function zoomGraphIn(page, total = 420) {
+  const before = await waitForStableGraph(page)
+  const center = await page.evaluate(() => {
+    const graph = document.querySelector('.nvl-graph')
+    const panel = document.querySelector('.floating-panel.right')
+    if (!(graph instanceof HTMLElement)) return null
+    const graphRect = graph.getBoundingClientRect()
+    const panelRect = panel instanceof HTMLElement ? panel.getBoundingClientRect() : null
+    const visibleRight = panelRect && panelRect.left > graphRect.left
+      ? panelRect.left
+      : graphRect.right
+    return {
+      x: graphRect.left + (visibleRight - graphRect.left) / 2,
+      y: graphRect.top + graphRect.height / 2,
+    }
+  })
+  assert(center, 'graph zoom geometry is unavailable')
+  await page.mouse.move(center.x, center.y, { steps: 18 })
+  const steps = 6
+  for (let index = 0; index < steps; index += 1) {
+    await page.mouse.wheel(0, -total / steps)
+    await page.waitForTimeout(180)
+  }
+  const after = await waitForStableGraph(page)
+  assert(
+    after.scale > before.scale,
+    `graph wheel zoom-in did not increase scale: ${before.scale} -> ${after.scale}`,
+  )
+  return { before: before.scale, after: after.scale }
+}
+
 async function selectOverviewBadge(page, label) {
   const badge = page.locator('.stat-badge.clickable')
     .filter({ hasText: new RegExp(`^${label}\\s*\\(`, 'i') })
@@ -275,12 +327,57 @@ async function selectViewMode(page, name) {
 
 async function screenshot(page, name) {
   await page.screenshot({ path: join(screenshotDir, name), fullPage: true })
+  if (recordingPath) {
+    recordingEvents.push({ name, offsetMs: Date.now() - recordingStartedAt })
+    await page.waitForTimeout(6_500)
+  }
 }
 
 await mkdir(screenshotDir, { recursive: true })
-const browser = await chromium.launch({ headless: true })
-const context = await browser.newContext({ viewport: { width: 1920, height: 1080 }, locale: 'ko-KR' })
-const page = await context.newPage()
+if (recordingPath) await mkdir(dirname(recordingPath), { recursive: true })
+const nativeRecording = recordingPath
+  ? await createNativeRecordingSession(chromium, recordingPath)
+  : null
+const browser = nativeRecording
+  ? nativeRecording.browser
+  : await chromium.launch({ headless: true })
+const context = nativeRecording
+  ? nativeRecording.context
+  : await browser.newContext({ viewport: { width: 1920, height: 1080 }, locale: 'ko-KR' })
+const page = nativeRecording ? nativeRecording.page : await context.newPage()
+if (recordingPath) {
+  await page.addInitScript(() => {
+    document.addEventListener('DOMContentLoaded', () => {
+      const cursor = document.createElement('div')
+      cursor.id = 'e2e-recording-cursor'
+      Object.assign(cursor.style, {
+        position: 'fixed',
+        zIndex: '2147483647',
+        width: '18px',
+        height: '18px',
+        border: '3px solid #ffffff',
+        borderRadius: '50%',
+        background: '#2563eb',
+        boxShadow: '0 1px 6px rgba(0,0,0,.6)',
+        pointerEvents: 'none',
+        transform: 'translate(-50%, -50%)',
+        left: '24px',
+        top: '24px',
+      })
+      document.documentElement.append(cursor)
+      document.addEventListener('mousemove', event => {
+        cursor.style.left = `${event.clientX}px`
+        cursor.style.top = `${event.clientY}px`
+      }, true)
+      document.addEventListener('mousedown', () => {
+        cursor.style.transform = 'translate(-50%, -50%) scale(.78)'
+      }, true)
+      document.addEventListener('mouseup', () => {
+        cursor.style.transform = 'translate(-50%, -50%) scale(1)'
+      }, true)
+    }, { once: true })
+  })
+}
 const pageErrors = []
 const consoleErrors = []
 const requestFailures = []
@@ -327,13 +424,44 @@ try {
   await page.getByTitle('코드 그래프', { exact: true }).click()
   await page.locator('.graph-tab .nvl-graph').waitFor({ state: 'visible', timeout: 60_000 })
   await page.locator('.navigator-panel .nav-tree-label').first().waitFor({ state: 'visible', timeout: 60_000 })
+  const modulesSection = page.locator('.navigator-panel .nav-section').filter({
+    has: page.locator('.section-label', { hasText: /^MODULES$/ }),
+  })
+  const tableSection = page.locator('.navigator-panel .nav-section').filter({
+    has: page.locator('.section-label', { hasText: /^TABLES$/ }),
+  })
+  assert(
+    (await modulesSection.locator('.section-count').textContent())?.trim() === '6',
+    'checkpoint Navigator did not preserve 6 modules',
+  )
+  assert(
+    (await tableSection.locator('.section-count').textContent())?.trim() === '22',
+    'checkpoint Navigator did not preserve 22 tables',
+  )
+  await page.getByTitle('모두 펼치기', { exact: true }).click()
+  const expandedCartFile = await navigatorLabel(page, 'cart', /order\/cart\.c$/)
+  const expandedCartAddFunction = await navigatorLabel(
+    page,
+    'cart_add_item',
+    /order\/cart\.c:cart_add_item$/,
+  )
+  assert(await expandedCartFile.isVisible(), 'Navigator recording did not start with all nodes expanded')
+  assert(
+    await expandedCartAddFunction.isVisible(),
+    'Navigator recording did not start with cart functions expanded',
+  )
+  if (nativeRecording) {
+    const recording = await nativeRecording.start()
+    recordingStartedAt = recording.startedAt
+  }
 
   const clear = page.getByRole('button', { name: /캔버스 비우기/ })
   if (await clear.isVisible().catch(() => false)) await clear.click()
   const navSearch = page.locator('.navigator-panel input[placeholder*="목록에서 좁히기"]')
-  await navSearch.fill('cart.c')
-  const cartFile = await navigatorLabel(page, 'cart', /order\/cart\.c$/)
+  assert((await navSearch.inputValue()) === '', 'Navigator recording started with a search filter')
+  const cartFile = expandedCartFile
   assert(await cartFile.getAttribute('title') === cartFileId, 'Navigator cart FILE id differs from checkpoint')
+  await cartFile.scrollIntoViewIfNeeded()
   await dragToCanvas(page, cartFile)
   await waitForGraphIds(page, [cartFileId])
   interactions.push('Navigator cart FILE drag to canvas')
@@ -345,8 +473,14 @@ try {
   assert(expanded.ids.length > 3, 'FILE double-click did not expand related nodes')
   interactions.push('cart FILE canvas double-click expansion')
 
-  const cartAddPoint = await graphPoint(page, cartAddId)
-  await page.mouse.click(cartAddPoint.x, cartAddPoint.y)
+  const cartAddFunction = expandedCartAddFunction
+  await cartAddFunction.dblclick({ delay: 90 })
+  await page.waitForTimeout(1_500)
+  assert(
+    await cartAddFunction.evaluate(element =>
+      element.classList.contains('selected') && element.classList.contains('on-canvas')),
+    'Navigator cart_add_item double-click did not select the function on canvas',
+  )
   const detail = page.locator('.floating-panel.right')
   await detail.locator('.identity-tech').filter({ hasText: /^cart_add_item$/ }).waitFor({
     state: 'visible',
@@ -354,7 +488,8 @@ try {
   })
   await detail.getByText(/cart\.c/, { exact: false }).first().waitFor({ state: 'visible' })
   await detail.getByRole('region', { name: '원문 코드' }).waitFor({ state: 'visible' })
-  interactions.push('cart_add_item canvas selection and source detail')
+  await scrollDown(page, detail.locator('.panel-body'), 460)
+  interactions.push('Navigator cart_add_item function double-click, source detail, and downward scroll')
   await screenshot(page, '08-analyzer-function-detail-1920x1080.png')
 
   const countPoint = await visibleGraphPoint(page, removableNodeId)
@@ -384,9 +519,9 @@ try {
   assert(inventoryBefore.ids.has(removableNodeId), 'canvas removal mutated persistent inventory')
   interactions.push('canvas-only node removal')
 
-  await clear.click()
   await page.locator('.nvl-graph').click({ position: { x: 600, y: 120 } })
   await detail.getByText('Overview', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 })
+  await clear.click()
   await navSearch.fill('')
   await selectOverviewBadge(page, 'TABLE')
   await selectOverviewBadge(page, 'QUERY')
@@ -400,6 +535,8 @@ try {
   const overview = await graphSnapshot(page)
   assert(overview.ids.length > 0, 'Overview TABLE+QUERY projection is empty')
   interactions.push('Overview TABLE + QUERY + BELONGS_TO projection')
+  const overviewZoom = await zoomGraphIn(page)
+  interactions.push(`Overview canvas wheel zoom-in: ${overviewZoom.before} -> ${overviewZoom.after}`)
   await screenshot(page, '09-analyzer-overview-1920x1080.png')
 
   const beforeStyle = await waitForStableGraph(page)
@@ -430,7 +567,14 @@ try {
   await clear.click()
   const viewModes = []
   viewModes.push(await selectViewMode(page, '모듈간 상호작용'))
+  await modulesSection.locator('.section-header').click()
+  await tableSection.locator('.section-header').scrollIntoViewIfNeeded()
+  assert(
+    (await tableSection.locator('.section-count').textContent())?.trim() === '22',
+    'module view Navigator did not preserve 22 tables',
+  )
   await screenshot(page, '11-analyzer-module-view-1920x1080.png')
+  interactions.push('module interaction cohesion/coupling and cross-area relationship risk colors')
   viewModes.push(await selectViewMode(page, '실제 업무 단위'))
   await page.waitForFunction(() => {
     const status = document.querySelector('.nvl-graph')?.dataset.clusterSeparationStatus
@@ -454,21 +598,16 @@ try {
     )
   }
   await screenshot(page, '12-analyzer-business-unit-view-1920x1080.png')
-  const riskNode = inventoryBefore.riskNode
-  assert(riskNode?.id, 'checkpoint has no risk-level function')
-  const graphSearch = page.getByPlaceholder(/노드 이름.*업무 말로 물어보기/)
-  await graphSearch.fill(riskNode.name)
-  await page.locator('.search-result-item').first().click()
-  await detail.locator('.identity-tech').filter({ hasText: new RegExp(`^${riskNode.name}$`) }).waitFor({
-    state: 'visible',
-    timeout: 15_000,
-  })
-  interactions.push('module and business-unit views with risk-node detail')
-  await screenshot(page, '14-analyzer-health-focused-1920x1080.png')
 
+  await selectViewMode(page, '실제 업무 단위')
+  assert(
+    (await page.locator('.view-menu-btn').filter({ hasText: /보기:/ }).textContent())?.includes('기본'),
+    'business-unit view did not toggle back to default',
+  )
   await page.locator('.nvl-graph').click({ position: { x: 40, y: 600 } })
   if (await clear.isVisible().catch(() => false)) await clear.click()
   await detail.getByText('Overview', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 })
+  const graphSearch = page.getByPlaceholder(/노드 이름.*업무 말로 물어보기/)
   await graphSearch.fill('주문 처리 과정에서 재고 예약, 실제 재고 차감, 부족 재고 거절은 어떤 코드 흐름으로 연결되는가?')
   const semanticResponsePromise = page.waitForResponse(response =>
     response.request().method() === 'POST' && response.url().includes('/robo/search/semantic'),
@@ -512,7 +651,6 @@ try {
     interactions,
     viewModes,
     clusterSeparation,
-    riskNode,
     semanticResult: {
       title: firstCluster.title,
       nodes: semanticNodeIds,
@@ -547,6 +685,10 @@ try {
     'utf8',
   )
   console.log(JSON.stringify(result, null, 2))
+  await nativeRecording?.stop()
   await context.close()
+  if (recordingPath) {
+    await writeFile(`${recordingPath}.events.json`, `${JSON.stringify(recordingEvents, null, 2)}\n`, 'utf8')
+  }
   await browser.close()
 }

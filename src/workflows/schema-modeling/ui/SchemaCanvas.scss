@@ -1428,14 +1428,14 @@
     }
 
     .source-line-number {
-      color: #0284c7;
+      color: var(--color-text-bright, #ffffff);
       font-weight: 700;
       opacity: 1;
       background: rgba(56, 189, 248, 0.12);
     }
 
     .source-line-content {
-      color: #0c4a6e;
+      color: var(--color-text-bright, #ffffff);
     }
   }
 }

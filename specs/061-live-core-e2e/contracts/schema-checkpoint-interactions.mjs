@@ -2,6 +2,9 @@ import { createRequire } from 'node:module'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  createNativeRecordingSession,
+} from '../../../../../goal-verify/e2e/recording-contract.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '../../..')
@@ -13,6 +16,11 @@ const gatewayUrl = process.env.GATEWAY_URL ?? 'http://127.0.0.1:9000'
 const evidenceDir = resolve(here, '../evidence')
 const screenshotDir = join(evidenceDir, 'screenshots', 'checkpoint')
 const outputPath = join(evidenceDir, 'schema-checkpoint-interactions.json')
+const recordingPath = process.env.RECORD_VIDEO_PATH
+  ? resolve(process.env.RECORD_VIDEO_PATH)
+  : null
+const recordingEvents = []
+let recordingStartedAt = 0
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -59,6 +67,10 @@ async function setPhysicalNames(page) {
 
 async function screenshot(page, name) {
   await page.screenshot({ path: join(screenshotDir, name), fullPage: true })
+  if (recordingPath) {
+    recordingEvents.push({ name, offsetMs: Date.now() - recordingStartedAt })
+    await page.waitForTimeout(6_500)
+  }
 }
 
 async function clickNodeAction(node, title) {
@@ -68,13 +80,64 @@ async function clickNodeAction(node, title) {
   await action.click()
 }
 
+async function scrollDown(page, locator, total = 360) {
+  await locator.waitFor({ state: 'visible', timeout: 10_000 })
+  const box = await locator.boundingBox()
+  assert(box, 'scroll target geometry is unavailable')
+  await page.mouse.move(box.x + box.width * 0.72, box.y + box.height * 0.7, { steps: 14 })
+  const steps = 8
+  for (let index = 0; index < steps; index += 1) {
+    await page.mouse.wheel(0, total / steps)
+    await page.waitForTimeout(120)
+  }
+  await page.waitForTimeout(1_200)
+}
+
 await mkdir(screenshotDir, { recursive: true })
-const browser = await chromium.launch({ headless: true })
-const context = await browser.newContext({
-  viewport: { width: 1920, height: 1080 },
-  locale: 'ko-KR',
-})
-const page = await context.newPage()
+if (recordingPath) await mkdir(dirname(recordingPath), { recursive: true })
+const nativeRecording = recordingPath
+  ? await createNativeRecordingSession(chromium, recordingPath)
+  : null
+const browser = nativeRecording
+  ? nativeRecording.browser
+  : await chromium.launch({ headless: true })
+const context = nativeRecording
+  ? nativeRecording.context
+  : await browser.newContext({ viewport: { width: 1920, height: 1080 }, locale: 'ko-KR' })
+const page = nativeRecording ? nativeRecording.page : await context.newPage()
+if (recordingPath) {
+  await page.addInitScript(() => {
+    document.addEventListener('DOMContentLoaded', () => {
+      const cursor = document.createElement('div')
+      cursor.id = 'e2e-recording-cursor'
+      Object.assign(cursor.style, {
+        position: 'fixed',
+        zIndex: '2147483647',
+        width: '18px',
+        height: '18px',
+        border: '3px solid #ffffff',
+        borderRadius: '50%',
+        background: '#2563eb',
+        boxShadow: '0 1px 6px rgba(0,0,0,.6)',
+        pointerEvents: 'none',
+        transform: 'translate(-50%, -50%)',
+        left: '24px',
+        top: '24px',
+      })
+      document.documentElement.append(cursor)
+      document.addEventListener('mousemove', event => {
+        cursor.style.left = `${event.clientX}px`
+        cursor.style.top = `${event.clientY}px`
+      }, true)
+      document.addEventListener('mousedown', () => {
+        cursor.style.transform = 'translate(-50%, -50%) scale(.78)'
+      }, true)
+      document.addEventListener('mouseup', () => {
+        cursor.style.transform = 'translate(-50%, -50%) scale(1)'
+      }, true)
+    }, { once: true })
+  })
+}
 const pageErrors = []
 const consoleErrors = []
 const requestFailures = []
@@ -140,6 +203,10 @@ try {
   assert(inventoryBefore.fkRelationships === 11, 'Neo4j FK relationship count is not 11')
 
   await page.goto(baseUrl, { waitUntil: 'networkidle', timeout: 60_000 })
+  if (nativeRecording) {
+    const recording = await nativeRecording.start()
+    recordingStartedAt = recording.startedAt
+  }
   await activateSchema(page)
 
   const datasourceHeader = page.getByRole('button', { name: 'shopmall 데이터소스' })
@@ -213,8 +280,51 @@ try {
   const highlightedSource = sourcePanel.locator('.source-line.highlighted')
   await highlightedSource.waitFor({ state: 'visible', timeout: 15_000 })
   assert((await highlightedSource.textContent()).includes('orders'), 'highlighted evidence does not reference orders')
+  const highlightedContrast = await highlightedSource.evaluate((line) => {
+    const parseColor = (value) => {
+      const channels = value.match(/[\d.]+/g)?.map(Number)
+      if (!channels || channels.length < 3) return null
+      return [channels[0], channels[1], channels[2], channels[3] ?? 1]
+    }
+    const composite = (foreground, background) => {
+      const alpha = foreground[3] + background[3] * (1 - foreground[3])
+      if (alpha === 0) return [0, 0, 0, 0]
+      return [
+        ...foreground.slice(0, 3).map((channel, index) =>
+          (channel * foreground[3] + background[index] * background[3] * (1 - foreground[3])) / alpha),
+        alpha,
+      ]
+    }
+    const luminance = (channels) => channels
+      .slice(0, 3)
+      .map(channel => channel / 255)
+      .map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4)
+      .reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0)
+    const content = line.querySelector('.source-line-content')
+    if (!(content instanceof HTMLElement)) return null
+    const foreground = parseColor(getComputedStyle(content).color)
+    const backgroundLayers = []
+    for (let element = line; element instanceof HTMLElement; element = element.parentElement) {
+      const color = parseColor(getComputedStyle(element).backgroundColor)
+      if (color) backgroundLayers.push(color)
+    }
+    const background = backgroundLayers
+      .reverse()
+      .reduce((result, layer) => composite(layer, result), [255, 255, 255, 1])
+    if (!foreground || !background) return null
+    const foregroundLuminance = luminance(foreground)
+    const backgroundLuminance = luminance(background)
+    return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05)
+      / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05)
+  })
+  assert(
+    highlightedContrast && highlightedContrast >= 4.5,
+    `highlighted source text contrast is insufficient: ${highlightedContrast}`,
+  )
   await page.waitForTimeout(400)
   await screenshot(page, '19-schema-source-evidence-1920x1080.png')
+  await scrollDown(page, sourcePanel.locator('.source-panel-content'), 260)
+  await screenshot(page, '19b-schema-source-context-scrolled-1920x1080.png')
   await sourcePanel.locator('.source-panel-header button').click()
   await sourcePanel.waitFor({ state: 'hidden', timeout: 10_000 })
 
@@ -271,6 +381,7 @@ try {
   await relationshipSection.getByRole('button', { name: /추가/ }).click()
   await relationshipSection.getByLabel('출발 컬럼').waitFor({ state: 'visible' })
   await relationshipSection.getByRole('button', { name: '취소' }).click()
+  await scrollDown(page, detail.locator('.detail-panel__content'), 420)
   await detail.locator('.detail-panel__header button').click()
 
   await clickNodeAction(orders, '테이블 데이터 조회')
@@ -417,7 +528,11 @@ try {
   throw error
 } finally {
   await writeFile(outputPath, JSON.stringify(result, null, 2), 'utf8')
+  await nativeRecording?.stop()
   await context.close()
+  if (recordingPath) {
+    await writeFile(`${recordingPath}.events.json`, `${JSON.stringify(recordingEvents, null, 2)}\n`, 'utf8')
+  }
   await browser.close()
 }
 
