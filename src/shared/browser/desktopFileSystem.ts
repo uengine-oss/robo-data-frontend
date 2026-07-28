@@ -14,6 +14,15 @@ export type DesktopFileSystemResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: { message: string } }
 
+export interface DesktopProjectStageResult {
+  fileCount: number
+  sourceCount: number
+  ddlCount: number
+  nontargetCount: number
+  skippedEntryCount: number
+  totalBytes: number
+}
+
 export interface DesktopFileSystemBridge {
   listDir(input: { root: string; path: string }): Promise<DesktopFileSystemResult<DesktopFileEntry[]>>
   readFile(input: { root: string; path: string }): Promise<DesktopFileSystemResult<DesktopFileReadResult>>
@@ -22,6 +31,7 @@ export interface DesktopFileSystemBridge {
   copy(input: { root: string; from: string; to: string }): Promise<DesktopFileSystemResult<{ ok: true }>>
   trash(input: { root: string; path: string }): Promise<DesktopFileSystemResult<{ ok: true }>>
   mkdir(input: { root: string; path: string }): Promise<DesktopFileSystemResult<{ ok: true }>>
+  stageProject(input: { root: string }): Promise<DesktopFileSystemResult<DesktopProjectStageResult>>
 }
 
 declare global {

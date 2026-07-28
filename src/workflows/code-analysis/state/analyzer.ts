@@ -36,6 +36,7 @@ import { useRuntimeStore } from '@/shared/stores/runtime'
 import { analyzerApi } from '@/domains/analyzer'
 import { catalogGraphApi } from '@/domains/catalog'
 import { parserApi, type ParserRequestMetadata } from '@/domains/parser'
+import { getDesktopFileSystemBridge } from '@/shared/browser/desktopFileSystem'
 import { isNodeHidden, isLinkHidden, isSystemNode } from '@/shared/utils/graphVisibility'
 import {
   convertNeo4jNode,
@@ -71,6 +72,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const nameCaseOption = ref<'original' | 'uppercase' | 'lowercase'>('original')
   // Electron 경로 모드: host(architect)가 넘긴 로컬 폴더 절대경로. null이면 브라우저 업로드 모드.
   const projectRoot = ref<string | null>(null)
+  const usesStagedProjectIngress = ref(false)
 
   // ----- 파일 -----
   const uploadedFiles = ref<UploadedFile[]>([])
@@ -357,7 +359,9 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   }))
 
   const parserMeta = computed<ParserRequestMetadata>(() => ({
-    project_root: projectRoot.value || undefined,
+    project_root: projectRoot.value && !usesStagedProjectIngress.value
+      ? projectRoot.value
+      : undefined,
   }))
 
   const analyzeMeta = computed<BackendRequestMetadata>(() => {
@@ -371,15 +375,20 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
       nameCase: nameCaseOption.value,
       datasource: datasourceName.value,
       inferFkRelations: inferFkRelations.value,
-      project_root: projectRoot.value || undefined,
+      project_root: projectRoot.value && !usesStagedProjectIngress.value
+        ? projectRoot.value
+        : undefined,
     }
   })
 
-  /** host가 projectRoot를 넘겼는가 = Electron 경로 모드(업로드 없이 로컬 폴더 분석). */
+  /** host가 projectRoot를 넘겼는가 = Electron/host 경로 모드. */
   const isPathMode = computed(() => !!projectRoot.value)
 
   // ----- Setters -----
-  function setProjectRoot(p: string | null): void { projectRoot.value = p }
+  function setProjectRoot(p: string | null): void {
+    projectRoot.value = p
+    usesStagedProjectIngress.value = false
+  }
   function setDatasourceName(name: string | null): void { datasourceName.value = name }
   function setInferFkRelations(value: boolean): void { inferFkRelations.value = value }
 
@@ -834,12 +843,15 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     await executeRestartPipeline()
   }
 
-  async function executeRestartPipeline(): Promise<void> {
+  async function executeRestartPipeline(ingressSummary?: string): Promise<void> {
     sourceType.value = null
     isProcessing.value = true
     currentPhaseIndex.value = -1
     currentPhaseProgress.value = 0
     clearMessages()
+    if (ingressSummary) {
+      addMessage('message', ingressSummary)
+    }
     clearGraphData()   // 재분석 = 새 결과만 — 이전 그래프/표시명 잔재 제거(누적·혼합 방지)
 
     try {
@@ -859,13 +871,35 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     }
   }
 
-  /** 경로 모드(Electron): 업로드 없이 host가 준 로컬 폴더를 바로 파싱→분석(antlr·robo가 그 경로 직접 읽음). */
+  /**
+   * 경로 모드:
+   * - Electron packaged: main process가 Windows 폴더를 Gateway multipart로 staging한 뒤
+   *   container Parser를 upload mode로 실행한다.
+   * - host와 Parser가 같은 filesystem을 보는 개발 모드: 기존 project_root 직접 경로.
+   */
   async function analyzeProjectPath(): Promise<void> {
     if (!projectRoot.value) {
       addMessage('error', '❌ 분석할 폴더 경로가 없습니다.')
       return
     }
-    await executeRestartPipeline()
+    const desktopFs = getDesktopFileSystemBridge()
+    let ingressSummary: string | undefined
+    if (desktopFs?.stageProject) {
+      addMessage('message', '📦 선택한 프로젝트를 분석 엔진으로 안전하게 옮기는 중이에요...')
+      const staged = await desktopFs.stageProject({ root: projectRoot.value })
+      if (!staged.ok) {
+        throw new Error(staged.error.message)
+      }
+      usesStagedProjectIngress.value = true
+      ingressSummary = `✅ 프로젝트 반입 완료 — 소스 ${staged.data.sourceCount}개 · DDL ${staged.data.ddlCount}개`
+      addMessage(
+        'message',
+        `✅ 프로젝트 반입 완료 — 소스 ${staged.data.sourceCount}개 · DDL ${staged.data.ddlCount}개`
+      )
+    } else {
+      usesStagedProjectIngress.value = false
+    }
+    await executeRestartPipeline(ingressSummary)
   }
 
   function removeFile(relPath: string, type: 'file' | 'ddl' = 'file'): void {
