@@ -5,10 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/test-node-label-role-lens.mjs",
     "build": "vue-tsc --noEmit && vite build",
+    "prebuild:docker": "node scripts/test-node-label-role-lens.mjs",
     "build:docker": "vite build",
     "preview": "vite preview",
     "type-check": "vue-tsc --noEmit",
+    "test:node-role-lens": "node scripts/test-node-label-role-lens.mjs",
     "test:panel-projection": "node scripts/test-panel-relationship-projection.mjs",
     "type-check:panel-projection": "tsc -p tsconfig.panel-projection.json"
   },

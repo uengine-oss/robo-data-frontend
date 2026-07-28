@@ -25,7 +25,7 @@ import {
   getNodeColor, getRelationshipColor, getRelationshipWidth, getNodeSize,
   getRelationshipDisplayName,
 } from '@/shared/config/graphStyles'
-import { colorLabelOf } from '@/shared/utils/nodeLabels'
+import { colorLabelOfNode } from '@/shared/utils/nodeLabels'
 import { storageVersion } from '@/shared/utils/graphStyleStorage'
 import { useNavigatorStore } from '@/workflows/code-analysis'
 import { storeToRefs } from 'pinia'
@@ -139,7 +139,7 @@ const isolatedSet = computed(() => new Set(props.isolatedLabels))
  * 결합이 묻힌다 — 위험은 "발견된 문제" 목록에서 해당 대상만 캔버스에 투영해 본다.
  */
 function resolveNodeColor(labels: string[], properties?: Record<string, unknown>): string {
-  return getNodeColor([colorLabelOf({ labels, properties }, isolatedSet.value)])
+  return getNodeColor([colorLabelOfNode({ labels, properties }, isolatedSet.value)])
 }
 
 const emit = defineEmits<{

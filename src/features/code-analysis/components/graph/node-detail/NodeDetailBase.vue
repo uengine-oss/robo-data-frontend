@@ -13,7 +13,7 @@ import { useCanvasStore } from '@/features/code-analysis/graphCanvas'
 import TextViewer from '@/shared/components/TextViewer.vue'
 import { relationshipRowParts, technicalNodeName } from '@/shared/utils/graphDisplay'
 import { getNodeColor } from '@/shared/config/graphStyles'
-import { colorLabelOf } from '@/shared/utils/nodeLabels'
+import { colorLabelOfNode } from '@/shared/utils/nodeLabels'
 import { buildIdentityRows } from '@/shared/utils/nodeIdentity'
 import { semanticRoleLabels } from '@/shared/utils/nodeLabels'
 
@@ -64,7 +64,7 @@ const roleLabels = computed(() => semanticRoleLabels(props.node))
 // 식별 배지 색 = 그래프 캔버스와 동일한 노드 색(단일 소스 getNodeColor·colorLabelOf 재사용=DRY).
 // 활성 렌즈(isolate된 역할) 따라감(spec 040) — 캔버스 노드 색과 일치. 어떤 포맷이든 color-mix 틴트.
 const badgeColor = computed(() =>
-  getNodeColor([colorLabelOf(props.node, canvasStore.loadedLabels)]))
+  getNodeColor([colorLabelOfNode(props.node, canvasStore.loadedLabels)]))
 
 // 건강지표 — 최종 판정만 저장(spec 020): risk_level(+in_call_cycle). 중간지표(fan/loc/god/table)는 미저장.
 const health = computed(() => {
