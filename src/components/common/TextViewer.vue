@@ -41,6 +41,9 @@ const maxHeightStyle = computed(() => {
 })
 
 interface Block {
+  // 같은 문장이 두 번 나올 수 있어 text 만으로는 key 가 되지 않는다. 만들면서
+  // 순번을 붙여 둔다 — 템플릿에서 v-for 의 인덱스를 다시 꺼내지 않아도 된다.
+  id: number
   kind: 'header' | 'bullet' | 'para'
   text: string
 }
@@ -57,11 +60,11 @@ const blocks = computed<Block[]>(() => {
     const trimmed = line.trim()
     const isHeader = !isIndented && /[:：]$/.test(trimmed)
     if (isHeader) {
-      out.push({ kind: 'header', text: trimmed.replace(/[:：]$/, '') })
+      out.push({ id: out.length, kind: 'header', text: trimmed.replace(/[:：]$/, '') })
     } else if (isIndented) {
-      out.push({ kind: 'bullet', text: trimmed })
+      out.push({ id: out.length, kind: 'bullet', text: trimmed })
     } else {
-      out.push({ kind: 'para', text: trimmed })
+      out.push({ id: out.length, kind: 'para', text: trimmed })
     }
   }
   return out
@@ -75,7 +78,7 @@ const blocks = computed<Block[]>(() => {
     :style="maxHeightStyle ? { maxHeight: maxHeightStyle, overflowY: 'auto' } : undefined"
   >
     <template v-if="hasContent && format === 'auto'">
-      <template v-for="(b, i) in blocks" :key="i">
+      <template v-for="b in blocks" :key="b.id">
         <h5 v-if="b.kind === 'header'" class="tv-header">{{ b.text }}</h5>
         <p v-else-if="b.kind === 'para'" class="tv-para">{{ b.text }}</p>
         <div v-else class="tv-bullet">
