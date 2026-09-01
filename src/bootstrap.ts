@@ -22,10 +22,18 @@ let app: VueApp | null = null
  * @param opts.embedded    host(architect) 안에 끼워질 때 true — analyzer 자체 상단바를 숨긴다.
  * @param opts.projectRoot host(architect, Electron)가 고른 로컬 폴더 경로 — 주면 경로 모드
  *                         (업로드 없이 그 폴더를 직접 분석). 없으면 브라우저 업로드 모드.
+ * @param opts.onProjectRootChange 사용자가 이 화면에서 폴더를 바꿨을 때 host 에 알린다.
+ *                         host 는 자기 저장소(localStorage / workdir ref)를 갱신해 다음
+ *                         마운트에도 같은 값을 넘긴다. 주지 않으면 폴더 변경 UI 를 숨긴다 —
+ *                         알릴 곳이 없는데 바꾸게 두면 다음 마운트에 조용히 되돌아간다.
  */
 export function mount(
   el: string | Element,
-  opts: { embedded?: boolean; projectRoot?: string } = {},
+  opts: {
+    embedded?: boolean
+    projectRoot?: string
+    onProjectRootChange?: (path: string) => void
+  } = {},
 ): () => void {
   // 앱 설정 초기화 (document.title 등)
   initializeAppSettings()
@@ -40,6 +48,8 @@ export function mount(
   if (opts.projectRoot) {
     useAnalyzerStore(pinia).setProjectRoot(opts.projectRoot)
   }
+  // 폴더 변경을 host 에 알릴 통로. 없으면 UploadTab 이 변경 UI 를 숨긴다.
+  app.provide('onProjectRootChange', opts.onProjectRootChange ?? null)
 
   app.mount(el)
 

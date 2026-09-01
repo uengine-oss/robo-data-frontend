@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { logger } from '@/utils/logger'
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, inject, nextTick, watch } from 'vue'
 import { useAnalyzerStore } from '@/stores/analyzer'
 import { useSessionStore } from '@/stores/session'
 import { storeToRefs } from 'pinia'
@@ -32,6 +32,46 @@ const handleRestartPipeline = async () => {
   } catch (error) {
     logger.error('인제스천 실패:', error)
   }
+}
+
+// ── 분석 폴더 바꾸기 ──────────────────────────────────────────────────────
+// 이 경로는 host 가 마운트할 때 넘긴 값이라 여기서 바꾸면 host 도 같이 갱신해야
+// 한다. 그 통로가 없으면(standalone 실행 등) 바꿔도 다음 마운트에 조용히
+// 되돌아가므로 변경 UI 자체를 숨긴다.
+const onProjectRootChange = inject<((path: string) => void) | null>('onProjectRootChange', null)
+const canChangeRoot = computed(() => !!onProjectRootChange)
+
+const showRootPicker = ref(false)
+const isBrowsing = ref(false)
+const pickerData = ref<{ current_path: string; parent_path: string | null; directories: string[] }>({
+  current_path: '', parent_path: null, directories: [],
+})
+
+// 폴더 목록은 host(architect) 백엔드가 준다. embedded 라 같은 페이지·같은 origin
+// 이므로 상대 경로면 브라우저(Vite 프록시)와 Electron(app:// 핸들러) 양쪽에서 닿는다.
+async function browseDirectory(path: string | null) {
+  isBrowsing.value = true
+  try {
+    const r = await fetch(`/api/claude-code/browse-directory?path=${encodeURIComponent(path || '~')}`)
+    if (r.ok) pickerData.value = await r.json()
+  } catch (e) {
+    logger.warn('폴더 목록을 읽지 못했습니다:', e)
+  } finally {
+    isBrowsing.value = false
+  }
+}
+
+function openRootPicker() {
+  if (!canChangeRoot.value) return
+  showRootPicker.value = true
+  browseDirectory(projectRoot.value || '~')
+}
+
+function applyRoot(path: string) {
+  showRootPicker.value = false
+  if (!path || path === projectRoot.value) return
+  projectStore.setProjectRoot(path)   // 이 화면은 즉시 반영
+  onProjectRootChange?.(path)          // host 는 저장해서 다음 마운트에도 유지
 }
 
 // 경로 모드(Electron): host가 준 로컬 폴더를 바로 분석
@@ -423,7 +463,16 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
               <IconFolder :size="18" />
               <span>로컬 폴더 분석</span>
             </div>
-            <div class="path-mode-path" :title="projectRoot || ''">{{ projectRoot }}</div>
+            <button
+              v-if="canChangeRoot"
+              class="path-mode-path path-mode-path--editable"
+              :title="(projectRoot || '') + ' (클릭하여 폴더 변경)'"
+              @click="openRootPicker"
+            >
+              <span class="path-mode-path__text">{{ projectRoot }}</span>
+              <IconFolderOpen :size="14" class="path-mode-path__icon" />
+            </button>
+            <div v-else class="path-mode-path" :title="projectRoot || ''">{{ projectRoot }}</div>
             <button
               class="btn btn--primary path-mode-btn"
               @click="handleAnalyzePath"
@@ -433,6 +482,39 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
               <span>{{ isProcessing ? '분석 중...' : '분석 시작' }}</span>
             </button>
             <p class="path-mode-hint">이 폴더를 직접 분석합니다 (업로드 없음 · 언어 자동 감지).</p>
+
+            <div v-if="showRootPicker" class="root-picker-overlay" @keydown.esc.window="showRootPicker = false">
+              <div class="root-picker">
+                <div class="root-picker__head">
+                  <span>분석할 폴더 선택</span>
+                  <button class="root-picker__close" @click="showRootPicker = false">
+                    <IconX :size="14" />
+                  </button>
+                </div>
+                <div class="root-picker__path">{{ pickerData.current_path || '…' }}</div>
+                <div class="root-picker__list">
+                  <div v-if="isBrowsing" class="root-picker__empty">읽는 중…</div>
+                  <template v-else>
+                    <button
+                      v-if="pickerData.parent_path"
+                      class="root-picker__item"
+                      @click="browseDirectory(pickerData.parent_path)"
+                    >../</button>
+                    <button
+                      v-for="d in pickerData.directories"
+                      :key="d"
+                      class="root-picker__item"
+                      @click="browseDirectory(pickerData.current_path + '/' + d)"
+                    >{{ d }}/</button>
+                    <div v-if="!pickerData.directories.length" class="root-picker__empty">하위 폴더 없음</div>
+                  </template>
+                </div>
+                <div class="root-picker__foot">
+                  <button class="root-picker__cancel" @click="showRootPicker = false">취소</button>
+                  <button class="root-picker__ok" @click="applyRoot(pickerData.current_path)">이 폴더로</button>
+                </div>
+              </div>
+            </div>
           </div>
         </template>
 
@@ -667,6 +749,133 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
   font-size: 13px;
   color: var(--color-text-light);
   word-break: break-all;
+}
+
+.path-mode-path--editable {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.path-mode-path--editable:hover {
+  border-color: var(--color-primary);
+  background: var(--color-bg-tertiary, var(--color-bg-secondary));
+}
+
+.path-mode-path__text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+}
+
+.path-mode-path__icon {
+  flex: none;
+  opacity: 0.6;
+}
+
+/* 폴더 선택기 — path-mode-panel 위에 덮는다. */
+.root-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.root-picker {
+  width: min(560px, 90vw);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 8px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  text-align: left;
+}
+
+.root-picker__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+  font-weight: 600;
+}
+
+.root-picker__close {
+  display: flex;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: inherit;
+}
+
+.root-picker__path {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border);
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--color-text-light);
+  word-break: break-all;
+}
+
+.root-picker__list {
+  flex: 1;
+  overflow: auto;
+  padding: 6px 0;
+}
+
+.root-picker__item {
+  display: block;
+  width: 100%;
+  padding: 7px 16px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  color: inherit;
+}
+
+.root-picker__item:hover {
+  background: var(--color-bg-tertiary, rgba(255, 255, 255, 0.06));
+}
+
+.root-picker__empty {
+  padding: 12px 16px;
+  font-size: 12px;
+  color: var(--color-text-light);
+}
+
+.root-picker__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.root-picker__cancel,
+.root-picker__ok {
+  padding: 6px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.root-picker__ok {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
 }
 
 .path-mode-hint {
