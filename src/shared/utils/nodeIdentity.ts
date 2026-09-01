@@ -8,7 +8,7 @@
 
 import type { GraphNode } from '@/shared/types'
 import { semanticRoleLabels } from '@/shared/utils/nodeLabels'
-import { CALLABLE_LABELS, VARIABLE_LABELS } from '@/shared/utils/nodeClassify'
+import { VARIABLE_LABELS } from '@/shared/utils/nodeClassify'
 
 export interface IdentityRow {
   /** 행 라벨(예: '논리명', '경로') */
@@ -107,42 +107,32 @@ export function buildIdentityRows(node: GraphNode, context: IdentityContext = {}
     if (roles.length) push('역할', roles.map(roleDisplay).join(', '))
   }
 
-  // ── 루틴(메서드/함수/프로시저/트리거) ────────────────
-  // ★ 공용 CALLABLE_LABELS 를 쓴다 — 종전엔 여기서 목록을 따로 들다 METHOD 를 빠뜨려
-  //   Java/C# 메서드의 파라미터·반환타입·군집이 영영 안 보였다 (spec 045 FR-012).
-  if ((node.labels || []).some(l => CALLABLE_LABELS.has(l))) {
-    push('파라미터', p.params)
-    push('반환', p.return_type)
-    push('협력 군집', p.component_name)   // 위험도는 건강 배지(NodeDetailBase)가 색으로 표시 — 중복 제외
-  }
-
   // ── 테이블 ───────────────────────────────────────────
   if (has('TABLE')) {
     push('스키마', p.schema)
-    push('DB', p.db)
+    push('DB', p.database)
     push('테이블 종류', p.table_type)
   }
 
   // ── 컬럼 ─────────────────────────────────────────────
   if (has('COLUMN')) {
-    push('타입', p.dtype)
-    if (p.is_primary_key === true || p.is_primary_key === 'true') push('PK', '예')
-    if (p.is_unique === true || p.is_unique === 'true') push('유니크', '예')
+    push('타입', p.data_type)
+    if (p.primary_key === true || p.primary_key === 'true') push('PK', '예')
+    if (p.unique === true || p.unique === 'true') push('유니크', '예')
     if (p.nullable === false || p.nullable === 'false') push('NULL', '불가')
     push('기본값', p.default_value)
   }
 
   // ── 변수/상수 (FIELD/MEMBER/GLOBAL_VARIABLE/DEFINE/CONSTANT_FIELD 포함) ──
   // ★ 공용 VARIABLE_LABELS — 종전엔 3종만 들어서 필드·멤버·전역변수·상수의 타입이 안 보였다.
-  //   값: 변수는 init_value, 상수는 value (spec 045 FR-009/FR-010).
+  //   값: 변수와 상수 모두 value.
   if ((node.labels || []).some(l => VARIABLE_LABELS.has(l))) {
-    push('타입', p.var_type)
-    push('값', p.init_value || p.value)
+    push('타입', p.data_type)
+    push('값', p.value)
   }
 
-  // ── 비코드 청크(framework ARTIFACT/CONFIG) ───────────
-  push('청크 타입', p.chunk_type)
-  push('키 경로', p.config_key_path)
+  push('외부 종류', p.kind)
+  push('외부 키', Array.isArray(p.key) ? p.key.join(', ') : p.key)
 
   return rows
 }

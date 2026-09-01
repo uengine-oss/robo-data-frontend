@@ -16,23 +16,19 @@ const labels = await import(`data:text/javascript;base64,${Buffer.from(compiled)
 
 const plainFunction = {
   labels: ['FUNCTION'],
-  properties: { type: 'FUNCTION' },
+  properties: {},
 }
 const queryFunction = {
-  labels: ['FUNCTION', 'QUERY', 'EMBEDDED'],
-  properties: { type: 'FUNCTION', stereotype: 'QUERY' },
-}
-const reversedQueryFunction = {
-  labels: ['QUERY', 'EMBEDDED', 'FUNCTION'],
-  properties: { type: 'FUNCTION', stereotype: 'QUERY' },
+  labels: ['FUNCTION'],
+  properties: { stereotype: 'QUERY' },
 }
 const table = {
   labels: ['TABLE'],
-  properties: { type: 'TABLE' },
+  properties: {},
 }
 
-assert.equal(labels.kindOfNode(reversedQueryFunction), 'FUNCTION', 'explicit type must defeat Neo4j label order')
-assert.deepEqual(labels.semanticRoleLabels(reversedQueryFunction), ['QUERY'], 'QUERY must remain the role after marker removal')
+assert.equal(labels.kindOfNode(queryFunction), 'FUNCTION', 'concrete graph label is the node kind')
+assert.deepEqual(labels.semanticRoleLabels(queryFunction), ['QUERY'], 'stereotype is the semantic role')
 
 const functionThenQuery = ['FUNCTION', 'QUERY']
 assert.equal(labels.colorLabelOfNode(plainFunction, functionThenQuery), 'FUNCTION')
@@ -45,8 +41,8 @@ assert.equal(labels.colorLabelOfNode(queryFunction, tableAndQuery), 'QUERY')
 assert.equal(labels.colorLabelOfNode(plainFunction, tableAndQuery), 'FUNCTION')
 
 const multiRole = {
-  labels: ['FUNCTION', 'COMMAND', 'QUERY', 'EXTERNAL'],
-  properties: { type: 'FUNCTION', stereotype: 'QUERY' },
+  labels: ['FUNCTION', 'COMMAND', 'EXTERNAL'],
+  properties: { stereotype: 'QUERY' },
 }
 assert.deepEqual(labels.semanticRoleLabels(multiRole), ['COMMAND', 'QUERY'])
 assert.equal(labels.colorLabelOfNode(multiRole, ['COMMAND', 'QUERY']), 'QUERY', 'latest matching role wins')

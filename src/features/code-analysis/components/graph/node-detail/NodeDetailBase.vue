@@ -40,16 +40,26 @@ const hasIdentityExtra = computed(() => Boolean(slots['identity-extra']?.()))
 const nodeName = computed(() => technicalNodeName(props.node))
 
 const ownerNode = computed(() => {
-  const ownerId = props.node.properties?.owner_id
-  return typeof ownerId === 'string' ? projectStore.nodeMap.get(ownerId) : undefined
+  for (const link of projectStore.linkMap.values()) {
+    if (link.type === 'PARENT_OF' && link.target === props.node.id) {
+      return projectStore.nodeMap.get(link.source)
+    }
+  }
+  return undefined
 })
 
 const packageNode = computed(() => {
-  const candidates = [props.node.id, ownerNode.value?.id].filter((id): id is string => Boolean(id))
+  const parentByChild = new Map<string, string>()
   for (const link of projectStore.linkMap.values()) {
-    if (link.type !== 'BELONGS_TO' || !candidates.includes(link.source)) continue
-    const target = projectStore.nodeMap.get(link.target)
-    if (target?.labels.includes('PACKAGE')) return target
+    if (link.type === 'PARENT_OF') parentByChild.set(link.target, link.source)
+  }
+  const seen = new Set<string>()
+  let currentId: string | undefined = props.node.id
+  while (currentId && !seen.has(currentId)) {
+    seen.add(currentId)
+    const current = projectStore.nodeMap.get(currentId)
+    if (current?.labels.includes('PACKAGE')) return current
+    currentId = parentByChild.get(currentId)
   }
   return undefined
 })
@@ -65,15 +75,6 @@ const roleLabels = computed(() => semanticRoleLabels(props.node))
 // 활성 렌즈(isolate된 역할) 따라감(spec 040) — 캔버스 노드 색과 일치. 어떤 포맷이든 color-mix 틴트.
 const badgeColor = computed(() =>
   getNodeColor([colorLabelOfNode(props.node, canvasStore.loadedLabels)]))
-
-// 건강지표 — 최종 판정만 저장(spec 020): risk_level(+in_call_cycle). 중간지표(fan/loc/god/table)는 미저장.
-const health = computed(() => {
-  const p = props.node.properties || {}
-  const risk = typeof p.risk_level === 'string' ? p.risk_level : ''
-  if (!risk && p.in_call_cycle !== true) return null
-  return { risk, inCycle: p.in_call_cycle === true }
-})
-const RISK_LABEL: Record<string, string> = { high: '높음', medium: '보통', low: '낮음' }
 
 const displayHeaderTitle = computed(() =>
   (props.headerTitle && props.headerTitle.trim()) ? props.headerTitle.trim() : nodeName.value,
@@ -255,12 +256,6 @@ const relStripToneClass = computed(() => {
               <span class="identity-row__k">소속</span>
               <span class="identity-row__v">{{ subInfo }}</span>
             </div>
-          </div>
-          <div v-if="health" class="detail-health">
-            <span v-if="health.risk" class="health-risk" :class="'health-risk--' + health.risk" title="건강지표(위험도)">
-              위험 {{ RISK_LABEL[health.risk] ?? health.risk }}
-            </span>
-            <span v-if="health.inCycle" class="health-flag" title="호출 순환에 포함">순환</span>
           </div>
           <div v-if="hasIdentityExtra" class="detail-identity-extra">
             <slot name="identity-extra" />
@@ -444,34 +439,6 @@ const relStripToneClass = computed(() => {
   border-color: var(--color-border);
   background: var(--color-bg-tertiary);
 }
-
-.detail-health {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 7px;
-}
-.health-risk, .health-metric, .health-flag {
-  font-size: 0.64rem;
-  font-weight: 700;
-  padding: 2px 7px;
-  border-radius: 999px;
-  letter-spacing: 0.02em;
-}
-.health-metric {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-muted);
-  border: 1px solid var(--color-border);
-  font-weight: 600;
-}
-.health-flag {
-  background: rgba(250, 82, 82, 0.15);
-  color: #ff8787;
-  border: 1px solid rgba(250, 82, 82, 0.3);
-}
-.health-risk--high   { background: rgba(250, 82, 82, 0.18);  color: #ff8787; }
-.health-risk--medium { background: rgba(255, 169, 77, 0.18); color: #ffc078; }
-.health-risk--low    { background: rgba(81, 207, 102, 0.16); color: #8ce99a; }
 
 .summary-headline {
   margin: 0 0 8px;

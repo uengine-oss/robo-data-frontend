@@ -14,7 +14,7 @@
 
 **Primary Dependencies**: 기존만 사용 — `@vue-flow/core`(스키마 캔버스), shared http 코어(`src/shared/services/http.ts`, gateway base), Neo4j 드라이버(catalog).
 
-**Storage**: Neo4j(읽기). 신규 스키마/라벨/관계 **0**. 디스크 원본 소스는 analyzer `GET /robo/source`(spec 043, 이미 slice 지원).
+**Storage**: Neo4j(읽기). 신규 스키마/라벨/관계 **0**. 원문은 참조 노드의 줄번호 포함 `code_text`를 사용한다.
 
 **Testing**: 프론트 UI = vite(3000)+Playwright 헤드리스 자가검증(.unittest 하니스 재사용) + Neo4j 직접쿼리·HTTP E2E 대조. 단위테스트 프레임워크 신규 도입 없음.
 
@@ -60,7 +60,7 @@ specs/044-reference-source-view/
 ```text
 robo-data-frontend/  (본체)
 └── src/features/schema/
-    ├── api.ts                                  # 참조 타입에 end_line·evidence_line 추가 / getSourceContent slice 호출(이미 지원)
+    ├── api.ts                                  # 참조 타입에 code_text·end_line·evidence_line 추가
     ├── schemaCanvas.ts                         # openSourceCodePanel: start_line 오프셋·evidence_line 하이라이트 / 소스패널 state / 테이블보기 컨트롤 state
     └── components/
         ├── nodes/TableNode.vue                 # 참조 트리거 재설계 / handleProcedure·FrameworkClick → 노드범위 slice 호출 / 참조목록 접근지점별 N행 / 없음·실패 구분

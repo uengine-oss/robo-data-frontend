@@ -5,7 +5,7 @@
  *
  * 표시:
  *   - 헤더 (sub-label = STRUCT/UNION/ENUM)
- *   - 멤버 필드 목록 (HAS_MEMBER + 데이터 라벨)
+ *   - 멤버 필드 목록 (PARENT_OF + 데이터 라벨)
  *   - 사용 흐름 (자식 필드를 REFERENCES 하는 함수 — 미구현, 추후 활성화)
  *
  * data_type 자체엔 summary 없음 — 자식 필드만 의미 담음 (백엔드 결정).
@@ -29,14 +29,8 @@ const subLabel = computed(() => props.node.labels?.[0] || 'DATATYPE')
 
 const subInfo = computed(() => {
   const p = props.node.properties || {}
-  const pkg = p.package_name as string | undefined
   const file = p.file_path as string | undefined
-  const fileName = (p.file_name as string | undefined) ||
-    (file ? file.split(/[/\\]/).pop() : undefined)
-  const parts: string[] = []
-  if (pkg) parts.push(pkg)
-  if (fileName) parts.push(fileName)
-  return parts.join(' · ')
+  return file ? file.split(/[/\\]/).pop() || file : ''
 })
 
 const groups = computed(() =>
@@ -55,8 +49,7 @@ function resolveField(id: string): FieldEntry {
   return {
     id,
     name: (p.name as string) || id,
-    // 백엔드 저장 이름은 `var_type` — 옛 `variable_type` 은 어디서도 저장되지 않는다 (spec 045 FR-009).
-    type: (p.var_type as string) || (p.dtype as string) || '',
+    type: (p.data_type as string) || '',
   }
 }
 
@@ -66,11 +59,7 @@ const fields = computed<FieldEntry[]>(() =>
 )
 
 const codeText = computed(() => (props.node.properties?.code_text as string) || '')
-const sourcePath = computed(() =>
-  (props.node.properties?.file_path as string)
-  || (props.node.properties?.file_name as string)
-  || '',
-)
+const sourcePath = computed(() => (props.node.properties?.file_path as string) || '')
 </script>
 
 <template>

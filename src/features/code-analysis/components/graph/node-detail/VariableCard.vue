@@ -11,24 +11,16 @@ const props = defineProps<Props>()
 const CONSTANT_LABELS = new Set(['CONSTANT', 'DEFINE', 'CONSTANT_FIELD'])
 const isConstant = computed(() => (props.node.labels || []).some(l => CONSTANT_LABELS.has(l)))
 const subLabel = computed(() => props.node.labels?.[0] || (isConstant.value ? 'CONSTANT' : 'VARIABLE'))
-// 백엔드 저장 이름은 `var_type` (analyzer shared/neo4j/nodes/variable.py·constant.py).
-// 옛 `variable_type` 은 어디서도 저장되지 않아 타입 행이 영구 공백이었다 (spec 045 FR-009).
-const variableType = computed(() => (props.node.properties?.var_type as string) || '')
-// 변수는 `init_value`, 상수는 `value` 로 저장된다 — 한 카드가 둘 다 담당 (FR-010).
+const variableType = computed(() => (props.node.properties?.data_type as string) || '')
 const initValue = computed(
-  () => (props.node.properties?.init_value as string) || (props.node.properties?.value as string) || '',
+  () => (props.node.properties?.value as string) || '',
 )
-const modifiers = computed(() => (props.node.properties?.modifiers as string) || '')
 const codeText = computed(() => (props.node.properties?.code_text as string) || '')
-const sourcePath = computed(() =>
-  (props.node.properties?.file_path as string)
-  || (props.node.properties?.file_name as string)
-  || '',
-)
+const sourcePath = computed(() => (props.node.properties?.file_path as string) || '')
 
 const subInfo = computed(() => {
   const p = props.node.properties || {}
-  const file = (p.file_name as string) || (p.code_ref as string) || ''
+  const file = (p.file_path as string) || ''
   const line = p.start_line ? `라인 ${p.start_line}` : ''
   return [file, line].filter(Boolean).join(' · ')
 })
@@ -42,7 +34,7 @@ const subInfo = computed(() => {
     :sub-info="subInfo"
   >
     <template #body>
-      <section v-if="variableType || initValue || modifiers" class="detail-card">
+      <section v-if="variableType || initValue" class="detail-card">
         <span class="detail-card__label">선언</span>
         <div class="detail-card__body detail-card__body--tight var-meta">
           <div v-if="variableType" class="meta-row">
@@ -52,10 +44,6 @@ const subInfo = computed(() => {
           <div v-if="initValue" class="meta-row">
             <span class="meta-key">{{ isConstant ? '값' : '초기값' }}</span>
             <span class="meta-val">{{ initValue }}</span>
-          </div>
-          <div v-if="modifiers" class="meta-row">
-            <span class="meta-key">수정자</span>
-            <span class="meta-val">{{ modifiers }}</span>
           </div>
         </div>
       </section>

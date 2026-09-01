@@ -22,8 +22,7 @@ const tables = [
     datasource: 'warehouse',
     logical_name: '주문',
     description: '고객 주문',
-    description_source: 'ddl',
-    analyzed_description: '판매 주문 원장',
+    summary: '판매 주문 원장',
     column_count: 2,
   },
   {
@@ -32,8 +31,7 @@ const tables = [
     datasource: 'lakehouse',
     logical_name: '고객',
     description: '고객 기준 정보',
-    description_source: 'ddl',
-    analyzed_description: '판매 고객 마스터',
+    summary: '판매 고객 마스터',
     column_count: 1,
   },
 ]
@@ -42,22 +40,20 @@ const columns = [
   {
     name: 'id',
     table_name: 'orders',
-    dtype: 'bigint',
+    data_type: 'bigint',
     nullable: false,
     logical_name: '주문 ID',
     description: '주문 식별자',
-    description_source: 'ddl',
-    analyzed_description: '주문의 기본 키',
+    summary: '주문의 기본 키',
   },
   {
     name: 'customer_id',
     table_name: 'orders',
-    dtype: 'bigint',
+    data_type: 'bigint',
     nullable: false,
     logical_name: '고객 ID',
     description: '고객 식별자',
-    description_source: 'ddl',
-    analyzed_description: '주문 고객 참조',
+    summary: '주문 고객 참조',
   },
 ]
 const ordersNodeId = `table-${encodeURIComponent(JSON.stringify(['warehouse', 'sales', 'orders']))}`
@@ -307,8 +303,7 @@ try {
       datasource: 'warehouse',
       logical_name: '주문',
       description: '고객 주문',
-      description_source: 'ddl',
-      analyzed_description: '판매 주문 원장',
+      summary: '판매 주문 원장',
       column_count: 2,
     },
   })

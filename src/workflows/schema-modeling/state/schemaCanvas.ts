@@ -120,7 +120,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     // Relationships
     const userRelationships = ref<SchemaRelationship[]>([])
 
-    // Catalog에서 가져온 FK_TO_TABLE 관계 (column_pairs 포함)
+    // Catalog에서 가져온 FK 관계 (column_pairs 포함)
     const neo4jRelationships = ref<CatalogRelationship[]>([])
 
   // UI state
@@ -263,7 +263,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
 
           // Neo4j 관계에서 현재 캔버스 테이블과 FK 관계가 있는지 확인
           const hasRelationWithCanvas = neo4jRelationships.value.some(rel => {
-            if (rel.type !== 'FK_TO_TABLE') return false
+            if (rel.type !== 'FK') return false
             // 새 테이블이 from 또는 to 중 하나이고, 다른 쪽이 캔버스에 있는 경우
             if (rel.from_table === tableName && canvasTableNames.includes(rel.to_table)) return true
             if (rel.to_table === tableName && canvasTableNames.includes(rel.from_table)) return true
@@ -325,7 +325,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
             const newColumn = {
               name: field,
               table_name: tableName,
-              dtype: (changes.dtype as string) || 'unknown',
+              data_type: (changes.data_type as string) || 'unknown',
               nullable: (changes.nullable as boolean) ?? true,
               description: (changes.description as string) || ''
             }
@@ -617,27 +617,13 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
 
       logger.debug(`[SchemaCanvas] API Response:`, result)
 
-      // FK 관계가 있는 테이블만 필터링 (CO_REFERENCED 제외)
-      // CO_REFERENCED는 같은 프로시저에서 참조되는 테이블일 뿐, 실제 FK 관계가 아님
-      const fkRelationships = result.relationships.filter(
-        rel => rel.type === 'FK_TO_TABLE' || rel.type === 'REFERENCES'
-      )
-
-      // FK 관계에 있는 테이블 이름 추출
       const fkTableNames = new Set<string>()
-      fkRelationships.forEach(rel => {
+      result.relationships.forEach(rel => {
         if (rel.from_table !== identity.name) fkTableNames.add(rel.from_table)
         if (rel.to_table !== identity.name) fkTableNames.add(rel.to_table)
       })
 
       logger.debug(`[SchemaCanvas] FK 관계 테이블: ${Array.from(fkTableNames).join(', ')}`)
-      logger.debug(`[SchemaCanvas] 제외된 CO_REFERENCED 테이블: ${
-        result.tables
-          .filter(t => !fkTableNames.has(t.name) && t.name !== identity.name)
-          .map(t => t.name)
-          .join(', ') || '없음'
-      }`)
-
       if (fkTableNames.size === 0) {
         logger.debug(`[SchemaCanvas] No FK relationships found for ${tableLabel}`)
         return true
@@ -672,13 +658,13 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         addedCount++
       }
 
-      // 동일 테이블 쌍의 DDL/code/user provenance를 각각 보존한다.
+      // 같은 테이블 쌍에서도 Analyzer/Catalog 소유 FK를 각각 보존한다.
       neo4jRelationships.value = mergeCatalogRelationships(
         neo4jRelationships.value,
         result.relationships,
       )
 
-      logger.debug(`[SchemaCanvas] ✅ Loaded ${addedCount} FK-related tables (${fkRelationships.length} FK relationships) for ${tableLabel}`)
+      logger.debug(`[SchemaCanvas] ✅ Loaded ${addedCount} FK-related tables (${result.relationships.length} FK relationships) for ${tableLabel}`)
 
       // 엣지 업데이트 및 레이아웃 적용
       updateEdgesFromRelationships()
@@ -828,13 +814,12 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
   // 소스 코드 패널 열기
   async function openSourceCodePanel(
     fileName: string,
-    fileDirectory: string,
+    filePath: string,
     fileContent: string,
     highlightedLine: number,
     procedureName: string,
     startLine = 1,
-    found = true,
-    loadError = false
+    found = true
   ) {
     // 하나만 열리게 — 소스 패널 열 때 다른 우측/데이터 패널 닫음
     isDetailPanelOpen.value = false
@@ -842,13 +827,12 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     sourceStatementRequestId += 1
     sourceCodePanel.value = createOpenSourceCodePanel({
       fileName,
-      fileDirectory,
+      filePath,
       fileContent,
       highlightedLine,
       procedureName,
       startLine,
       found,
-      loadError,
     })
 
     if (sourceCodePanel.value.isLoadingStatements) await loadSourceStatements()
@@ -856,19 +840,19 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
 
   async function loadSourceStatements() {
     const panel = sourceCodePanel.value
-    if (!panel.isOpen || panel.notFound || panel.loadError || !panel.procedureName) return
+    if (!panel.isOpen || panel.notFound || !panel.procedureName) return
 
     const requestId = ++sourceStatementRequestId
     const procedureName = panel.procedureName
-    const fileDirectory = panel.fileDirectory
+    const filePath = panel.filePath
     panel.isLoadingStatements = true
     panel.statementError = null
 
     const result = await loadProcedureStatements(
       procedureName,
-      fileDirectory,
-      (name, directory) =>
-        catalogSchemaApi.getProcedureStatements(name, directory, catalogContext()),
+      filePath,
+      (name, path) =>
+        catalogSchemaApi.getProcedureStatements(name, path, catalogContext()),
     )
 
     const currentPanel = sourceCodePanel.value
@@ -876,7 +860,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
       requestId !== sourceStatementRequestId
       || !currentPanel.isOpen
       || currentPanel.procedureName !== procedureName
-      || currentPanel.fileDirectory !== fileDirectory
+      || currentPanel.filePath !== filePath
     ) return
 
     currentPanel.isLoadingStatements = false
@@ -927,11 +911,11 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     try {
       await catalogSchemaApi.addRelationship({
         ...relationship,
-        relationship_type: 'FK_TO_TABLE'
+        relationship_type: 'FK'
       }, catalogContext())
       const committed: SchemaRelationship = {
         ...relationship,
-        relationship_type: 'FK_TO_TABLE',
+        relationship_type: 'FK',
       }
       if (!userRelationships.value.some(candidate => sameRelationship(candidate, committed))) {
         userRelationships.value.push(committed)
@@ -953,22 +937,7 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
     relationship: Omit<SchemaRelationship, 'relationship_type'> & { cardinality: Cardinality },
   ) {
     try {
-      // Map cardinality to relationship type
-      let relationshipType = 'FK_TO_TABLE'
-      switch (relationship.cardinality) {
-        case '1:1':
-          relationshipType = 'ONE_TO_ONE'
-          break
-        case '1:N':
-          relationshipType = 'ONE_TO_MANY'
-          break
-        case 'N:1':
-          relationshipType = 'MANY_TO_ONE'
-          break
-        case 'N:N':
-          relationshipType = 'MANY_TO_MANY'
-          break
-      }
+      const description = `[${relationship.cardinality}] ${relationship.description || ''}`.trim()
 
       const relData = {
         from_table: relationship.from_table,
@@ -977,8 +946,8 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         to_table: relationship.to_table,
         to_schema: relationship.to_schema,
         to_column: relationship.to_column,
-        description: relationship.description,
-        relationship_type: relationshipType,
+        description,
+        relationship_type: 'FK' as const,
       }
 
       await catalogSchemaApi.addRelationship(relData, catalogContext())
@@ -989,8 +958,8 @@ export const useSchemaCanvasStore = defineStore('schemaCanvas', () => {
         to_table: relationship.to_table,
         to_schema: relationship.to_schema,
         to_column: relationship.to_column,
-        description: relationship.description,
-        relationship_type: relationshipType,
+        description,
+        relationship_type: 'FK',
       }
       if (!userRelationships.value.some(candidate => sameRelationship(candidate, committed))) {
         userRelationships.value.push(committed)

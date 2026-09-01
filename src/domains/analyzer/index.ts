@@ -3,5 +3,4 @@ export type {
   PipelineControlResponse,
   PipelinePhaseInfo,
   PipelineStatus,
-  SourceContent,
 } from './api/index.ts'

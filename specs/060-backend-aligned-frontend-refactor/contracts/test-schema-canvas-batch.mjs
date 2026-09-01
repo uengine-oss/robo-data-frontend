@@ -21,8 +21,7 @@ try {
     datasource: 'warehouse',
     logical_name: '주문',
     description: '주문 원장',
-    description_source: 'user',
-    analyzed_description: '고객별 주문',
+    summary: '고객별 주문',
     column_count: 0,
   }]
   const snapshot = structuredClone(tables)
@@ -40,11 +39,10 @@ try {
   const columns = [{
     name: 'order_id',
     table_name: 'orders',
-    dtype: 'uuid',
+    data_type: 'uuid',
     nullable: false,
     logical_name: '주문 ID',
     description: '식별자',
-    description_source: 'ddl',
   }]
   const behaviors = [{
     name: 'cancel',
@@ -72,8 +70,7 @@ try {
       datasource: 'warehouse',
       logical_name: '주문',
       description: '주문 원장',
-      analyzed_description: '고객별 주문',
-      description_source: 'user',
+      summary: '고객별 주문',
       columns,
       columnCount: 1,
       isPrimary: false,

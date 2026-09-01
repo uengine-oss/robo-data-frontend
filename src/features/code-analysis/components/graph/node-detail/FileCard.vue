@@ -1,8 +1,7 @@
 <script setup lang="ts">
 /**
  * FileCard.vue
- * 파일 노드 — Framework MODULE.FILE / MODULE.DEFINE + DBMS FILE 라벨.
- * 모듈 아닌 물리 컨테이너. 안의 함수/변수 목록 표시.
+ * FILE 노드 — 소스 파일 컨테이너와 그 안의 함수 목록을 표시한다.
  */
 
 import { computed } from 'vue'
@@ -37,11 +36,7 @@ const functions = computed(() =>
 )
 
 const codeText = computed(() => (props.node.properties?.code_text as string) || '')
-const sourcePath = computed(() =>
-  (props.node.properties?.file_path as string)
-  || (props.node.properties?.file_name as string)
-  || '',
-)
+const sourcePath = computed(() => (props.node.properties?.file_path as string) || '')
 </script>
 
 <template>

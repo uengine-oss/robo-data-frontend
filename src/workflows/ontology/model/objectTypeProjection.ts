@@ -3,7 +3,7 @@ import type { ObjectTypeInfo, OntologyBehavior } from '@/domains/ontology'
 export interface ObjectTypeCanvasColumn {
   name: string
   table_name: string
-  dtype: string
+  data_type: string
   description: string
   nullable: boolean
 }
@@ -45,7 +45,7 @@ export function projectObjectTypeToCanvas(objectType: ObjectTypeInfo): ObjectTyp
   const columns = objectType.columns.map(column => ({
     name: column.name,
     table_name: objectType.name,
-    dtype: column.type || 'string',
+    data_type: column.type || 'string',
     description: column.description || '',
     nullable: true,
   }))

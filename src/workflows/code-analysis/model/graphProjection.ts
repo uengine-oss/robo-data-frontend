@@ -32,7 +32,7 @@ export function convertNeo4jNode(node: Neo4jNode): GraphNode {
   const labels = node['Labels'] || []
   const properties = node['Properties'] || {}
   return {
-    id: (properties.id as string) || node['Node ID'],
+    id: (properties._id as string) || node['Node ID'],
     labels,
     properties,
   }
@@ -49,12 +49,20 @@ export function convertNeo4jRelationship(
     elementIdToLogicalId.get(relationship['End Node ID']) ??
     relationship['End Node ID']
 
+  const properties = relationship['Properties'] || {}
   return {
-    id: `${relationship['Type']}|${source}|${target}||`,
+    id: [
+      relationship['Type'],
+      source,
+      target,
+      properties.from_column || '',
+      properties.to_column || '',
+      properties._owner || '',
+    ].join('|'),
     source,
     target,
     type: relationship['Type'],
-    properties: relationship['Properties'],
+    properties,
   }
 }
 
@@ -67,12 +75,11 @@ export function resolveNodeName(
   if (name) return String(name)
   const key = properties.key
   if (key) return String(key)
-  const title = properties.title
-  if (title) return String(title)
-  const kind = extractSubLabel(labels) || (properties.type as string) || ''
+  const extractedKind = extractSubLabel(labels)
+  const kind = extractedKind === 'Unknown' ? '' : extractedKind
   const line = properties.start_line
   if (kind) return line != null && line !== 0 ? `${kind} [${line}]` : kind
-  const id = properties.id
+  const id = properties._id
   if (id) return String(id).split('.').pop() || String(id)
   return nodeId
 }

@@ -46,17 +46,15 @@ const progressPanelCollapsed = ref(false) // 진행 패널 축소 상태
 
 /**
  * 보기 모드 (spec 018 — 단일선택 enum).
- * 모듈간/업무 단위는 서로 배타라 한 번에 하나만 켜진다. 기존엔 독립 토글이라
- * 동시에 켜져 화면 의미가 모호해지고 silent no-op 가 섞였다 → 단일 enum 으로 일원화.
+ * 기본 보기와 모듈간 상호작용 보기를 하나의 상태로 관리한다.
  *
  *  - 'default' : 프리셋 끔, hull 끔, 색=라벨별
  *  - 'module'  : 모듈간 상호작용 — 영역을 접고 영역을 넘는 관계만 그린다(spec 059)
- *  - 'area'    : 실제 업무 단위(hull, component_id=CALL 군집 기준). ※폴더 구조와 별개
  *
  * groupHullBy / preset 은 viewMode 에서 파생(computed)되므로
  * 단일 진실원천은 viewMode 하나다. (NvlGraph/canvasStore 가 소비하는 prop 계약은 불변)
  */
-// 'module'=모듈간 상호작용 / 'area'=실제 업무 단위
+// 'module'=모듈간 상호작용
 // (spec 021: 'table-flow' 제거 — 노드 폭발. 'area-struct'(영역·구조) 제거 — 모듈간과 구조 중복.
 //  spec 059: '건강' 제거 — 화면 전체를 위험색으로 칠해 정작 봐야 할 결합이 묻혔다. 실제 건강
 //  악화를 보여주는 화면은 별도 UI/UX 로 다시 설계한다(우선순위 낮음, 사용자 결정 2026-07-21).)
@@ -64,8 +62,8 @@ const viewMode = ref<GraphViewMode>('default')
 
 /**
  * 중첩 영역(헐) 레벨 — NvlGraph :hullLevels 소비(spec 021).
- *  - 실제 업무 단위(area) = [component_id 단일 레벨]
- *  - 그 외             = [] (표시 안 함). 모듈간은 별도(Phase4)에서 패키지 1겹.
+ *  - 모듈간 보기 = 패키지 단위 경계
+ *  - 기본 보기 = 경계 없음
  */
 const hullLevels = computed(() => createGraphHullLevels(
   viewMode.value,
@@ -76,8 +74,7 @@ const hullLevels = computed(() => createGraphHullLevels(
 /**
  * 클러스터 분리 키(spec 022) — NvlGraph :clusterKeyOf 소비. 노드를 이 키로 묶어 화면에서 떨어뜨림.
  *  - 모듈간: 모듈=패키지(external은 '__external__'), 테이블=주인 영역 → 영역 단위로 분리
- *  - 협력군집: component_id(미보유='__ungrouped__') → 군집/기타 분리
- *  - 그 외: null(분리 안 함 — 영역구조는 중첩이라 분리 불필요, 건강은 단일)
+ *  - 기본 보기: 분리 없음
  */
 const clusterKeyOf = computed(() => createGraphClusterKey(
   viewMode.value,
@@ -87,8 +84,7 @@ const clusterKeyOf = computed(() => createGraphClusterKey(
 
 /**
  * 클러스터 키 → 앵커(대표 노드) 라벨(spec 022). clusterKeyOf 와 짝 — NvlGraph 가 각 클러스터
- * 중심에 이 라벨의 앵커 노드를 둔다. 키는 노드 id(패키지)·합성키('__external__'/'__ungrouped__')·
- * component_id 가 섞이므로 보기별로 사람이 읽을 이름으로 푼다.
+ * 중심에 이 라벨의 앵커 노드를 둔다. 패키지 ID는 사람이 읽을 이름으로 푼다.
  */
 const clusterLabelOf = computed(() => createGraphClusterLabel(
   viewMode.value,
@@ -119,7 +115,7 @@ function toggleShowHidden(): void {
 }
 
 /**
- * 보기 ▾ 드롭다운 (spec 018) — 보기 모드(모듈간/업무 단위)를 상단 일렬 버튼 대신 한 곳에서 고른다.
+ * 보기 ▾ 드롭다운 — 모듈간 보기를 한 곳에서 켜고 끈다.
  * 단일선택: 한 항목을 누르면 그 모드로, 이미 그 모드면 default 로 토글오프. 한 번에 하나만 켜짐.
  * 관계필터는 별개 축이라 보기모드와 무관하게 독립 토글.
  */
@@ -127,7 +123,7 @@ const showViewMenu = ref(false)
 
 /**
  * 보기 모드 선택 — 단일선택. 이미 선택된 모드면 default 로 끔(토글오프).
- * 모드 진입 시 그 모드가 무언가를 보이게 캔버스를 보장(업무 단위는 빈 캔버스면 해당 속성 노드 자동 로드).
+ * 모드 진입 시 프리셋을 적용한다.
  */
 function selectViewMode(mode: Exclude<GraphViewMode, 'default'>): void {
   const next: GraphViewMode = viewMode.value === mode ? 'default' : mode
@@ -152,8 +148,6 @@ function applyViewMode(mode: GraphViewMode): void {
       '영역 간 관계가 없습니다 — 분석 대상의 폴더(패키지)가 둘 이상이고 그 사이에 호출이나 '
       + '테이블 접근이 있어야 합니다. 폴더가 하나뿐이면 모든 관계가 그 안에 있어 그릴 선이 없습니다.',
     )
-  } else if (mode === 'area') {
-    ensureNodesForView('component_id')
   } else {
     autoPopulateHint.value = ''
   }
@@ -173,37 +167,6 @@ function hintIfEmpty(reason: string): void {
     ? graph.links.length === 0
     : graph.nodes.length === 0
   autoPopulateHint.value = nothingToShow ? reason : ''
-}
-
-/**
- * 빈 캔버스에서 업무 단위 보기를 켜면 무반응(재스타일만 함)이던 문제 근본수정.
- * 캔버스가 비어 있으면 해당 속성을 가진 노드만 골라 캔버스에 자동 추가(바운디드 — 전체덤프 X).
- * 추가할 노드가 0개면 침묵 대신 안내 힌트를 띄운다.
- *
- * @param propKey   노드가 가져야 할 속성 키 (예: 'component_id')
- */
-function ensureNodesForView(propKey: string): void {
-  autoPopulateHint.value = ''
-  // spec 021: 보기모드 독립 — 진입할 때마다 자기 콘텐츠로 리셋(이전 보기 노드 잔상 0).
-  // (과거엔 캔버스 비었을 때만 채우는 early-return 이라 테이블흐름→영역 전환 시 이전 노드
-  //  위에 영역 헐이 덧칠되던 비독립 버그가 있었다.)
-  const matched: string[] = []
-  for (const node of projectStore.nodeMap.values()) {
-    if (isSystemNode(node)) continue
-    const v = node.properties?.[propKey]
-    if (v === undefined || v === null || v === '') continue
-    matched.push(node.id)
-  }
-
-  if (matched.length === 0) {
-    canvasStore.setCanvasNodes([])   // 독립: 매치 0이면 이전 보기 잔상 비우고 사유 안내만
-    autoPopulateHint.value =
-      propKey === 'component_id'
-        ? '업무 단위(군집) 정보를 가진 노드가 없습니다 — 분석을 끝까지 실행해 주세요'
-        : '표시할 노드가 없습니다 — 분석을 끝까지 실행해 주세요'
-    return
-  }
-  canvasStore.setCanvasNodes(matched)
 }
 
 /** 자동 로드 결과 안내 (해당 속성 노드 0개일 때). 빈 문자열이면 표시 안 함. */
@@ -241,7 +204,6 @@ function handleLayerFilter(layer: string): void {
 const activeViewLabel = computed(() => {
   switch (viewMode.value) {
     case 'module': return '모듈간'
-    case 'area': return '실제 업무 단위'
     default: return '기본'
   }
 })
@@ -540,7 +502,7 @@ function handleRelFilterToggle(relType: string): void {
 
 /**
  * "모듈간 상호작용 보기" 프리셋(viewMode='module'): 화면에서 MODULE 과 TABLE 만 보여주고
- * 둘 사이를 잇는 가상 링크(VIRTUAL_USES) 를 합성해 그려준다.
+ * 모듈 사이 CALLS와 모듈-테이블 READS/WRITES를 현재 관계명으로 합성해 그려준다.
  * 가상 링크 합성은 canvasStore.canvasGraphData(computed) 에서 처리하므로 여기선 프리셋만 토글.
  */
 const { presetMode: canvasPresetMode, loadedLabels, loadedRelTypes } = storeToRefs(canvasStore)
@@ -825,11 +787,6 @@ watch(hasGraph, (has, prev) => {
               <span class="vm-icon">🔗</span>
               <span class="vm-text"><b>모듈간 상호작용</b><small>모듈·함수·테이블만</small></span>
               <span class="vm-check">{{ viewMode === 'module' ? '✓' : '' }}</span>
-            </button>
-            <button class="view-menu-item" :class="{ active: viewMode === 'area' }" @click="selectViewMode('area')">
-              <span class="vm-icon">🧩</span>
-              <span class="vm-text"><b>실제 업무 단위</b><small>호출로 함께 움직이는 루틴 묶음</small></span>
-              <span class="vm-check">{{ viewMode === 'area' ? '✓' : '' }}</span>
             </button>
           </div>
         </Transition>

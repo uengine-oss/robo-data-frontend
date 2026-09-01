@@ -1,388 +1,188 @@
-/**
- * features/graph/stores/navigator.ts
- *
- * Navigator 사이드 패널의 모든 상태를 관리한다:
- *   - UI 상태        : 패널 열림/닫힘
- *   - 트리 상태      : 섹션 확장, 노드 확장, 검색어
- *   - 파생 트리 뷰   : MODULES / TABLES (projectStore 기반 computed)
- *
- * projectStore.nodeMap / linkMap 을 단일 진실 소스로 삼으며, 분석 스트림으로 데이터가
- * 쌓이는 동안 Pinia 반응성으로 트리가 자동 갱신된다.
- */
-
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { useAnalyzerStore } from './analyzer'
 import type { GraphLink, GraphNode } from '@/shared/types'
-import { ROUTINE_LABELS } from '@/shared/utils/nodeRelationships'
-import { isContainerNode } from '@/shared/utils/nodeClassify'
-import { typeWithLine, applyLogicalMode } from '@/shared/utils/graphDisplay'
+import { applyLogicalMode, typeWithLine } from '@/shared/utils/graphDisplay'
 import { isNodeHidden, isSystemNode } from '@/shared/utils/graphVisibility'
 import { kindOfNode } from '@/shared/utils/nodeLabels'
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 타입 정의
-// ═══════════════════════════════════════════════════════════════════════════
+import { useAnalyzerStore } from './analyzer'
 
 export type NavigatorSection = 'MODULES' | 'TABLES'
 
 export interface NavigatorTreeItem {
   id: string
   name: string
-  nodeType: string        // 표시용 서브라벨 (CLASS/FUNCTION/Table 등)
+  nodeType: string
   labels: string[]
   children: NavigatorTreeItem[]
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 논리명/물리명 표시 전환 (모듈 레벨 — store + 헬퍼 함수 모두 접근)
-// ═══════════════════════════════════════════════════════════════════════════
-
 const showLogicalNames = ref(false)
+const CHILD_RELATIONS = new Set(['PARENT_OF', 'HAS_COLUMN', 'HAS_RULE'])
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 트리 빌드 헬퍼 (순수 함수)
-// ═══════════════════════════════════════════════════════════════════════════
-
-/** 자식으로 확장할 관계 타입 (컨테이너 → 자식).
- *  HAS_MEMBER = 그릇(FILE/CLASS) → 멤버. 트리엔 **루틴만** 넣는다(데이터 멤버 변수·상수는
- *  노드패널 카드에서 표시 — 트리 노이즈 방지). 종류 구분 = 노드 라벨(buildChildIndexes). */
-const CHILD_REL_TYPES = new Set([
-  'HAS_MEMBER',           // 그릇 → 루틴 (PROCEDURE/FUNCTION/METHOD/TRIGGER)
-  'HAS_METHOD', 'HAS_CLASS', 'HAS_INTERFACE',
-  'CONTAINS',
-  'HAS_COLUMN',           // Table → Column
-  'HAS_BUSINESS_LOGIC',   // Function → BusinessLogic
-])
-
-// 비즈니스로직 메타(규칙·예시·질문) — 평소엔 트리에서 숨김, "숨김 요소 표시" 켜면 자식으로 펼침.
-// FUNCTION-[HAS_RULE]->RULE-[HAS_EXAMPLE]->EXAMPLE, FUNCTION-[HAS_QUESTION]->QUESTION 계층.
-const META_CHILD_RELS = new Set(['HAS_RULE', 'HAS_EXAMPLE', 'HAS_QUESTION'])
-
-/**
- * 노드의 표시용 sublabel 을 결정한다.
- * 1) 부가 역할 라벨 제외한 첫 번째 = 실제 종류(antlr type, 예 [:METHOD]→'METHOD').
- * 2) 없으면(외부 stub 등) 우선순위 기반 폴백.
- */
-function pickDisplayLabel(node: GraphNode): string {
-  return kindOfNode(node)
-}
-
-function pickDisplayName(node: GraphNode): string {
-  const p = node.properties
-  if (node.labels.includes('BusinessLogic')) {
-    const seq = p['sequence']
-    const title = String(p['title'] ?? p['name'] ?? node.id)
-    return seq != null ? `[${seq}] ${title}` : title
+function displayName(node: GraphNode): string {
+  const properties = node.properties
+  if (node.labels.includes('RULE')) {
+    const value = properties.condition_description ?? properties.condition
+    const text = typeof value === 'string' ? value.trim() : ''
+    if (text) return text.length > 40 ? `${text.slice(0, 40)}…` : text
   }
-  // 비즈니스로직 메타 — name 이 없어 본문 텍스트(statement/description/text)를 트리 라벨로(자르기).
-  const metaText = node.labels.includes('RULE') ? p['statement']
-    : node.labels.includes('EXAMPLE') ? p['description']
-    : node.labels.includes('QUESTION') ? p['text'] : undefined
-  if (metaText != null) {
-    const s = String(metaText).trim()
-    return s.length > 40 ? s.slice(0, 40) + '…' : (s || pickDisplayLabel(node))
+  const physical = properties.name
+    ? String(properties.name)
+    : typeWithLine(kindOfNode(node), properties.start_line, true)
+  return applyLogicalMode(node, physical || node.id, showLogicalNames.value)
+}
+
+function visible(node: GraphNode, showHidden: boolean): boolean {
+  return !isSystemNode(node) && (showHidden || !isNodeHidden(node))
+}
+
+function childIndexes(links: Iterable<GraphLink>): {
+  children: Map<string, string[]>
+  parents: Map<string, string>
+} {
+  const children = new Map<string, string[]>()
+  const parents = new Map<string, string>()
+  for (const link of links) {
+    if (!CHILD_RELATIONS.has(link.type)) continue
+    const current = children.get(link.source) ?? []
+    current.push(link.target)
+    children.set(link.source, current)
+    if (!parents.has(link.target)) parents.set(link.target, link.source)
   }
-  // 물리 식별자 — 이름 우선, 없으면 `타입 [라인]`(트리는 라인 표기). type 산출은 트리 고유(pickDisplayLabel).
-  const name = p['name']
-  const physical = name ? String(name) : typeWithLine(pickDisplayLabel(node), p['start_line'], true)
-  return applyLogicalMode(node, physical, showLogicalNames.value)
+  return { children, parents }
 }
 
-/** BL 의 sequence 는 "1", "2", "2-1" 형식 — 튜플 비교로 정렬. */
-function blSequenceKey(node: GraphNode): [number, ...number[]] {
-  const s = node.properties['sequence']
-  if (s == null) return [999]
-  try {
-    return String(s).split('-').map(x => parseInt(x, 10)) as [number, ...number[]]
-  } catch {
-    return [999]
-  }
-}
-
-function isExcluded(node: GraphNode): boolean {
-  // 캔버스와 같은 단일 정책. summary 생성 시점은 구조 탐색 표시 여부와 무관하다.
-  if (isSystemNode(node)) return true
-  if (useAnalyzerStore().showHidden) return false
-  return isNodeHidden(node)
-}
-
-/**
- * 주어진 노드를 루트로 자식 트리를 재귀 구성.
- * - HAS_BUSINESS_LOGIC 자식은 sequence 순으로 정렬
- * - 기타 자식은 이름순 정렬
- */
-function buildSubtree(
+function buildTree(
   nodeId: string,
-  nodeMap: Map<string, GraphNode>,
-  childIndex: Map<string, string[]>,
-  relIndex: Map<string, Map<string, string>>,    // source → (target → relType)
-  depth: number,
+  nodes: Map<string, GraphNode>,
+  children: Map<string, string[]>,
+  showHidden: boolean,
+  accepted: (node: GraphNode) => boolean,
   visited: Set<string>,
 ): NavigatorTreeItem | null {
-  if (visited.has(nodeId) || depth > 10) return null
+  if (visited.has(nodeId)) return null
+  const node = nodes.get(nodeId)
+  if (!node || !accepted(node) || !visible(node, showHidden)) return null
   visited.add(nodeId)
-  const node = nodeMap.get(nodeId)
-  if (!node || isExcluded(node)) return null
 
-  const childIds = childIndex.get(nodeId) ?? []
-  const blChildren: NavigatorTreeItem[] = []
-  const astChildren: NavigatorTreeItem[] = []   // 언어 공통 AST 구조(PARENT_OF) — 소스 등장(라인) 순
-  const otherChildren: NavigatorTreeItem[] = []
-
-  for (const cid of childIds) {
-    const child = buildSubtree(cid, nodeMap, childIndex, relIndex, depth + 1, visited)
-    if (!child) continue
-    const rel = relIndex.get(nodeId)?.get(cid)
-    if (rel === 'HAS_BUSINESS_LOGIC') blChildren.push(child)
-    else if (rel === 'PARENT_OF') {
-      // 언어 공통 AST 구조 — 중첩(소스 등장순). 배지·이름은 라벨/name 직독.
-      astChildren.push(child)
-    }
-    else otherChildren.push(child)
-  }
-
-  otherChildren.sort((a, b) => a.name.localeCompare(b.name))
-  // AST 구문은 실행 순서(시작 라인) — 알파벳 정렬하면 흐름이 깨짐.
-  const lineOf = (id: string) => Number(nodeMap.get(id)?.properties?.start_line ?? 0)
-  astChildren.sort((a, b) => lineOf(a.id) - lineOf(b.id))
-  blChildren.sort((a, b) => {
-    const na = nodeMap.get(a.id), nb = nodeMap.get(b.id)
-    if (!na || !nb) return 0
-    const ka = blSequenceKey(na), kb = blSequenceKey(nb)
-    for (let i = 0; i < Math.max(ka.length, kb.length); i++) {
-      const d = (ka[i] ?? 0) - (kb[i] ?? 0)
-      if (d !== 0) return d
-    }
-    return 0
-  })
+  const childItems = (children.get(nodeId) ?? [])
+    .map(childId => buildTree(
+      childId,
+      nodes,
+      children,
+      showHidden,
+      accepted,
+      visited,
+    ))
+    .filter((item): item is NavigatorTreeItem => Boolean(item))
+    .sort((left, right) => {
+      const leftLine = Number(nodes.get(left.id)?.properties.start_line ?? 0)
+      const rightLine = Number(nodes.get(right.id)?.properties.start_line ?? 0)
+      if (leftLine !== rightLine) return leftLine - rightLine
+      return left.name.localeCompare(right.name)
+    })
 
   return {
     id: node.id,
-    name: pickDisplayName(node),
-    nodeType: pickDisplayLabel(node),
+    name: displayName(node),
+    nodeType: kindOfNode(node),
     labels: node.labels,
-    children: [...otherChildren, ...astChildren, ...blChildren],
+    children: childItems,
   }
 }
 
-/** source → [targetIds] / source → (target → relType) 인덱스 빌드.
- *  언어 공통: 구조 노드는 PARENT_OF 로 루틴/구조 노드 아래 **AST 그대로 중첩**.
- *  그 구문이 모듈의 평면 자식(HAS_MEMBER 등)으로 **중복 등장하지 않도록** 억제(중첩 우선). */
-function buildChildIndexes(
-  linkMap: Map<string, GraphLink>,
-  nodeMap: Map<string, GraphNode>,
-) {
-  const childIndex = new Map<string, string[]>()
-  const relIndex = new Map<string, Map<string, string>>()
-  const FLAT_CONTAINER_RELS = new Set(['HAS_MEMBER', 'HAS_METHOD'])
-  // "숨김 요소 표시" 켜지면 데이터 멤버(변수/상수)도 트리에 — 기본은 루틴만(노이즈 방지).
-  const showHidden = useAnalyzerStore().showHidden
+function buildModulesTree(
+  nodes: Map<string, GraphNode>,
+  links: Map<string, GraphLink>,
+  showHidden: boolean,
+): NavigatorTreeItem[] {
+  const { children, parents } = childIndexes(links.values())
+  const accepted = (node: GraphNode) =>
+    !node.labels.includes('TABLE') && !node.labels.includes('COLUMN')
+  const visited = new Set<string>()
+  const roots: NavigatorTreeItem[] = []
+  const candidates = [...nodes.values()].filter(node =>
+    accepted(node)
+    && (node.labels.includes('PACKAGE') || !parents.has(node.id)),
+  )
 
-  // 1) PARENT_OF 부모를 가진 노드(=언어 공통 AST 구조) 집합 — 평면 컨테이너 자식에서 제외 대상.
-  const hasParent = new Set<string>()
-  for (const link of linkMap.values()) {
-    if (link.type === 'PARENT_OF') hasParent.add(link.target)
-  }
-
-  const add = (src: string, tgt: string, type: string) => {
-    const list = childIndex.get(src) ?? []
-    list.push(tgt)
-    childIndex.set(src, list)
-    const rmap = relIndex.get(src) ?? new Map<string, string>()
-    rmap.set(tgt, type)
-    relIndex.set(src, rmap)
-  }
-
-  for (const link of linkMap.values()) {
-    // Do not even build AST children in the default Navigator. showHidden restores
-    // the original PARENT_OF nesting and source-line ordering below.
-    if (link.type === 'PARENT_OF') {
-      if (showHidden) add(link.source, link.target, 'PARENT_OF')
+  for (const node of candidates) {
+    if (node.labels.includes('PACKAGE') && displayName(node) === 'root') {
+      for (const childId of children.get(node.id) ?? []) {
+        const child = buildTree(
+          childId, nodes, children, showHidden, accepted, visited,
+        )
+        if (child) roots.push(child)
+      }
       continue
     }
-    // 메타(규칙·예시·질문)는 "숨김 요소 표시" 켤 때만 자식으로 — 평소엔 트리 노이즈 방지.
-    const isChildRel = CHILD_REL_TYPES.has(link.type) || (showHidden && META_CHILD_RELS.has(link.type))
-    if (!isChildRel) continue
-    // HAS_MEMBER 는 기본 루틴만 트리에(데이터 멤버는 노이즈) — 숨김 표시 켜지면 변수/상수도 포함.
-    if (link.type === 'HAS_MEMBER' && !showHidden) {
-      const tgt = nodeMap.get(link.target)
-      if (!tgt || !tgt.labels.some(l => ROUTINE_LABELS.has(l))) continue
-    }
-    // AST 구조(PARENT_OF 부모 보유)는 모듈 평면 자식으로 넣지 않음 — 중첩 위치에만.
-    if (hasParent.has(link.target) && FLAT_CONTAINER_RELS.has(link.type)) continue
-    add(link.source, link.target, link.type)
+    const root = buildTree(
+      node.id, nodes, children, showHidden, accepted, visited,
+    )
+    if (root) roots.push(root)
   }
-  return { childIndex, relIndex }
+
+  for (const node of nodes.values()) {
+    if (visited.has(node.id) || !accepted(node)) continue
+    const root = buildTree(
+      node.id, nodes, children, showHidden, accepted, visited,
+    )
+    if (root) roots.push(root)
+  }
+
+  return roots.sort((left, right) => left.name.localeCompare(right.name))
 }
 
-/**
- * MODULES 섹션: PACKAGE 계층 → MODULE → FUNCTION/CLASS → BusinessLogic.
- *
- * 견고성 원칙 (스트리밍 도중에도 0건이 되지 않도록):
- * 1. MODULE 라벨이 있는 모든 노드를 우선 트리에 등장시킨다.
- * 2. PACKAGE 계층은 부수적 — 형성되면 MODULE 을 그 안에 흡수, 안 되면 평면으로.
- * 3. 'root' 패키지 식별 실패해도 MODULE 자체는 항상 노출 (스트림 초기에도 카운트 > 0).
- */
-function buildModulesTree(
-  nodeMap: Map<string, GraphNode>,
-  linkMap: Map<string, GraphLink>,
-): NavigatorTreeItem[] {
-  const { childIndex, relIndex } = buildChildIndexes(linkMap, nodeMap)
-
-  // BELONGS_TO: source = 자식(그릇), target = 부모(PACKAGE). Table→Schema 도 같은 BELONGS_TO 라
-  // **대상이 PACKAGE 인 것만** 패키지 트리에 쓴다(스키마 소속이 모듈 트리를 오염시키지 않도록).
-  const belongsTo = new Map<string, string[]>()   // parentPkgId → [childId]
-  const parentOf = new Map<string, string>()       // childId → parentPkgId
-  for (const link of linkMap.values()) {
-    if (link.type !== 'BELONGS_TO') continue
-    const parent = nodeMap.get(link.target)
-    if (!parent || !parent.labels.includes('PACKAGE')) continue
-    parentOf.set(link.source, link.target)
-    const list = belongsTo.get(link.target) ?? []
-    list.push(link.source)
-    belongsTo.set(link.target, list)
-  }
-
-  const visited = new Set<string>()
-
-  function buildPkgTree(pkgId: string, depth: number): NavigatorTreeItem | null {
-    if (visited.has(pkgId) || depth > 8) return null
-    visited.add(pkgId)
-    const pkg = nodeMap.get(pkgId)
-    if (!pkg) return null
-    const name = pickDisplayName(pkg)
-    if (name === 'root') return null            // root 패키지는 숨김
-
-    const children: NavigatorTreeItem[] = []
-    for (const childId of belongsTo.get(pkgId) ?? []) {
-      const child = nodeMap.get(childId)
-      if (!child) continue
-      if (child.labels.includes('PACKAGE')) {
-        const pt = buildPkgTree(childId, depth + 1)
-        if (pt) children.push(pt)
-      } else if (isContainerNode(child.labels)) {
-        const mt = buildSubtree(childId, nodeMap, childIndex, relIndex, 0, new Set(visited))
-        if (mt) {
-          visited.add(childId)
-          children.push(mt)
-        }
-      }
-    }
-    children.sort((a, b) => {
-      const ap = a.labels.includes('PACKAGE') ? 0 : 1
-      const bp = b.labels.includes('PACKAGE') ? 0 : 1
-      return ap !== bp ? ap - bp : a.name.localeCompare(b.name)
-    })
-
-    return {
-      id: pkg.id,
-      name,
-      nodeType: 'PACKAGE',
-      labels: pkg.labels,
-      children,
-    }
-  }
-
-  const roots: NavigatorTreeItem[] = []
-
-  // [A] PACKAGE 계층 — root 부모를 가진 최상위 패키지부터 (있으면)
-  for (const pkg of nodeMap.values()) {
-    if (!pkg.labels.includes('PACKAGE')) continue
-    const parentPkgId = parentOf.get(pkg.id)
-    const parent = parentPkgId ? nodeMap.get(parentPkgId) : null
-    const isTopLevel = !parent || pickDisplayName(parent) === 'root' || !parent.labels.includes('PACKAGE')
-    if (!isTopLevel) continue
-    const tree = buildPkgTree(pkg.id, 0)
-    if (tree) roots.push(tree)
-  }
-
-  // [B] 위에서 흡수 안 된 MODULE 은 전부 평면 루트로 노출 (스트림 초기에도 카운트 > 0).
-  for (const node of nodeMap.values()) {
-    if (!isContainerNode(node.labels)) continue
-    if (visited.has(node.id)) continue           // 이미 PACKAGE 트리에 들어감
-    const tree = buildSubtree(node.id, nodeMap, childIndex, relIndex, 0, new Set(visited))
-    if (tree) {
-      visited.add(node.id)
-      roots.push(tree)
-    }
-  }
-
-  roots.sort((a, b) => {
-    const ap = a.labels.includes('PACKAGE') ? 0 : 1
-    const bp = b.labels.includes('PACKAGE') ? 0 : 1
-    return ap !== bp ? ap - bp : a.name.localeCompare(b.name)
-  })
-  return roots
-}
-
-/** TABLES 섹션: Table → Column (HAS_COLUMN). */
 function buildTablesTree(
-  nodeMap: Map<string, GraphNode>,
-  linkMap: Map<string, GraphLink>,
+  nodes: Map<string, GraphNode>,
+  links: Map<string, GraphLink>,
+  showHidden: boolean,
 ): NavigatorTreeItem[] {
-  const { childIndex, relIndex } = buildChildIndexes(linkMap, nodeMap)
-  const roots: NavigatorTreeItem[] = []
-  for (const node of nodeMap.values()) {
-    if (!node.labels.includes('TABLE')) continue
-    const tree = buildSubtree(node.id, nodeMap, childIndex, relIndex, 0, new Set())
-    if (tree) roots.push(tree)
-  }
-  roots.sort((a, b) => a.name.localeCompare(b.name))
-  return roots
+  const { children } = childIndexes(links.values())
+  const accepted = (node: GraphNode) =>
+    node.labels.includes('TABLE') || node.labels.includes('COLUMN')
+  return [...nodes.values()]
+    .filter(node => node.labels.includes('TABLE'))
+    .map(node => buildTree(
+      node.id, nodes, children, showHidden, accepted, new Set<string>(),
+    ))
+    .filter((item): item is NavigatorTreeItem => Boolean(item))
+    .sort((left, right) => left.name.localeCompare(right.name))
 }
 
-/** 검색 필터 — 자기 자신이나 자손 중 매칭이 있으면 유지. */
-function filterTree(items: NavigatorTreeItem[], query: string): NavigatorTreeItem[] {
-  if (!query) return items
-  const q = query.toLowerCase()
-  const out: NavigatorTreeItem[] = []
-  for (const item of items) {
-    const self = item.name.toLowerCase().includes(q) || item.id.toLowerCase().includes(q)
-    const kids = filterTree(item.children, q)
-    if (self || kids.length > 0) out.push({ ...item, children: kids })
-  }
-  return out
+function filterTree(
+  items: NavigatorTreeItem[],
+  query: string,
+): NavigatorTreeItem[] {
+  const normalized = query.trim().toLowerCase()
+  if (!normalized) return items
+  return items.flatMap(item => {
+    const children = filterTree(item.children, normalized)
+    const matches = item.name.toLowerCase().includes(normalized)
+      || item.id.toLowerCase().includes(normalized)
+    return matches || children.length ? [{ ...item, children }] : []
+  })
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Pinia Store
-// ═══════════════════════════════════════════════════════════════════════════
 
 export const useNavigatorStore = defineStore('navigator', () => {
-  const projectStore = useAnalyzerStore()
-
-  // ── UI 상태 ──
+  const analyzer = useAnalyzerStore()
   const isPanelOpen = ref(false)
-
-  // ── 트리 상태 ──
-  // 기본 동작: 모든 노드가 펼쳐진 상태. 사용자가 접은 것만 collapsedNodes 에 들어간다.
   const expandedSections = ref<Set<NavigatorSection>>(
-    new Set(['MODULES', 'TABLES'])
+    new Set(['MODULES', 'TABLES']),
   )
   const collapsedNodes = ref<Set<string>>(new Set())
   const searchQuery = ref('')
-
-  // ── 선택 상태 ──
-  // Navigator 단일 클릭 시 세팅 — GraphTab 이 watch 해서 노드 디테일 패널에 즉시 표시.
   const selectedNodeId = ref<string | null>(null)
 
-  // ── 파생 트리 ──
-  const moduleTree = computed(() =>
-    filterTree(
-      buildModulesTree(projectStore.nodeMap, projectStore.linkMap),
-      searchQuery.value,
-    )
-  )
+  const moduleTree = computed(() => filterTree(
+    buildModulesTree(analyzer.nodeMap, analyzer.linkMap, analyzer.showHidden),
+    searchQuery.value,
+  ))
+  const tableList = computed(() => filterTree(
+    buildTablesTree(analyzer.nodeMap, analyzer.linkMap, analyzer.showHidden),
+    searchQuery.value,
+  ))
 
-  const tableList = computed(() =>
-    filterTree(
-      buildTablesTree(projectStore.nodeMap, projectStore.linkMap),
-      searchQuery.value,
-    )
-  )
-
-  // ── UI 액션 ──
   function setPanelOpen(open: boolean): void {
     isPanelOpen.value = open
   }
@@ -393,43 +193,33 @@ export const useNavigatorStore = defineStore('navigator', () => {
     expandedSections.value = next
   }
 
-  /**
-   * 노드 펼침/접힘 토글. 기본 동작은 전체 펼침이므로 collapsedNodes 에 넣으면 접힘.
-   */
   function toggleNode(nodeId: string): void {
     const next = new Set(collapsedNodes.value)
     next.has(nodeId) ? next.delete(nodeId) : next.add(nodeId)
     collapsedNodes.value = next
   }
 
-  /** 노드가 펼쳐져 있는지 — collapsedNodes 에 없으면 펼침. */
   function isNodeExpanded(nodeId: string): boolean {
     return !collapsedNodes.value.has(nodeId)
   }
 
-  /** 모든 노드 접기. */
   function collapseAll(): void {
-    // 모든 트리 id 를 collapsedNodes 에 넣는다.
-    const all = new Set<string>()
-    const walk = (items: NavigatorTreeItem[]) => {
-      for (const it of items) {
-        if (it.children.length > 0) {
-          all.add(it.id)
-          walk(it.children)
-        }
+    const next = new Set<string>()
+    const visit = (items: NavigatorTreeItem[]) => {
+      for (const item of items) {
+        if (item.children.length) next.add(item.id)
+        visit(item.children)
       }
     }
-    walk(moduleTree.value)
-    walk(tableList.value)
-    collapsedNodes.value = all
+    visit(moduleTree.value)
+    visit(tableList.value)
+    collapsedNodes.value = next
   }
 
-  /** 모든 노드 펼치기 (= collapsedNodes 비우기). */
   function expandAll(): void {
     collapsedNodes.value = new Set()
   }
 
-  /** Navigator 트리 노드 단일 클릭 — 디테일 패널에 즉시 표시. */
   function selectNode(nodeId: string | null): void {
     selectedNodeId.value = nodeId
   }
@@ -439,13 +229,10 @@ export const useNavigatorStore = defineStore('navigator', () => {
   }
 
   return {
-    // UI
     isPanelOpen,
     setPanelOpen,
-    // 논리명/물리명 토글
     showLogicalNames,
     toggleLogicalNames,
-    // 트리 상태
     expandedSections,
     collapsedNodes,
     searchQuery,
@@ -454,10 +241,8 @@ export const useNavigatorStore = defineStore('navigator', () => {
     isNodeExpanded,
     collapseAll,
     expandAll,
-    // 선택 상태
     selectedNodeId,
     selectNode,
-    // 파생 뷰
     moduleTree,
     tableList,
   }

@@ -28,15 +28,6 @@ export interface PipelineControlResponse {
   status: PipelineStatus
 }
 
-export interface SourceContent {
-  file_path: string
-  content: string
-  line_count: number
-  start_line: number
-  end_line: number
-  found: boolean
-}
-
 export const analyzerApi = {
   async analyze(
     metadata: BackendRequestMetadata,
@@ -76,28 +67,6 @@ export const analyzerApi = {
       body: JSON.stringify({ action }),
     })
     if (!response.ok) await analyzerHttp.handleError(response)
-    return response.json()
-  },
-
-  async getSourceContent(
-    filePath: string,
-    options?: { startLine?: number; endLine?: number },
-  ): Promise<SourceContent> {
-    const params = new URLSearchParams({ file_path: filePath })
-    if (options?.startLine) params.append('start_line', options.startLine.toString())
-    if (options?.endLine) params.append('end_line', options.endLine.toString())
-
-    const response = await fetch(`${ROBO_BASE_URL}/source?${params}`)
-    if (!response.ok) {
-      return {
-        file_path: filePath,
-        content: '',
-        line_count: 0,
-        start_line: 0,
-        end_line: 0,
-        found: false,
-      }
-    }
     return response.json()
   },
 }

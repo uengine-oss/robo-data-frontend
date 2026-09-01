@@ -1,64 +1,55 @@
 <script setup lang="ts">
-/**
- * FunctionCard.vue — FUNCTION / PROCEDURE / TRIGGER 디테일.
- * 순서: 식별(시그니처는 식별 카드 안 컴팩트) → 개요 → 역할 → 원문 코드 → 연결.
- */
-
 import { computed } from 'vue'
 import type { GraphNode } from '@/shared/types'
 import { technicalNodeName } from '@/shared/utils/graphDisplay'
 import { getSemanticReport } from '@/shared/utils/nodeRelationships'
 import { useAnalyzerStore } from '@/workflows/code-analysis'
 import NodeDetailBase from './NodeDetailBase.vue'
+import TextViewer from '@/shared/components/TextViewer.vue'
 import { AsyncCodeViewer as CodeViewer } from '@/shared/components/codeViewerAsync'
 
 interface Props {
   node: GraphNode
 }
-const props = defineProps<Props>()
 
+const props = defineProps<Props>()
 const projectStore = useAnalyzerStore()
 
-// 의미데이터(업무규칙·예시·질문) — linkMap 에서 함수→규칙→예시 순회(getSemanticReport 가 의미 타입만 골라 씀).
-const semantic = computed(() =>
-  getSemanticReport(props.node.id, projectStore.linkMap.values(), projectStore.nodeMap),
-)
+function textList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map(item => String(item).trim()).filter(Boolean)
+  }
+  if (typeof value === 'string' && value.trim()) return [value.trim()]
+  return []
+}
+
 const rules = computed(() =>
-  semantic.value.rules
-    .map(r => ({
-      statement: String(r.node.properties?.statement ?? '').trim(),
-      examples: r.examples
-        .map(e => String(e.properties?.description ?? '').trim())
-        .filter(Boolean),
-    }))
-    .filter(r => r.statement),
+  getSemanticReport(
+    props.node.id,
+    projectStore.linkMap.values(),
+    projectStore.nodeMap,
+  ).rules.map(({ node }) => ({
+    id: node.id,
+    line: Number(node.properties.line ?? 0),
+    condition: String(
+      node.properties.condition_description
+      ?? node.properties.condition
+      ?? '',
+    ).trim(),
+    effects: textList(
+      node.properties.effect_descriptions
+      ?? node.properties.effects,
+    ),
+    codeText: String(node.properties.code_text ?? '').trim(),
+  })),
 )
-const questions = computed(() =>
-  semantic.value.questions
-    .map(q => ({
-      text: String(q.properties?.text ?? '').trim(),
-      reason: String(q.properties?.reason ?? '').trim(),
-    }))
-    .filter(q => q.text),
-)
-const hasSemantic = computed(() => rules.value.length > 0 || questions.value.length > 0)
 
 const subLabel = computed(() => {
-  const sub = props.node.properties?.type as string | undefined
-  if (sub) return sub
   return props.node.labels?.[0] || 'FUNCTION'
 })
-
 const headerTech = computed(() => technicalNodeName(props.node))
-// "원문 코드" = 진짜 원문. 주석도 코드의 일부(레거시의 이력·경고·자백이 거기 있다) —
-// 지우면 라벨과 내용이 어긋난다.
-const codeText = computed(() => (props.node.properties?.code_text as string) || '')
-const sourcePath = computed(() =>
-  (props.node.properties?.file_path as string)
-  || (props.node.properties?.file_name as string)
-  || '',
-)
-// 논리명·경로·라인·분류(역할=stereotype)는 모두 식별 행(buildIdentityRows)에서 표시 — 카드 중복 제거.
+const codeText = computed(() => String(props.node.properties?.code_text || ''))
+const sourcePath = computed(() => String(props.node.properties?.file_path || ''))
 </script>
 
 <template>
@@ -69,22 +60,26 @@ const sourcePath = computed(() =>
     :header-title="headerTech"
   >
     <template #body>
-      <section v-if="hasSemantic" class="detail-card">
-        <span class="detail-card__label">업무 규칙 · 예시 · 질문</span>
-        <div class="detail-card__body detail-card__body--tight">
-          <p class="sem-hint">코드에서 뽑아낸 비즈니스 규칙 · 시나리오(예시) · 사람 확인이 필요한 질문</p>
-          <div v-for="(r, ri) in rules" :key="'rule-' + ri" class="sem-rule">
-            <p class="sem-rule__stmt">📌 {{ r.statement }}</p>
-            <ul v-if="r.examples.length" class="sem-ex">
-              <li v-for="(ex, ei) in r.examples" :key="ei" class="sem-ex__item">{{ ex }}</li>
-            </ul>
-          </div>
-          <div v-if="questions.length" class="sem-q">
-            <p v-for="(q, qi) in questions" :key="'q-' + qi" class="sem-q__item">
-              <span class="sem-q__text">❓ {{ q.text }}</span>
-              <span v-if="q.reason" class="sem-q__reason">— {{ q.reason }}</span>
-            </p>
-          </div>
+      <section v-if="rules.length" class="detail-card">
+        <span class="detail-card__label">업무 규칙</span>
+        <div class="detail-card__body detail-card__body--tight rule-list">
+          <article v-for="rule in rules" :key="rule.id" class="rule-item">
+            <p v-if="rule.line" class="rule-line">라인 {{ rule.line }}</p>
+            <div v-if="rule.condition" class="rule-section">
+              <strong>조건</strong>
+              <TextViewer :content="rule.condition" :max-height="160" compact />
+            </div>
+            <div v-if="rule.effects.length" class="rule-section">
+              <strong>효과</strong>
+              <ul>
+                <li v-for="effect in rule.effects" :key="effect">{{ effect }}</li>
+              </ul>
+            </div>
+            <div v-if="rule.codeText" class="rule-section">
+              <strong>근거 코드</strong>
+              <CodeViewer :content="rule.codeText" :file-path="sourcePath" />
+            </div>
+          </article>
         </div>
       </section>
 
@@ -99,60 +94,43 @@ const sourcePath = computed(() =>
 </template>
 
 <style lang="scss" scoped>
-.fn-actor {
-  margin: 0;
-  font-size: 0.8rem;
-  line-height: 1.5;
-  color: var(--color-text-light);
+.rule-list {
+  display: grid;
+  gap: 12px;
 }
 
-.sem-hint {
-  margin: 0 0 10px;
+.rule-item {
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-secondary);
+}
+
+.rule-line {
+  margin: 0 0 8px;
   font-size: 0.68rem;
-  line-height: 1.4;
   color: var(--color-text-muted);
 }
 
-.sem-rule {
-  & + .sem-rule { margin-top: 10px; }
-}
+.rule-section {
+  & + & { margin-top: 10px; }
 
-.sem-rule__stmt {
-  margin: 0;
-  font-size: 0.8rem;
-  font-weight: 600;
-  line-height: 1.5;
-  color: var(--color-text-bright);
-}
+  strong {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 0.72rem;
+    color: var(--color-text-muted);
+  }
 
-.sem-ex {
-  margin: 4px 0 0;
-  padding-left: 18px;
-  list-style: disc;
-}
+  ul {
+    margin: 0;
+    padding-left: 18px;
+  }
 
-.sem-ex__item {
-  font-size: 0.76rem;
-  line-height: 1.5;
-  color: var(--color-text-light);
-}
-
-.sem-q {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--color-border);
-}
-
-.sem-q__item {
-  margin: 0;
-  & + .sem-q__item { margin-top: 4px; }
-  font-size: 0.78rem;
-  line-height: 1.5;
-  color: var(--color-text-light);
-}
-
-.sem-q__reason {
-  margin-left: 4px;
-  color: var(--color-text-muted);
+  li {
+    font-size: 0.76rem;
+    line-height: 1.5;
+    color: var(--color-text-light);
+  }
 }
 </style>

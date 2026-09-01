@@ -24,8 +24,7 @@ const table = (name, schema, datasource) => ({
   datasource,
   logical_name: `${name} logical`,
   description: `${name} description`,
-  description_source: 'ddl',
-  analyzed_description: `${name} analyzed`,
+  summary: `${name} analyzed`,
   column_count: 1,
 })
 
@@ -45,8 +44,7 @@ try {
     datasource: 'warehouse',
     logical_name: 'orders logical',
     description: 'orders description',
-    description_source: 'ddl',
-    analyzed_description: 'orders analyzed',
+    summary: 'orders analyzed',
     column_count: 1,
   }])
   projectedTables[0].description = 'changed projection'
@@ -55,12 +53,11 @@ try {
   const sourceColumns = [{
     name: 'id',
     table_name: 'orders',
-    dtype: 'integer',
+    data_type: 'integer',
     nullable: false,
     logical_name: '식별자',
     description: 'primary key',
-    description_source: 'ddl',
-    analyzed_description: 'order identifier',
+    summary: 'order identifier',
   }]
   const projectedColumns = projection.projectSchemaCatalogColumns(sourceColumns)
   assert.deepEqual(projectedColumns, sourceColumns)

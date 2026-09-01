@@ -46,9 +46,9 @@
 
 **Rationale**: 설계자/개발자가 "파일 1809줄 중 어디"를 교차참조. 1부터 재번호는 위치감 상실 → 기각.
 
-## R5. getSourceContent slice 지원 여부
+## R5. 노드 원문 범위 지원 여부
 
-**Decision**: 추가 백엔드 작업 0. `GET /robo/source`(spec 043, `source_router.py:63`)가 이미 `start_line`·`end_line` 쿼리로 슬라이스 반환. 프론트 `api.ts:166 getSourceContent`도 이미 옵션 지원. **프론트 호출부만** `{startLine: node.start_line, endLine: node.end_line}`로 바꾸면 됨(현재 `{1,0}`=전체).
+**Decision**: 추가 원문 조회 작업 0. Catalog가 참조 노드의 `code_text`, `start_line`, `end_line`을 함께 반환하고 프론트는 그 값을 그대로 표시한다. 전체 파일을 다시 읽거나 별도 호출하지 않는다.
 
 ## R6. 참조 트리거 UX (사용자 위임 → 결정)
 

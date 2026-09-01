@@ -16,23 +16,19 @@
  * 관계 타입별 색상
  */
 export const RELATIONSHIP_COLORS: Record<string, string> = {
-  HAS_MEMBER: '#9CA3AB',
-  LINKS_TO: '#9CA3AB',
   PARENT_OF: '#9CA3AB',
   NEXT: '#9CA3AB',
-  FROM: '#9CA3AB',
+  CALLS: '#4EA8DE',
+  READS: '#F5A524',
+  WRITES: '#E5484D',
+  REFERENCES: '#9CA3AB',
+  INIT_BY: '#9CA3AB',
   HAS_COLUMN: '#9CA3AB',
-  DB_LINK: '#9CA3AB',
-  FK_TO_TABLE: '#9CA3AB',
-  FK_TO_COLUMN: '#9CA3AB',
-  SCOPE: '#9CA3AB',
+  FK: '#9CA3AB',
+  HAS_RULE: '#9CA3AB',
   EXTENDS: '#9CA3AB',
   IMPLEMENTS: '#9CA3AB',
-  BELONGS_TO: '#9CA3AB',
-  DECLARES: '#9CA3AB',
-  HAS_AC: '#9CA3AB',
-  HAS_USER_STORY: '#9CA3AB',
-  VIRTUAL_USES: '#8B5CF6',
+  DATA_FLOWS_TO: '#8B5CF6',
   DEFAULT: '#9CA3AB'
 }
 
@@ -76,7 +72,7 @@ export function getRelationshipDisplayName(type: string): string {
  * 관계 타입별 두께 (기본값)
  */
 export const RELATIONSHIP_WIDTHS: Record<string, number> = {
-  VIRTUAL_USES: 3,
+  DATA_FLOWS_TO: 3,
   DEFAULT: 2
 }
 

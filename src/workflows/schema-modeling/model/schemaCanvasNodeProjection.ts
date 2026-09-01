@@ -11,8 +11,7 @@ export interface TableNodeData {
   datasource?: string
   logical_name?: string
   description?: string
-  analyzed_description?: string
-  description_source?: 'ddl' | 'procedure' | 'code' | 'user' | ''
+  summary?: string
   columns: SchemaModelingColumn[]
   columnCount: number
   isPrimary?: boolean
@@ -56,8 +55,7 @@ export function projectSchemaCanvasNode(
       datasource: table.datasource || '',
       logical_name: table.logical_name || undefined,
       description: table.description || undefined,
-      analyzed_description: table.analyzed_description || undefined,
-      description_source: table.description_source || undefined,
+      summary: table.summary || undefined,
       columns: columns.map(column => ({ ...column })),
       columnCount: table.column_count || columns.length,
       isPrimary: options.isPrimary !== false,

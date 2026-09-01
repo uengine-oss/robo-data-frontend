@@ -6,7 +6,6 @@ import { IconEdit, IconTrash, IconPlus } from '@/shared/icons'
 import ActionDialog from '@/shared/components/ActionDialog.vue'
 import { useManagedTimeouts } from '@/shared/composables/useManagedTimeouts'
 import CloseButton from './CloseButton.vue'
-import { getDescriptionColor, getDescriptionSourceLabel } from '@/shared/utils/descriptionColor'
 import TextViewer from '@/shared/components/TextViewer.vue'
 import type { OntologyBehavior } from '@/domains/ontology'
 import type { SchemaRelationship } from '../model/relationshipEdgeProjection'
@@ -142,18 +141,7 @@ const columnsError = computed(() => {
   )
 })
 
-// 설명 표시 — 분석된 의미(AI)와 원본 설명 중복 제거.
-const analyzedText = computed(() => (table.value?.analyzed_description || '').trim())
-const rawText = computed(() => (table.value?.description || '').trim())
-// 원본 설명은 "분석본과 다른 진짜 원본"일 때만 표시. 코드 도출(code/procedure)이면 원본=분석본 → 숨김.
-const showRaw = computed(() => {
-  if (!analyzedText.value) return true                 // 분석본 없으면 원본(편집)만 보여줌
-  if (!rawText.value) return false
-  if (analyzedText.value === rawText.value) return false
-  const src = table.value?.description_source
-  if (src === 'code' || src === 'procedure') return false
-  return true
-})
+const summaryText = computed(() => (table.value?.summary || '').trim())
 
 const availableTables = computed(() => {
   return store.allTables.filter(candidate =>
@@ -485,26 +473,15 @@ function isColumnUpdating(colName: string): boolean {
             <span v-if="isTableUpdating" class="detail-section__update-badge">✨ 업데이트</span>
           </div>
           
-          <!-- 분석된 의미 (AI 도출, 읽기 전용·깔끔) -->
-          <div v-if="analyzedText" class="detail-field">
-            <label>분석된 의미</label>
+          <div v-if="summaryText" class="detail-field">
+            <label>분석 요약</label>
             <div class="detail-field__analyzed">
-              <TextViewer :content="analyzedText" :max-height="160" />
+              <TextViewer :content="summaryText" :max-height="160" />
             </div>
           </div>
 
-          <!-- 설명 (원본 — 분석본과 다른 진짜 원본일 때만, 편집 가능) -->
-          <div v-if="showRaw" class="detail-field" :class="{ 'is-updating': isTableUpdating }">
-            <label>
-              설명
-              <span
-                v-if="table.description_source"
-                class="detail-field__source-badge"
-                :style="{ background: getDescriptionColor(table.description_source) }"
-              >
-                {{ getDescriptionSourceLabel(table.description_source) }}
-              </span>
-            </label>
+          <div class="detail-field" :class="{ 'is-updating': isTableUpdating }">
+            <label>설명</label>
             <div v-if="isEditingDescription" class="detail-field__edit">
               <textarea 
                 v-model="tableDescForm.description"
@@ -580,7 +557,7 @@ function isColumnUpdating(colName: string): boolean {
                 <span class="column-item__required">
                   <span v-if="!col.nullable" class="column-item__nn-badge">NOT NULL</span>
                 </span>
-                <span class="column-item__type">{{ col.dtype.toUpperCase() }}</span>
+                <span class="column-item__type">{{ col.data_type.toUpperCase() }}</span>
               </div>
               
               <div v-if="editingColumnName === col.name" class="column-item__edit">
@@ -612,12 +589,12 @@ function isColumnUpdating(colName: string): boolean {
                 </div>
               </div>
               <div v-else class="column-item__desc">
-                <span
-                  v-if="col.description_source"
-                  class="column-item__source-dot"
-                  :style="{ background: getDescriptionColor(col.description_source) }"
-                  :title="`출처: ${getDescriptionSourceLabel(col.description_source)}`"
-                ></span>
+                <TextViewer
+                  v-if="col.summary"
+                  :content="col.summary"
+                  :max-height="120"
+                  compact
+                />
                 <TextViewer
                   :content="col.description"
                   :max-height="120"
@@ -940,18 +917,6 @@ function isColumnUpdating(colName: string): boolean {
   }
 }
 
-/* 설명 출처 배지 — 라벨 행 오른쪽 끝으로 정렬(출처 표시 유지·위치 정리) */
-.detail-field__source-badge {
-  margin-left: auto;
-  font-size: 0.55rem;
-  font-weight: 600;
-  color: #1a1b1e;
-  padding: 1px 6px;
-  border-radius: 3px;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-
 /* 분석된 의미 — 읽기 전용 클린 블록(파란 좌측선 제거) */
 .detail-field__analyzed {
   padding: 10px 12px;
@@ -1139,15 +1104,6 @@ function isColumnUpdating(colName: string): boolean {
   border-radius: 3px;
   white-space: nowrap;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
-}
-
-/* 컬럼 설명 출처 점 — 작게(출처 색만) */
-.column-item__source-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  margin-top: 5px;
 }
 
 /* 설명 — 박스 제거, 이름 아래 흐린 인라인 줄(아이콘 폭만큼 들여쓰기) */

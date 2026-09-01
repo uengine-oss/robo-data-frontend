@@ -2798,7 +2798,7 @@ for (const file of files) {
       || !source.includes('class="table-node__behavior-edit-btn nodrag"')
       || !source.includes('class="table-node__behavior-run-btn nodrag"')
       || /class="references-popup__item"\s+role="button"/.test(source)
-      || (source.match(/<button[\s\S]{0,180}class="references-popup__item"/g)?.length ?? 0) !== 4
+      || (source.match(/<button[\s\S]{0,180}class="references-popup__item"/g)?.length ?? 0) !== 2
     )
   ) {
     violations.push(`${path}: schema table-node column, reference, and Behavior actions require discoverable native controls`)

@@ -44,7 +44,7 @@ function requestHeaders(
   const apiKey = context?.apiKey?.trim() || headers['X-API-Key']?.trim()
   if (apiKey) headers['X-API-Key'] = apiKey
   if (requireApiKey && !apiKey) {
-    throw new Error('Catalog 설명 편집과 의미 검색에는 설정된 LLM API 키가 필요합니다.')
+    throw new Error('Catalog 설명 편집과 의미 검색에는 API 키가 필요합니다.')
   }
   return headers
 }
@@ -165,11 +165,11 @@ export const catalogSchemaApi = {
    */
   async getProcedureStatements(
     procedureName: string,
-    fileDirectory?: string,
+    filePath?: string,
     context?: CatalogSchemaRequestContext,
   ): Promise<CatalogProcedureStatementsResponse> {
     const params = new URLSearchParams()
-    if (fileDirectory) params.append('file_directory', fileDirectory)
+    if (filePath) params.append('file_path', filePath)
 
     const response = await fetch(
       `${ROBO_BASE_URL}/schema/procedures/${encodeURIComponent(procedureName)}/statements?${params}`,
@@ -242,7 +242,7 @@ export const catalogSchemaApi = {
       to_table: string
       to_schema?: string
       to_column: string
-      relationship_type: string
+      relationship_type: 'FK'
       description?: string
     },
     context?: CatalogSchemaRequestContext,

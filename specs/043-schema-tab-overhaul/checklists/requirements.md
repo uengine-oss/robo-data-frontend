@@ -22,4 +22,4 @@
 - [x] Constitution I~IV PASS(plan)
 
 ## Notes
-- 다서비스 변경(analyzer/gateway/catalog)은 contracts/source-endpoint.md 단일 계약으로 묶음.
+- 원문 표시는 그래프 노드의 `code_text` 계약 하나로 묶고 별도 파일 조회 계약을 두지 않음.

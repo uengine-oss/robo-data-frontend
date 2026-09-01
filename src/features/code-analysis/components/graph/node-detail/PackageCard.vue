@@ -1,82 +1,43 @@
 <script setup lang="ts">
-/**
- * PackageCard.vue
- * Framework PACKAGE — 자식 모듈 목록 (BELONGS_TO 역방향).
- */
-
 import { computed } from 'vue'
-import type { GraphNode, GraphLink } from '@/shared/types'
+import type { GraphNode } from '@/shared/types'
 import { useAnalyzerStore } from '@/workflows/code-analysis'
 import NodeDetailBase from './NodeDetailBase.vue'
 
-interface Props { node: GraphNode }
-const props = defineProps<Props>()
-
+const props = defineProps<{ node: GraphNode }>()
 const projectStore = useAnalyzerStore()
-
-const fqn = computed(() => (props.node.properties?.id as string) || (props.node.properties?.name as string) || props.node.id)
-
-const childModules = computed(() => {
-  const result: { id: string; name: string; type: string }[] = []
-  for (const link of projectStore.linkMap.values() as Iterable<GraphLink>) {
-    if (link.target !== props.node.id) continue
-    if (link.type !== 'BELONGS_TO') continue
-    const n = projectStore.nodeMap.get(link.source)
-    const p = n?.properties || {}
-    result.push({
-      id: link.source,
-      name: (p.name as string) || link.source,
-      type: (p.type as string) || (n?.labels?.[0] as string) || '',
-    })
-  }
-  return result
-})
+const qualifiedName = computed(() => String(props.node.properties?.qualified_name || props.node.properties?.name || ''))
+const children = computed(() => [...projectStore.linkMap.values()]
+  .filter(link => link.type === 'PARENT_OF' && link.source === props.node.id)
+  .map(link => {
+    const node = projectStore.nodeMap.get(link.target)
+    return {
+      id: link.target,
+      name: String(node?.properties?.name || link.target),
+      type: String(node?.labels?.[0] || ''),
+    }
+  }))
 </script>
 
 <template>
-  <NodeDetailBase :node="node" icon="📦" label-badge="PACKAGE" :sub-info="fqn">
+  <NodeDetailBase :node="node" icon="📦" label-badge="PACKAGE" :sub-info="qualifiedName">
     <template #body>
-      <section v-if="childModules.length > 0" class="detail-card">
-        <span class="detail-card__label">자식 모듈 · {{ childModules.length }}</span>
-        <div class="detail-card__body detail-card__body--tight">
-          <ul class="modules-list">
-            <li v-for="m in childModules" :key="m.id">
-              <span class="module-type">{{ m.type }}</span>
-              <span class="module-name">{{ m.name }}</span>
-            </li>
-          </ul>
-        </div>
+      <section v-if="children.length" class="detail-card">
+        <span class="detail-card__label">하위 항목 · {{ children.length }}</span>
+        <ul>
+          <li v-for="child in children" :key="child.id">
+            <span class="type">{{ child.type }}</span>
+            <span class="name">{{ child.name }}</span>
+          </li>
+        </ul>
       </section>
     </template>
   </NodeDetailBase>
 </template>
 
 <style lang="scss" scoped>
-.modules-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-
-  li {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 8px;
-    font-size: 0.8rem;
-  }
-
-  .module-type {
-    font-size: 0.65rem;
-    padding: 1px 6px;
-    border-radius: 3px;
-    background: var(--color-bg-tertiary);
-    color: var(--color-text-muted);
-    font-weight: 700;
-  }
-
-  .module-name {
-    color: var(--color-text-bright);
-    font-family: monospace;
-  }
-}
+ul { list-style: none; margin: 0; padding: 8px; }
+li { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.type { color: var(--color-text-muted); font-size: 0.68rem; font-weight: 700; }
+.name { color: var(--color-text-bright); font-family: monospace; }
 </style>

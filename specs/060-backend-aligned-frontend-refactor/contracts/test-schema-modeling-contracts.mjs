@@ -42,9 +42,8 @@ try {
     contracts.parseDescriptionUpdate({
       message: 'updated',
       updated: true,
-      embedding_updated: false,
     }),
-    { message: 'updated', updated: true, embedding_updated: false },
+    { message: 'updated', updated: true },
   )
   assert.throws(
     () => contracts.parseSchemaTables([{
@@ -133,7 +132,7 @@ try {
         to_table: 'customers',
         to_schema: 'sales',
         to_column: 'id',
-        relationship_type: 'FK_TO_TABLE',
+        relationship_type: 'FK',
       }],
       catalogRelationships: [],
       visibility: { ddl: true, code: true, user: true },
@@ -148,7 +147,6 @@ try {
     return new Response(JSON.stringify({
       message: 'updated',
       updated: true,
-      embedding_updated: true,
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -162,7 +160,7 @@ try {
       '설명',
       { headers: { Authorization: 'Bearer session' } },
     ),
-    /LLM API 키/,
+    /API 키/,
   )
   assert.equal(capturedRequest, null, 'Missing API key must fail before sending a request')
 
@@ -171,14 +169,13 @@ try {
     'sales',
     '설명',
     {
-      headers: { Authorization: 'Bearer session', 'X-LLM-Api-Key': 'llm-key' },
+      headers: { Authorization: 'Bearer session' },
       apiKey: 'catalog-key',
     },
   )
   assert.match(capturedRequest.url, /\/schema\/tables\/order%20details\/description$/)
   assert.equal(capturedRequest.init.method, 'PUT')
   assert.equal(capturedRequest.init.headers.Authorization, 'Bearer session')
-  assert.equal(capturedRequest.init.headers['X-LLM-Api-Key'], 'llm-key')
   assert.equal(capturedRequest.init.headers['X-API-Key'], 'catalog-key')
   assert.deepEqual(JSON.parse(capturedRequest.init.body), {
     name: 'order details',

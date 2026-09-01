@@ -43,14 +43,14 @@ const customersNodeId = schemaTableNodeId(tables[1])
 
 const columns = {
   orders: [
-    { name: 'id', table_name: 'orders', dtype: 'bigint', nullable: false, description: '' },
-    { name: 'customer_id', table_name: 'orders', dtype: 'bigint', nullable: false, description: '' },
-    { name: 'created_by', table_name: 'orders', dtype: 'bigint', nullable: true, description: '' },
-    { name: 'unverified_id', table_name: 'orders', dtype: 'bigint', nullable: true, description: '' },
+    { name: 'id', table_name: 'orders', data_type: 'bigint', nullable: false, description: '' },
+    { name: 'customer_id', table_name: 'orders', data_type: 'bigint', nullable: false, description: '' },
+    { name: 'created_by', table_name: 'orders', data_type: 'bigint', nullable: true, description: '' },
+    { name: 'unverified_id', table_name: 'orders', data_type: 'bigint', nullable: true, description: '' },
   ],
   customers: [
-    { name: 'id', table_name: 'customers', dtype: 'bigint', nullable: false, description: '' },
-    { name: 'name', table_name: 'customers', dtype: 'varchar', nullable: false, description: '' },
+    { name: 'id', table_name: 'customers', data_type: 'bigint', nullable: false, description: '' },
+    { name: 'name', table_name: 'customers', data_type: 'varchar', nullable: false, description: '' },
   ],
 }
 
@@ -63,7 +63,6 @@ async function installCatalogFixture(
     dataQueries: [],
     statementRequests: 0,
     tableReferenceRequests: 0,
-    sourceRequests: [],
     catalogRelationshipDeletes: 0,
     catalogRelationshipCreates: [],
     tableDescriptionRequests: [],
@@ -192,15 +191,15 @@ async function installCatalogFixture(
           {
             from_table: 'orders',
             to_table: 'customers',
-            type: 'FK_TO_TABLE',
-            source: 'ddl',
+            type: 'FK',
+            source: 'analyzer',
             column_pairs: [{ source: 'customer_id', target: 'id', name: 'Order customer' }],
           },
           {
             from_table: 'orders',
             to_table: 'customers',
-            type: 'FK_TO_TABLE',
-            source: 'code',
+            type: 'FK',
+            source: 'catalog',
             column_pairs: [{ source: 'created_by', target: 'id', name: 'Code owner' }],
           },
         ],
@@ -267,23 +266,8 @@ async function installCatalogFixture(
           evidence_line: 2,
           file_name: 'orders.sql',
           file_path: '/workspace/sql/orders.sql',
+          code_text: '1 | BEGIN\n2 | SELECT * FROM orders;\n3 | END',
         }],
-        framework_references: [],
-      }),
-    })
-  })
-  await page.route(/\/api\/gateway\/robo\/source\?/, route => {
-    requestCounts.sourceRequests.push(new URL(route.request().url()).searchParams)
-    return route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        file_path: '/workspace/sql/orders.sql',
-        content: 'BEGIN\nSELECT * FROM orders;\nEND',
-        line_count: 3,
-        start_line: 1,
-        end_line: 3,
-        found: true,
       }),
     })
   })
@@ -442,11 +426,10 @@ try {
 
   const sourcePanel = projectionPage.locator('.source-code-panel')
   await sourcePanel.waitFor()
-  assert(projectionRequests.sourceRequests.length === 1, 'Reference selection did not load source exactly once')
-  const sourceParams = projectionRequests.sourceRequests[0]
-  assert(sourceParams.get('file_path') === '/workspace/sql/orders.sql', 'Source request lost file_path')
-  assert(sourceParams.get('start_line') === '1', 'Source request lost start_line')
-  assert(sourceParams.get('end_line') === '3', 'Source request lost end_line')
+  assert(
+    (await sourcePanel.locator('.source-line-content').first().textContent()) === '1 | BEGIN',
+    'Reference selection did not render Catalog code_text',
+  )
   const statementError = sourcePanel.locator('.source-annotation-error')
   await statementError.waitFor()
   assert(

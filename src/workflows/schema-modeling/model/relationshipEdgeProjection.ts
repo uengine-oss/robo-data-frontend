@@ -9,15 +9,15 @@ export interface SchemaRelationship {
   to_schema: string
   to_column: string
   description?: string
-  relationship_type: string
+  relationship_type: 'FK'
   name?: string
 }
 
 export interface CatalogRelationship {
   from_table: string
   to_table: string
-  type: string
-  source?: 'ddl' | 'procedure' | 'code' | 'user'
+  type: 'FK'
+  source?: 'analyzer' | 'catalog'
   column_pairs: Array<{ source: string; target: string; name?: string }>
   name?: string
 }
@@ -137,30 +137,28 @@ function resolveHandles(
 
 function resolveCardinalityStyle(relationship: SchemaRelationship): CardinalityStyle {
   const description = relationship.description || ''
-  const type = relationship.relationship_type || ''
-
-  if (description.includes('[1:1]') || type === 'ONE_TO_ONE') {
+  if (description.includes('[1:1]')) {
     return {
       label: '1:1',
       markerStart: 'url(#erd-one-green)',
       markerEnd: 'url(#erd-one-green)',
     }
   }
-  if (description.includes('[1:N]') || type === 'ONE_TO_MANY') {
+  if (description.includes('[1:N]')) {
     return {
       label: '1:N',
       markerStart: 'url(#erd-one)',
       markerEnd: 'url(#crowfoot-many)',
     }
   }
-  if (description.includes('[N:1]') || type === 'MANY_TO_ONE') {
+  if (description.includes('[N:1]')) {
     return {
       label: 'N:1',
       markerStart: 'url(#crowfoot-many)',
       markerEnd: 'url(#erd-one)',
     }
   }
-  if (description.includes('[N:N]') || type === 'MANY_TO_MANY') {
+  if (description.includes('[N:N]')) {
     return {
       label: 'N:N',
       markerStart: 'url(#crowfoot-many-purple)',
@@ -222,15 +220,7 @@ function resolveCatalogSource(relationship: CatalogRelationship): {
   strokeColor: string
   strokeDasharray: string | undefined
 } {
-  const isCode = relationship.source === 'code'
-    || relationship.source === 'procedure'
-    || relationship.type === 'CO_REFERENCED'
-  const isUser = relationship.source === 'user'
-
-  if (isCode) {
-    return { visibility: 'code', strokeColor: '#38bdf8', strokeDasharray: '6 3' }
-  }
-  if (isUser) {
+  if (relationship.source === 'catalog') {
     return { visibility: 'user', strokeColor: '#f59e0b', strokeDasharray: undefined }
   }
   return { visibility: 'ddl', strokeColor: '#22c55e', strokeDasharray: undefined }

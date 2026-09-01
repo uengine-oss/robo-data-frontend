@@ -82,7 +82,7 @@ export function nodeSearchContext(node: GraphNode): string {
   if (lastDot > 0) return id.slice(0, lastDot)
 
   const parts: string[] = []
-  if (properties.schema_name) parts.push(String(properties.schema_name))
+  if (properties.schema) parts.push(String(properties.schema))
   if (properties.file_path) {
     parts.push(String(properties.file_path).split(/[\\/]/).pop() || '')
   }

@@ -2,14 +2,9 @@ import type { GraphNode } from '@/shared/types'
 import type { HierarchyInfo } from './graphCanvas'
 import type { HullLevel } from './components/graph/useGroupHulls'
 
-export type GraphViewMode = 'default' | 'module' | 'area'
+export type GraphViewMode = 'default' | 'module'
 
 type HierarchyMap = ReadonlyMap<string, HierarchyInfo>
-
-function componentKey(node: GraphNode): string | null {
-  const value = node.properties?.component_id
-  return value === undefined || value === null || value === '' ? null : String(value)
-}
 
 function moduleKey(
   node: GraphNode,
@@ -26,21 +21,12 @@ export function createGraphHullLevels(
   hierarchyMap: HierarchyMap,
   tableAreaKey: (nodeId: string) => string | null,
 ): HullLevel[] {
-  if (mode === 'area') {
-    return [{
-      keyOf: componentKey,
-      labelOf: () => '',
-      padding: 30,
-    }]
-  }
-  if (mode === 'module') {
-    return [{
-      keyOf: node => moduleKey(node, hierarchyMap, tableAreaKey),
-      labelOf: () => '',
-      padding: 22,
-    }]
-  }
-  return []
+  if (mode !== 'module') return []
+  return [{
+    keyOf: node => moduleKey(node, hierarchyMap, tableAreaKey),
+    labelOf: () => '',
+    padding: 22,
+  }]
 }
 
 export function createGraphClusterKey(
@@ -48,34 +34,17 @@ export function createGraphClusterKey(
   hierarchyMap: HierarchyMap,
   tableAreaKey: (nodeId: string) => string | null,
 ): ((node: GraphNode) => string | null) | null {
-  if (mode === 'module') {
-    return node => moduleKey(node, hierarchyMap, tableAreaKey)
-  }
-  if (mode === 'area') {
-    return node => componentKey(node) ?? '__ungrouped__'
-  }
-  return null
+  return mode === 'module'
+    ? node => moduleKey(node, hierarchyMap, tableAreaKey)
+    : null
 }
 
 export function createGraphClusterLabel(
   mode: GraphViewMode,
   nodeMap: ReadonlyMap<string, GraphNode>,
 ): ((key: string) => string) | null {
-  if (mode === 'module') {
-    return key => key === '__external__'
-      ? 'external (외부 호출)'
-      : String(nodeMap.get(key)?.properties?.name || '모듈')
-  }
-  if (mode === 'area') {
-    return key => {
-      if (key === '__ungrouped__') return '기타'
-      for (const node of nodeMap.values()) {
-        if (String(node.properties?.component_id ?? '') === key) {
-          return String(node.properties?.component_name || `군집 ${key}`)
-        }
-      }
-      return `군집 ${key}`
-    }
-  }
-  return null
+  if (mode !== 'module') return null
+  return key => key === '__external__'
+    ? 'external'
+    : String(nodeMap.get(key)?.properties?.name || 'package')
 }

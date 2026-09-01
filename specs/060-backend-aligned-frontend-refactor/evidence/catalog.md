@@ -2,7 +2,7 @@
 
 검증일: 2026-07-22
 
-- Gateway 라우팅 원문을 기준으로 `/robo/schema`, `/robo/graph`, `/robo/lineage`는 Catalog, `/robo/analyze`, `/robo/search`, `/robo/source`, `/robo/pipeline`은 Analyzer 소유로 분리했다.
+- Gateway 라우팅 원문을 기준으로 `/robo/schema`, `/robo/graph`, `/robo/lineage`는 Catalog, `/robo/analyze`, `/robo/search`, `/robo/pipeline`은 Analyzer 소유로 분리했다. 원문은 그래프 노드의 `code_text`를 사용한다.
 - schema·graph·lineage transport를 `src/domains/catalog/api`에 통합하고 schema modeling·data lineage workflow는 domain public entrypoint만 소비하도록 변경했다.
 - 실제 Catalog health 응답은 200, schema table 목록은 `audit_log` 등 5개, graph check는 3,379 nodes, lineage overview는 ETL 70/source 21/target 16/flow 128을 반환했다.
 - `node contracts/verify-catalog-ui.mjs`: 1920×1080 Chromium에서 schema 목록/상세/canvas, lineage graph, Catalog+OLAP 전체 장애와 재시도 UI 통과.

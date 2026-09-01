@@ -1,25 +1,21 @@
-export type CatalogDescriptionSource = 'ddl' | 'procedure' | 'user' | 'code' | ''
-
 export interface RoboSchemaTableInfo {
   name: string
   table_schema: string
   datasource: string
   logical_name?: string
   description: string
-  description_source?: CatalogDescriptionSource
-  analyzed_description?: string
+  summary?: string
   column_count: number
 }
 
 export interface RoboSchemaColumnInfo {
   name: string
   table_name: string
-  dtype: string
+  data_type: string
   nullable: boolean
   logical_name?: string
   description: string
-  description_source?: CatalogDescriptionSource
-  analyzed_description?: string
+  summary?: string
 }
 
 export interface RoboSchemaRelationship {
@@ -29,7 +25,7 @@ export interface RoboSchemaRelationship {
   to_table: string
   to_schema: string
   to_column: string
-  relationship_type: string
+  relationship_type: 'FK'
   description: string
   name?: string
 }
@@ -40,8 +36,8 @@ export interface CatalogRelatedTablesResponse {
   relationships: Array<{
     from_table: string
     to_table: string
-    type: string
-    source?: 'ddl' | 'procedure' | 'user' | 'code'
+    type: 'FK'
+    source?: 'analyzer' | 'catalog'
     column_pairs?: Array<{ source: string; target: string; name?: string }>
     name?: string
   }>
@@ -57,21 +53,8 @@ export interface CatalogTableReferencesResponse {
     statement_type?: string
     statement_line?: number
     evidence_line?: number
-    file_name?: string
-    file_directory?: string
     file_path?: string
-  }>
-  framework_references?: Array<{
-    source_name: string
-    source_type: string
-    access_type: string
-    start_line?: number
-    end_line?: number
-    evidence_line?: number
-    file_name?: string
-    file_path?: string
-    file_directory?: string
-    module_name?: string
+    code_text?: string
   }>
 }
 
@@ -105,7 +88,6 @@ export interface CatalogRelationshipDeleteResponse {
 export interface CatalogDescriptionUpdateResponse {
   message: string
   updated: true
-  embedding_updated?: boolean | null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -146,12 +128,6 @@ function optionalFiniteNumber(value: unknown, context: string): number | undefin
   return finiteNumber(value, context)
 }
 
-function descriptionSource(value: unknown, context: string): CatalogDescriptionSource | undefined {
-  if (value === undefined || value === null || value === '') return undefined
-  if (value === 'ddl' || value === 'procedure' || value === 'user' || value === 'code') return value
-  throw new Error(`${context}가 지원하는 설명 출처가 아닙니다.`)
-}
-
 export function parseSchemaTables(value: unknown): RoboSchemaTableInfo[] {
   return array(value, 'Catalog schema tables').map((entry, index) => {
     const item = record(entry, `Catalog schema tables[${index}]`)
@@ -163,14 +139,7 @@ export function parseSchemaTables(value: unknown): RoboSchemaTableInfo[] {
         : string(item.datasource, `Catalog schema tables[${index}].datasource`),
       logical_name: optionalString(item.logical_name, `Catalog schema tables[${index}].logical_name`),
       description: string(item.description, `Catalog schema tables[${index}].description`),
-      description_source: descriptionSource(
-        item.description_source,
-        `Catalog schema tables[${index}].description_source`,
-      ),
-      analyzed_description: optionalString(
-        item.analyzed_description,
-        `Catalog schema tables[${index}].analyzed_description`,
-      ),
+      summary: optionalString(item.summary, `Catalog schema tables[${index}].summary`),
       column_count: finiteNumber(item.column_count, `Catalog schema tables[${index}].column_count`),
     }
   })
@@ -185,18 +154,11 @@ export function parseSchemaColumns(value: unknown): RoboSchemaColumnInfo[] {
     return {
       name: string(item.name, `Catalog schema columns[${index}].name`, false),
       table_name: string(item.table_name, `Catalog schema columns[${index}].table_name`, false),
-      dtype: string(item.dtype, `Catalog schema columns[${index}].dtype`),
+      data_type: string(item.data_type, `Catalog schema columns[${index}].data_type`),
       nullable: item.nullable,
       logical_name: optionalString(item.logical_name, `Catalog schema columns[${index}].logical_name`),
       description: string(item.description, `Catalog schema columns[${index}].description`),
-      description_source: descriptionSource(
-        item.description_source,
-        `Catalog schema columns[${index}].description_source`,
-      ),
-      analyzed_description: optionalString(
-        item.analyzed_description,
-        `Catalog schema columns[${index}].analyzed_description`,
-      ),
+      summary: optionalString(item.summary, `Catalog schema columns[${index}].summary`),
     }
   })
 }
@@ -204,6 +166,9 @@ export function parseSchemaColumns(value: unknown): RoboSchemaColumnInfo[] {
 export function parseSchemaRelationships(value: unknown): RoboSchemaRelationship[] {
   return array(value, 'Catalog schema relationships').map((entry, index) => {
     const item = record(entry, `Catalog schema relationships[${index}]`)
+    if (item.relationship_type !== 'FK') {
+      throw new Error(`Catalog schema relationships[${index}].relationship_type가 FK가 아닙니다.`)
+    }
     return {
       from_table: string(item.from_table, `Catalog schema relationships[${index}].from_table`, false),
       from_schema: string(item.from_schema, `Catalog schema relationships[${index}].from_schema`),
@@ -211,11 +176,7 @@ export function parseSchemaRelationships(value: unknown): RoboSchemaRelationship
       to_table: string(item.to_table, `Catalog schema relationships[${index}].to_table`, false),
       to_schema: string(item.to_schema, `Catalog schema relationships[${index}].to_schema`),
       to_column: string(item.to_column, `Catalog schema relationships[${index}].to_column`),
-      relationship_type: string(
-        item.relationship_type,
-        `Catalog schema relationships[${index}].relationship_type`,
-        false,
-      ),
+      relationship_type: 'FK',
       description: string(item.description, `Catalog schema relationships[${index}].description`),
       name: optionalString(item.name, `Catalog schema relationships[${index}].name`),
     }
@@ -256,8 +217,16 @@ export function parseRelatedTables(value: unknown): CatalogRelatedTablesResponse
           relationship.source,
           `Catalog related tables.relationships[${index}].source`,
         )
-        if (source && source !== 'ddl' && source !== 'procedure' && source !== 'user' && source !== 'code') {
+        if (source && source !== 'analyzer' && source !== 'catalog') {
           throw new Error(`Catalog related tables.relationships[${index}].source가 올바르지 않습니다.`)
+        }
+        const relationshipType = string(
+          relationship.type,
+          `Catalog related tables.relationships[${index}].type`,
+          false,
+        )
+        if (relationshipType !== 'FK') {
+          throw new Error(`Catalog related tables.relationships[${index}].type은 FK여야 합니다.`)
         }
         return {
           from_table: string(
@@ -270,11 +239,7 @@ export function parseRelatedTables(value: unknown): CatalogRelatedTablesResponse
             `Catalog related tables.relationships[${index}].to_table`,
             false,
           ),
-          type: string(
-            relationship.type,
-            `Catalog related tables.relationships[${index}].type`,
-            false,
-          ),
+          type: relationshipType,
           source: source as CatalogRelatedTablesResponse['relationships'][number]['source'],
           column_pairs: parseColumnPairs(
             relationship.column_pairs,
@@ -301,69 +266,17 @@ function parseProcedureReference(entry: unknown, context: string) {
     statement_type: optionalString(item.statement_type, `${context}.statement_type`),
     statement_line: optionalFiniteNumber(item.statement_line, `${context}.statement_line`),
     evidence_line: optionalFiniteNumber(item.evidence_line, `${context}.evidence_line`),
-    file_name: optionalString(item.file_name, `${context}.file_name`),
-    file_directory: optionalString(item.file_directory, `${context}.file_directory`),
     file_path: optionalString(item.file_path, `${context}.file_path`),
+    code_text: optionalString(item.code_text, `${context}.code_text`),
   }
 }
 
 export function parseTableReferences(value: unknown): CatalogTableReferencesResponse {
   const response = record(value, 'Catalog table references')
-  const framework = response.framework_references
   return {
     references: array(response.references, 'Catalog table references.references').map(
       (entry, index) => parseProcedureReference(entry, `Catalog table references.references[${index}]`),
     ),
-    framework_references: framework === undefined
-      ? undefined
-      : array(framework, 'Catalog table references.framework_references').map((entry, index) => {
-          const item = record(entry, `Catalog table references.framework_references[${index}]`)
-          return {
-            source_name: string(
-              item.source_name,
-              `Catalog table references.framework_references[${index}].source_name`,
-              false,
-            ),
-            source_type: string(
-              item.source_type,
-              `Catalog table references.framework_references[${index}].source_type`,
-              false,
-            ),
-            access_type: string(
-              item.access_type,
-              `Catalog table references.framework_references[${index}].access_type`,
-              false,
-            ),
-            start_line: optionalFiniteNumber(
-              item.start_line,
-              `Catalog table references.framework_references[${index}].start_line`,
-            ),
-            end_line: optionalFiniteNumber(
-              item.end_line,
-              `Catalog table references.framework_references[${index}].end_line`,
-            ),
-            evidence_line: optionalFiniteNumber(
-              item.evidence_line,
-              `Catalog table references.framework_references[${index}].evidence_line`,
-            ),
-            file_name: optionalString(
-              item.file_name,
-              `Catalog table references.framework_references[${index}].file_name`,
-            ),
-            file_path: optionalString(
-              item.file_path,
-              `Catalog table references.framework_references[${index}].file_path`,
-            ),
-            file_directory: optionalString(
-              item.file_directory,
-              `Catalog table references.framework_references[${index}].file_directory`,
-            ),
-            module_name: optionalString(
-              item.module_name,
-              `Catalog table references.framework_references[${index}].module_name`,
-            ),
-          }
-        }),
   }
 }
 
@@ -439,13 +352,8 @@ export function parseDescriptionUpdate(value: unknown): CatalogDescriptionUpdate
   if (response.updated !== true) {
     throw new Error('Catalog description update.updated가 true가 아닙니다.')
   }
-  const embedding = response.embedding_updated
-  if (embedding !== undefined && embedding !== null && typeof embedding !== 'boolean') {
-    throw new Error('Catalog description update.embedding_updated가 boolean/null이 아닙니다.')
-  }
   return {
     message: mutationMessage(response, 'Catalog description update'),
     updated: true,
-    embedding_updated: embedding as boolean | null | undefined,
   }
 }

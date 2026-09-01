@@ -45,7 +45,7 @@
 
 ## 의미 규약
 
-- **슬라이스 범위** = `[start_line, end_line]` (그 루틴 코드만). 프론트가 `GET /robo/source?file_path&start_line&end_line`로 호출.
+- **원문 범위** = `[start_line, end_line]` (그 루틴 코드만). 프론트는 응답 노드의 `code_text`를 추가 호출 없이 표시한다.
 - **강조 줄** = framework `evidence_line` / DBMS `statement_line`. 0/누락 시 `start_line` 폴백.
 - `start_line ≤ 강조줄 ≤ end_line` 기대. 위반 시 강조 생략(응답은 그대로, 표시 측 방어).
 - REFER_TO(모듈 참조)는 evidence_line이 없을 수 있음 → start_line 강조 폴백.

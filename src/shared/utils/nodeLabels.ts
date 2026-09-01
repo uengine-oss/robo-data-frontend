@@ -1,10 +1,8 @@
 /**
  * Node kind/role contract shared by Overview, canvas, and Node detail.
  *
- * The Analyzer normally stores `[kind, ...roles, ...markers]`, but Neo4j label
- * order is not a safe business contract. Explicit `properties.type` and
- * `properties.stereotype` therefore win when present; position is only the
- * compatibility fallback for older analysis data.
+ * Analyzer product nodes have one concrete kind label. Semantic role is the
+ * explicit `stereotype` property and is not duplicated as a label.
  */
 
 export interface NodeLabelSource {
@@ -17,10 +15,6 @@ const SYSTEM_MARKERS: ReadonlySet<string> = new Set(['INTERNAL', 'EXTERNAL'])
 const HIDDEN_MARKERS: ReadonlySet<string> = new Set(['EMBEDDED'])
 const MARKER_LABELS: ReadonlySet<string> = new Set([...SYSTEM_MARKERS, ...HIDDEN_MARKERS])
 
-function normalizedLabel(value: unknown): string {
-  return typeof value === 'string' ? value.replace(/[^a-z0-9]/gi, '').toUpperCase() : ''
-}
-
 function visibleLabels(node: NodeLabelSource): string[] {
   return (node.labels ?? []).filter(label => !MARKER_LABELS.has(label))
 }
@@ -28,19 +22,6 @@ function visibleLabels(node: NodeLabelSource): string[] {
 /** Neo4j label order independent node kind. */
 export function kindOfNode(node: NodeLabelSource): string {
   const labels = visibleLabels(node)
-  const explicitType = normalizedLabel(node.properties?.type)
-  if (explicitType) {
-    const match = labels.find(label => normalizedLabel(label) === explicitType)
-    if (match) return match
-  }
-
-  // Compatibility data may have stereotype but no explicit type. Exclude the
-  // stereotype before taking the positional kind fallback.
-  const stereotype = normalizedLabel(node.properties?.stereotype)
-  if (stereotype) {
-    const nonRole = labels.find(label => normalizedLabel(label) !== stereotype)
-    if (nonRole) return nonRole
-  }
   return labels[0] ?? 'Unknown'
 }
 
@@ -48,14 +29,19 @@ export function kindOfNode(node: NodeLabelSource): string {
 export function semanticRoleLabels(node: NodeLabelSource): string[] {
   const kind = kindOfNode(node)
   const seen = new Set<string>()
-  return visibleLabels(node).filter(label => {
+  const roles = visibleLabels(node).filter(label => {
     if (label === kind || seen.has(label)) return false
     seen.add(label)
     return true
   })
+  const stereotype = typeof node.properties?.stereotype === 'string'
+    ? node.properties.stereotype.trim()
+    : ''
+  if (stereotype && stereotype !== kind && !seen.has(stereotype)) roles.push(stereotype)
+  return roles
 }
 
-/** Compatibility helpers for label-only consumers. Production lens code uses node-aware APIs below. */
+/** Label-only helpers for consumers that do not have the property map. */
 export function kindOf(labels: readonly string[] | undefined): string {
   return kindOfNode({ labels })
 }

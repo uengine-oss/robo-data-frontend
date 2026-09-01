@@ -14,8 +14,7 @@ function cloneTable(table: Readonly<SchemaModelingTable>): SchemaModelingTable {
     datasource: table.datasource,
     logical_name: table.logical_name,
     description: table.description,
-    description_source: table.description_source,
-    analyzed_description: table.analyzed_description,
+    summary: table.summary,
     column_count: table.column_count,
   }
 }

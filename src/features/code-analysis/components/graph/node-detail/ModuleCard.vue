@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * ModuleCard.vue
- * MODULE 라벨 노드 — 메서드 품는 컨테이너 (CLASS/INTERFACE/ENUM/RECORD/Go STRUCT 등).
+ * CLASS/INTERFACE 노드 — 메서드를 품는 소스 컨테이너.
  */
 
 import { computed } from 'vue'
@@ -10,6 +10,7 @@ import { useAnalyzerStore } from '@/workflows/code-analysis'
 import { getRelationshipGroups, getMembersByLabels, ROUTINE_LABELS } from '@/shared/utils/nodeRelationships'
 import { technicalNodeName, logicalNodeName } from '@/shared/utils/graphDisplay'
 import NodeDetailBase from './NodeDetailBase.vue'
+import { AsyncCodeViewer as CodeViewer } from '@/shared/components/codeViewerAsync'
 
 interface Props {
   node: GraphNode
@@ -18,21 +19,16 @@ const props = defineProps<Props>()
 
 const projectStore = useAnalyzerStore()
 
-const subLabel = computed(() => (props.node.properties?.type as string) || 'MODULE')
-
-const intent = computed(() => (props.node.properties?.intent as string) || '')
+const subLabel = computed(() => props.node.labels?.[0] || 'CLASS')
 
 const subInfo = computed(() => {
   const p = props.node.properties || {}
-  const pkg = p.package_name as string | undefined
   const file = p.file_path as string | undefined
-  const fileName = (p.file_name as string | undefined) ||
-    (file ? file.split(/[/\\]/).pop() : undefined)
-  const parts: string[] = []
-  if (pkg) parts.push(pkg)
-  if (fileName) parts.push(fileName)
-  return parts.join(' · ')
+  return file ? file.split(/[/\\]/).pop() || file : ''
 })
+
+const codeText = computed(() => String(props.node.properties?.code_text || ''))
+const sourcePath = computed(() => String(props.node.properties?.file_path || ''))
 
 const groups = computed(() =>
   getRelationshipGroups(props.node.id, projectStore.linkMap.values()),
@@ -76,13 +72,6 @@ const umlEdges = computed(() =>
     :sub-info="subInfo"
   >
     <template #body>
-      <section v-if="intent" class="detail-card">
-        <span class="detail-card__label">의도</span>
-        <div class="detail-card__body detail-card__body--tight">
-          <p class="module-prose">{{ intent }}</p>
-        </div>
-      </section>
-
       <section v-if="methods.length > 0" class="detail-card">
         <span class="detail-card__label">함수 · {{ methods.length }}</span>
         <div class="detail-card__body detail-card__body--tight">
@@ -107,18 +96,18 @@ const umlEdges = computed(() =>
           </ul>
         </div>
       </section>
+
+      <section v-if="codeText" class="detail-card">
+        <span class="detail-card__label">원문 코드</span>
+        <div class="detail-card__body detail-card__body--flush">
+          <CodeViewer :content="codeText" :file-path="sourcePath" :max-height="320" />
+        </div>
+      </section>
     </template>
   </NodeDetailBase>
 </template>
 
 <style lang="scss" scoped>
-.module-prose {
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--color-text);
-  line-height: 1.5;
-}
-
 .member-list {
   list-style: none;
   margin: 0;

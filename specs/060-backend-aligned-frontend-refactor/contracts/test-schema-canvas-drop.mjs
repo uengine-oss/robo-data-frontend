@@ -23,8 +23,7 @@ try {
       datasource: 'warehouse',
       logical_name: '주문',
       description: '주문 원장',
-      description_source: 'user',
-      analyzed_description: '고객 주문',
+      summary: '고객 주문',
       column_count: 3,
     },
   }
@@ -49,8 +48,7 @@ try {
         datasource: undefined,
         logical_name: undefined,
         description: '고객',
-        description_source: undefined,
-        analyzed_description: undefined,
+        summary: undefined,
         column_count: 0,
       },
     },
@@ -64,7 +62,7 @@ try {
     columns: [{
       name: 'order_id',
       table_name: 'Order',
-      dtype: 'string',
+      data_type: 'string',
       nullable: false,
       description: '주문 식별자',
     }],
@@ -89,12 +87,11 @@ try {
     columns: [{
       name: 'order_id',
       table_name: 'Order',
-      dtype: 'string',
+      data_type: 'string',
       nullable: false,
       logical_name: undefined,
       description: '주문 식별자',
-      description_source: undefined,
-      analyzed_description: undefined,
+      summary: undefined,
     }],
     isObjectType: true,
     behaviors: [{
@@ -124,7 +121,7 @@ try {
   }))
   assert.equal(legacy.table.schema, 'ObjectType')
   assert.equal(legacy.options.columns[0].table_name, 'Legacy')
-  assert.equal(legacy.options.columns[0].dtype, 'string')
+  assert.equal(legacy.options.columns[0].data_type, 'string')
 
   const cloned = drop.cloneSchemaCanvasDropTarget(objectType)
   cloned.table.name = 'Changed'

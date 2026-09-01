@@ -1304,17 +1304,10 @@ async function handleRefresh() {
           <span class="source-panel-line">Line {{ store.sourceCodePanel.highlightedLine }}</span>
         </div>
         <div class="source-panel-content" ref="sourceCodeContentRef">
-          <!-- 불러오기 실패(≠ 없음) — 재시도 안내 (spec 044) -->
-          <div v-if="store.sourceCodePanel.loadError" class="source-empty">
-            <span class="source-empty-icon">⚠️</span>
-            <p class="source-empty-title">코드를 불러오지 못했습니다</p>
-            <p class="source-empty-desc">일시적인 문제일 수 있습니다. 참조를 다시 선택해 주세요.</p>
-          </div>
-          <!-- 원본 소스 미로드 — 가짜 코드 대신 정직한 빈 상태 (spec 043) -->
-          <div v-else-if="store.sourceCodePanel.notFound" class="source-empty">
+          <div v-if="store.sourceCodePanel.notFound" class="source-empty">
             <span class="source-empty-icon">📄</span>
-            <p class="source-empty-title">원본 소스를 찾을 수 없습니다</p>
-            <p class="source-empty-desc">이 그래프에는 원본 코드가 로드되어 있지 않습니다.<br>소스 폴더를 다시 분석하면 코드 보기가 활성화됩니다.</p>
+            <p class="source-empty-title">저장된 원문 코드가 없습니다</p>
+            <p class="source-empty-desc">해당 노드에 code_text가 있는지 확인한 뒤 다시 분석해 주세요.</p>
           </div>
           <template v-else>
           <div v-if="store.sourceCodePanel.isLoadingStatements" class="source-loading">
@@ -1355,7 +1348,6 @@ async function handleRefresh() {
               }"
               :data-line="store.sourceCodePanel.startLine + index"
             >
-              <span class="source-line-number">{{ store.sourceCodePanel.startLine + index }}</span>
               <span class="source-line-content">{{ line || ' ' }}</span>
             </div>
           </template>

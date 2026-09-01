@@ -968,8 +968,8 @@ try {
     column_count: 2,
   })
   assert.deepEqual(objectTypeCanvas.columns, [
-    { name: 'id', table_name: 'Order', dtype: 'integer', description: 'identifier', nullable: true },
-    { name: 'status', table_name: 'Order', dtype: 'string', description: '', nullable: true },
+    { name: 'id', table_name: 'Order', data_type: 'integer', description: 'identifier', nullable: true },
+    { name: 'status', table_name: 'Order', data_type: 'string', description: '', nullable: true },
   ])
   assert.deepEqual(objectTypeCanvas.dragData, {
     ...objectTypeCanvas.tableInfo,
@@ -1079,8 +1079,8 @@ try {
   const initialCatalogRelationships = [{
     from_table: 'orders',
     to_table: 'customers',
-    type: 'FK_TO_TABLE',
-    source: 'ddl',
+    type: 'FK',
+    source: 'analyzer',
     column_pairs: [{ source: 'customer_id', target: 'id', name: 'Old name' }],
   }]
   const mergedCatalogRelationships = relationshipEdges.mergeCatalogRelationships(
@@ -1089,15 +1089,15 @@ try {
       {
         from_table: 'orders',
         to_table: 'customers',
-        type: 'FK_TO_TABLE',
-        source: 'code',
+        type: 'FK',
+        source: 'catalog',
         column_pairs: [{ source: 'created_by', target: 'id' }],
       },
       {
         from_table: 'orders',
         to_table: 'customers',
-        type: 'FK_TO_TABLE',
-        source: 'ddl',
+        type: 'FK',
+        source: 'analyzer',
         column_pairs: [
           { source: 'customer_id', target: 'id', name: 'Current name' },
           { source: 'billing_customer_id', target: 'id' },
@@ -1106,7 +1106,7 @@ try {
     ],
   )
   assert.equal(mergedCatalogRelationships.length, 2)
-  assert.deepEqual(mergedCatalogRelationships.map(relationship => relationship.source), ['ddl', 'code'])
+  assert.deepEqual(mergedCatalogRelationships.map(relationship => relationship.source), ['analyzer', 'catalog'])
   assert.deepEqual(mergedCatalogRelationships[0].column_pairs, [
     { source: 'customer_id', target: 'id', name: 'Current name' },
     { source: 'billing_customer_id', target: 'id' },
@@ -1116,18 +1116,18 @@ try {
   const projectedRelationshipEdges = relationshipEdges.projectRelationshipEdges({
     nodes: relationshipNodes,
     userRelationships: [
-      { ...userRelationshipBase, from_column: 'one', to_column: 'one', description: '[1:1] ', relationship_type: 'FK_TO_TABLE' },
-      { ...userRelationshipBase, from_column: 'many', to_column: 'many', description: '[1:N] owns', relationship_type: 'FK_TO_TABLE' },
-      { ...userRelationshipBase, from_column: 'reverse', to_column: 'reverse', relationship_type: 'MANY_TO_ONE' },
-      { ...userRelationshipBase, from_column: 'both', to_column: 'both', relationship_type: 'MANY_TO_MANY', name: 'Peers' },
-      { ...userRelationshipBase, from_table: 'missing', from_column: 'id', to_column: 'id', relationship_type: 'FK_TO_TABLE' },
+      { ...userRelationshipBase, from_column: 'one', to_column: 'one', description: '[1:1] ', relationship_type: 'FK' },
+      { ...userRelationshipBase, from_column: 'many', to_column: 'many', description: '[1:N] owns', relationship_type: 'FK' },
+      { ...userRelationshipBase, from_column: 'reverse', to_column: 'reverse', description: '[N:1]', relationship_type: 'FK' },
+      { ...userRelationshipBase, from_column: 'both', to_column: 'both', description: '[N:N] Peers', relationship_type: 'FK' },
+      { ...userRelationshipBase, from_table: 'missing', from_column: 'id', to_column: 'id', relationship_type: 'FK' },
     ],
     catalogRelationships: [
       {
         from_table: 'orders',
         to_table: 'customers',
-        type: 'FK_TO_TABLE',
-        source: 'ddl',
+        type: 'FK',
+        source: 'analyzer',
         name: 'Order customer',
         column_pairs: [
           { source: 'customer_id', target: 'id' },
@@ -1137,30 +1137,23 @@ try {
       {
         from_table: 'orders',
         to_table: 'customers',
-        type: 'FK_TO_TABLE',
-        source: 'code',
+        type: 'FK',
+        source: 'catalog',
         column_pairs: [{ source: 'customer_id', target: 'id', name: 'Duplicate must not replace' }],
       },
       {
         from_table: 'customers',
         to_table: 'orders',
-        type: 'FK_TO_TABLE',
-        source: 'procedure',
+        type: 'FK',
+        source: 'analyzer',
         column_pairs: [{ source: 'last_order_id', target: 'id', name: 'Procedure reference' }],
       },
       {
         from_table: 'customers',
         to_table: 'orders',
-        type: 'FK_TO_TABLE',
-        source: 'user',
+        type: 'FK',
+        source: 'catalog',
         column_pairs: [{ source: 'favorite_order_id', target: 'id' }],
-      },
-      {
-        from_table: 'orders',
-        to_table: 'customers',
-        type: 'CO_REFERENCED',
-        source: 'ddl',
-        column_pairs: [{ source: 'account_id', target: 'account_id' }],
       },
     ],
     visibility: { ddl: true, code: true, user: true },
@@ -1173,7 +1166,6 @@ try {
     'neo4j-orders-customer_id-customers-id',
     'neo4j-customers-last_order_id-orders-id',
     'neo4j-customers-favorite_order_id-orders-id',
-    'neo4j-orders-account_id-customers-account_id',
   ])
   assert.deepEqual(
     projectedRelationshipEdges.slice(0, 4).map(edge => [edge.label, edge.markerStart, edge.markerEnd]),
@@ -1188,9 +1180,8 @@ try {
   assert.equal(projectedRelationshipEdges[5].sourceHandle, 'fk-last_order_id-source-left')
   assert.equal(projectedRelationshipEdges[4].label, 'Order customer')
   assert.equal(projectedRelationshipEdges[4].style.stroke, '#22c55e')
-  assert.equal(projectedRelationshipEdges[5].style.strokeDasharray, '6 3')
+  assert.equal(projectedRelationshipEdges[5].style.stroke, '#22c55e')
   assert.equal(projectedRelationshipEdges[6].style.stroke, '#f59e0b')
-  assert.equal(projectedRelationshipEdges[7].style.strokeDasharray, '6 3')
 
   const hiddenRelationshipEdges = relationshipEdges.projectRelationshipEdges({
     nodes: relationshipNodes,
@@ -1198,13 +1189,13 @@ try {
       ...userRelationshipBase,
       from_column: 'customer_id',
       to_column: 'id',
-      relationship_type: 'FK_TO_TABLE',
+      relationship_type: 'FK',
     }],
     catalogRelationships: [{
       from_table: 'orders',
       to_table: 'customers',
-      type: 'FK_TO_TABLE',
-      source: 'ddl',
+      type: 'FK',
+      source: 'analyzer',
       column_pairs: [{ source: 'customer_id', target: 'id' }],
     }],
     visibility: { ddl: false, code: true, user: false },
@@ -1220,7 +1211,7 @@ try {
       ...userRelationshipBase,
       from_column: 'customer_id',
       to_column: 'id',
-      relationship_type: 'FK_TO_TABLE',
+      relationship_type: 'FK',
     }],
     catalogRelationships: [],
     visibility: { ddl: true, code: true, user: true },
@@ -1387,7 +1378,7 @@ try {
   assert.deepEqual(sourceCodePanel.createClosedSourceCodePanel(), {
     isOpen: false,
     fileName: '',
-    fileDirectory: '',
+    filePath: '',
     fileContent: '',
     startLine: 1,
     highlightedLine: 0,
@@ -1396,11 +1387,10 @@ try {
     isLoadingStatements: false,
     statementError: null,
     notFound: false,
-    loadError: false,
   })
   const missingSourcePanel = sourceCodePanel.createOpenSourceCodePanel({
     fileName: 'orders.sql',
-    fileDirectory: '/missing/orders.sql',
+    filePath: '/missing/orders.sql',
     fileContent: 'fabricated content must not render',
     highlightedLine: 12,
     procedureName: 'load_orders',
@@ -1460,7 +1450,7 @@ try {
   assert.equal(tableReferences.getAccessTypeLabel('READS'), '읽기')
   assert.equal(tableReferences.getAccessTypeLabel('CUSTOM'), 'CUSTOM')
   assert.equal(tableReferences.getAccessTypeColor('WRITES'), '#f59e0b')
-  assert.equal(tableReferences.getAccessTypeColor('REFER_TO'), '#a78bfa')
+  assert.equal(tableReferences.getAccessTypeColor('READS'), '#38bdf8')
 
   const highlightValues = new Map()
   const scheduledHighlights = []

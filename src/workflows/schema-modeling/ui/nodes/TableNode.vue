@@ -31,8 +31,8 @@ function isColumnUpdating(colName: string): boolean {
 }
 
 // 카드 제목 — 논리명 모드면 logical_name(analyzer spec 025, 짧은 도메인명), 없으면 물리명.
-// 물리명 모드면 항상 물리명. (요약 analyzed_description 은 제목으로 쓰지 않음 = 부제/상세용)
-const tableMeaning = computed(() => (props.data.analyzed_description || '').trim())
+// 물리명 모드면 항상 물리명. summary는 부제와 상세에서만 사용한다.
+const tableMeaning = computed(() => (props.data.summary || '').trim())
 const cardTitle = computed(() =>
   canvasStore.showLogicalNames && props.data.logical_name
     ? props.data.logical_name
@@ -52,7 +52,6 @@ const {
   isLoadingReferences,
   referencesError,
   procedureReferences,
-  frameworkReferences,
   showReferencesPopup,
   referencesPopupPosition,
   showColumnReferencesPopup,
@@ -60,7 +59,6 @@ const {
   columnReferencesPopupPosition,
   isLoadingColumnReferences,
   columnReferences,
-  columnFrameworkReferences,
   activeColumnName,
   openReferences,
   closeReferencesPopup,
@@ -68,7 +66,6 @@ const {
   loadColumnReferences,
   handleColumnSourceClick,
   handleProcedureClick,
-  handleFrameworkClick,
   getAccessTypeLabel,
   getAccessTypeColor,
 } = useTableReferences(
@@ -122,8 +119,8 @@ function isForeignKey(colName: string): boolean {
 }
 
 // 카드용 간단 타입 — 길이/정밀도 괄호 제거, 소문자(상세 길이는 상세패널에서). 예: VARCHAR(20)→varchar
-function simpleType(dtype: string): string {
-  return (dtype || '').replace(/\s*\(.*\)\s*/, '').toLowerCase()
+function simpleType(dataType: string): string {
+  return (dataType || '').replace(/\s*\(.*\)\s*/, '').toLowerCase()
 }
 
 function handleRemove(e: Event) {
@@ -290,7 +287,7 @@ function onColumnMouseLeave() {
             <p>참조를 불러오지 못했습니다.</p>
             <button class="references-popup__retry" @click="loadColumnReferences(activeColumnName)">다시 시도</button>
           </div>
-          <div v-else-if="columnReferences.length === 0 && columnFrameworkReferences.length === 0" class="references-popup__empty">
+          <div v-else-if="columnReferences.length === 0" class="references-popup__empty">
             참조 없음 — 이 컬럼을 읽고/쓰는 코드가 없습니다.
           </div>
           <template v-else>
@@ -321,36 +318,12 @@ function onColumnMouseLeave() {
                 </span>
               </span>
             </button>
-            <!-- 프레임워크 참조 -->
-            <button
-              v-for="ref in columnFrameworkReferences"
-              :key="`col-fw-${ref.source_name}-${ref.start_line}`"
-              type="button"
-              class="references-popup__item"
-              @click="handleFrameworkClick(ref)"
-            >
-              <span class="references-popup__proc-name">
-                <span class="references-popup__proc-type references-popup__proc-type--fw">{{ ref.source_type }}</span>
-                {{ ref.source_name }}
-                <span v-if="ref.module_name && ref.module_name !== ref.source_name" class="references-popup__module-name">
-                  ({{ ref.module_name }})
-                </span>
-              </span>
-              <span class="references-popup__details">
-                <span
-                  class="references-popup__access-type"
-                  :style="{ color: getAccessTypeColor(ref.access_type) }"
-                >
-                  {{ getAccessTypeLabel(ref.access_type) }}
-                </span>
-              </span>
-            </button>
           </template>
         </div>
       </div>
     </Teleport>
 
-    <!-- 참조 팝업 (프로시저 + 프레임워크) -->
+    <!-- 코드 참조 팝업 -->
     <Teleport to="body">
       <div
         v-if="showReferencesPopup"
@@ -369,7 +342,7 @@ function onColumnMouseLeave() {
             <p>참조를 불러오지 못했습니다.</p>
             <button class="references-popup__retry" @click="openReferences($event)">다시 시도</button>
           </div>
-          <div v-else-if="procedureReferences.length === 0 && frameworkReferences.length === 0" class="references-popup__empty">
+          <div v-else-if="procedureReferences.length === 0" class="references-popup__empty">
             참조 없음 — 이 테이블을 읽고/쓰는 코드가 없습니다.
           </div>
           <template v-else>
@@ -397,33 +370,6 @@ function onColumnMouseLeave() {
                 </span>
                 <span v-if="ref.statement_line" class="references-popup__line">
                   Line {{ ref.statement_line }}
-                </span>
-              </span>
-            </button>
-            <!-- 프레임워크 참조 -->
-            <button
-              v-for="ref in frameworkReferences"
-              :key="`fw-${ref.source_name}-${ref.start_line}`"
-              type="button"
-              class="references-popup__item"
-              @click="handleFrameworkClick(ref)"
-            >
-              <span class="references-popup__proc-name">
-                <span class="references-popup__proc-type references-popup__proc-type--fw">{{ ref.source_type }}</span>
-                {{ ref.source_name }}
-                <span v-if="ref.module_name && ref.module_name !== ref.source_name" class="references-popup__module-name">
-                  ({{ ref.module_name }})
-                </span>
-              </span>
-              <span class="references-popup__details">
-                <span
-                  class="references-popup__access-type"
-                  :style="{ color: getAccessTypeColor(ref.access_type) }"
-                >
-                  {{ getAccessTypeLabel(ref.access_type) }}
-                </span>
-                <span v-if="ref.evidence_line || ref.start_line" class="references-popup__line">
-                  Line {{ ref.evidence_line || ref.start_line }}
                 </span>
               </span>
             </button>
@@ -491,7 +437,7 @@ function onColumnMouseLeave() {
             <span v-else-if="isForeignKey(col.name)" class="table-node__col-tag table-node__col-tag--fk">FK</span>
             <span v-if="!col.nullable" class="table-node__nn-star" title="NOT NULL — 필수 입력(비울 수 없음)">*</span>
           </span>
-          <span class="table-node__column-type" :title="col.dtype">{{ simpleType(col.dtype) }}</span>
+          <span class="table-node__column-type" :title="col.data_type">{{ simpleType(col.data_type) }}</span>
         </div>
 
         <!-- Drag hint for FK columns -->
@@ -829,17 +775,6 @@ function onColumnMouseLeave() {
   padding: 1px 5px;
   border-radius: 3px;
   text-transform: uppercase;
-}
-
-.references-popup__proc-type--fw {
-  color: #10b981;
-  background: rgba(16, 185, 129, 0.15);
-}
-
-.references-popup__module-name {
-  font-size: 0.7rem;
-  color: #94a3b8;
-  margin-left: 4px;
 }
 
 .references-popup__details {

@@ -136,11 +136,6 @@
     {
       "method": "GET",
       "status": 200,
-      "url": "http://127.0.0.1:3000/api/gateway/robo/source?file_path=D%3A%5Cwork%5Crobo%5Cproject%5Cdata%5Csource%5Cshop_mall%5Cmember%5Creview_point.c&start_line=78&end_line=213"
-    },
-    {
-      "method": "GET",
-      "status": 200,
       "url": "http://127.0.0.1:3000/api/gateway/robo/schema/procedures/check_purchased/statements?file_directory=D%3A%5Cwork%5Crobo%5Cproject%5Cdata%5Csource%5Cshop_mall%5Cmember%5Creview_point.c"
     },
     {

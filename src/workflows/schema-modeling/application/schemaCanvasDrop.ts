@@ -60,22 +60,6 @@ function parseColumnCount(
   return value
 }
 
-function parseDescriptionSource(
-  value: unknown,
-): SchemaModelingTable['description_source'] {
-  if (value === undefined) return undefined
-  if (
-    value === ''
-    || value === 'ddl'
-    || value === 'procedure'
-    || value === 'user'
-    || value === 'code'
-  ) {
-    return value
-  }
-  throw new Error('드래그 테이블 description_source가 올바르지 않습니다.')
-}
-
 function parseTable(
   value: unknown,
   defaultSchema = 'public',
@@ -101,11 +85,7 @@ function parseTable(
       value.description,
       '드래그 테이블 description',
     ) ?? '',
-    description_source: parseDescriptionSource(value.description_source),
-    analyzed_description: optionalString(
-      value.analyzed_description,
-      '드래그 테이블 analyzed_description',
-    ),
+    summary: optionalString(value.summary, '드래그 테이블 summary'),
     column_count: parseColumnCount(
       value.column_count,
       '드래그 테이블 column_count',
@@ -135,7 +115,7 @@ function parseObjectTypeColumns(
       table_name: item.table_name === undefined
         ? tableName
         : requiredIdentity(item.table_name, `${contract}.table_name`),
-      dtype: optionalString(item.dtype, `${contract}.dtype`) || 'string',
+      data_type: optionalString(item.data_type, `${contract}.data_type`) || 'string',
       nullable: item.nullable ?? true,
       logical_name: optionalString(
         item.logical_name,
@@ -145,11 +125,7 @@ function parseObjectTypeColumns(
         item.description,
         `${contract}.description`,
       ) ?? '',
-      description_source: parseDescriptionSource(item.description_source),
-      analyzed_description: optionalString(
-        item.analyzed_description,
-        `${contract}.analyzed_description`,
-      ),
+      summary: optionalString(item.summary, `${contract}.summary`),
     }
   })
 }

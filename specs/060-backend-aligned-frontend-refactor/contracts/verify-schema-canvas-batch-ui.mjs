@@ -72,8 +72,7 @@ const tables = Array.from({ length: 11 }, (_, index) => ({
   datasource: 'warehouse',
   logical_name: index === 0 ? '주문' : `테이블 ${index + 1}`,
   description: `batch table ${index + 1}`,
-  description_source: 'ddl',
-  analyzed_description: `batch projection ${index + 1}`,
+  summary: `batch projection ${index + 1}`,
   column_count: 1,
 }))
 const nodeId = name => `table-${encodeURIComponent(JSON.stringify(['warehouse', 'sales', name]))}`
@@ -138,20 +137,18 @@ try {
       ? Array.from({ length: 9 }, (_, index) => ({
           name: index === 0 ? 'id' : `field_${index + 1}`,
           table_name: name,
-          dtype: index === 0 ? 'bigint' : 'varchar',
+          data_type: index === 0 ? 'bigint' : 'varchar',
           nullable: index !== 0,
           logical_name: index === 0 ? 'ID' : `필드 ${index + 1}`,
           description: `${name} field ${index + 1}`,
-          description_source: 'ddl',
         }))
       : [{
           name: 'id',
           table_name: name,
-          dtype: 'bigint',
+          data_type: 'bigint',
           nullable: false,
           logical_name: 'ID',
           description: `${name} identifier`,
-          description_source: 'ddl',
         }]
     return route.fulfill({
       status: 200,
@@ -164,7 +161,7 @@ try {
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: '{"references":[],"framework_references":[]}',
+      body: '{"references":[]}',
     })
   })
   await page.route(/\/api\/gateway\/robo\/graph\/related-tables\/([^/?]+)(?:\?.*)?$/, route => {

@@ -1,19 +1,19 @@
 # Tasks: 스키마 탭 전면 고도화
 
-**Feature**: 043-schema-tab-overhaul | **Plan**: [plan.md](./plan.md) | **Contract**: [contracts/source-endpoint.md](./contracts/source-endpoint.md)
+**Feature**: 043-schema-tab-overhaul | **Plan**: [plan.md](./plan.md)
 
 빌드·재분석 금지. 검증은 vite dev(3000) + Playwright. 최종에만 빌드.
 
 ## Phase 1: Setup / 사실확정
-- [ ] T001 구현 전 확인(코드 정독): `SourceFileCache.slice` 시그니처/반환, analyzer `main.py` 라우터 등록 패턴, `ROBO_BASE_URL` 실제 매핑, 프로시저 노드의 file_path 존재. (추측 금지)
+- [ ] T001 구현 전 확인(코드 정독): 프로시저·함수 노드의 `code_text`, `start_line`, `end_line` 계약과 화면 표시 경로를 확인한다. (추측 금지)
 
-## Phase 2: Stream A — 소스 코드뷰 백엔드 서빙 (US1, P1)
-**Goal**: 업로드 의존 폐기, analyzer가 디스크 소스를 서빙, 프론트가 호출. **Independent test**: 업로드 0 상태에서 참조 클릭 → 실제 코드.
-- [ ] T002 [US1] analyzer `api/source_router.py` 신규: `GET /robo/source?file_path&start_line&end_line` — `Path.resolve()`가 `ENV.data.dir/source` 하위인지 검사(아니면 400), 없으면 404, `SourceFileCache.slice`(또는 동일 패턴)로 본문 반환(계약 응답형). `main.py`에 등록.
-- [ ] T003 [US1] gateway `application.yml`에 `api-gateway-robo-source`(`/api/gateway/robo/source/**` → 5502) 라우트를 catalog catch-all 위에 추가.
-- [ ] T004 [US1] catalog `schema_query_service.py` proc_query에 `p.file_path AS file_path` 추가(프로시저 참조도 절대경로 확보).
-- [ ] T005 [US1] frontend `schema/api.ts`에 `getSourceContent(filePath, {startLine,endLine})` 추가(공유 http, 게이트웨이 경유). 400/404는 `found:false` 신호로 정규화.
-- [ ] T006 [US1] `TableNode.vue` `handleProcedureClick`/`handleFrameworkClick` 재배선: `uploadedFiles` 조회 폐기 → `getSourceContent(file_path 또는 file_directory기반 절대경로, {startLine:line})` 호출 → `openSourceCodePanel`에 실제 본문. 실패(found:false)면 가짜 "//코드" 대신 정직한 빈 상태 신호.
+## Phase 2: Stream A — 노드 원문 코드뷰 (US1, P1)
+**Goal**: 업로드·파일 재조회 의존을 폐기하고 그래프 노드의 줄번호 포함 `code_text`를 그대로 표시한다. **Independent test**: 참조 클릭 → 해당 노드 범위의 실제 코드.
+- [ ] T002 [US1] Catalog 참조 응답에 노드의 `code_text`, `start_line`, `end_line`을 포함한다.
+- [ ] T003 [US1] frontend 참조 타입에서 원문과 실제 줄 범위를 검증한다.
+- [ ] T004 [US1] `openSourceCodePanel`에 노드 `code_text`와 실제 시작 줄을 전달한다.
+- [ ] T005 [US1] 원문이 없으면 가짜 "//코드" 대신 정직한 빈 상태를 표시한다.
+- [ ] T006 [US1] 디스크 파일을 다시 읽는 별도 백엔드·게이트웨이 경로가 없음을 확인한다.
 - [ ] T007 [US1] 소스 패널(SchemaCanvas/schemaCanvas store openSourceCodePanel) — "소스 없음" 정직 빈 상태 렌더 분기(코드가 아님이 명확). 가짜 placeholder 문자열 생성 제거.
 
 ## Phase 3: Stream B — 잔여물 제거 (US2, P2)

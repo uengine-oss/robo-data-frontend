@@ -39,13 +39,9 @@ export interface HierarchyInfo {
   isExternal: boolean
 }
 
-// HAS_MEMBER 는 그릇→루틴/데이터 공통이지만, 다음 단계(FUNCTION_TO_TABLE_REL)에서 테이블을
-// READS/WRITES 하는 루틴만 가상 링크로 이어지므로 데이터 멤버는 자연 제외된다.
-const MODULE_TO_FUNCTION_REL = new Set(['HAS_MEMBER'])
-const FUNCTION_TO_TABLE_REL = new Set(['FROM', 'READS', 'REFER_TO', 'REFERS_TO', 'WRITES'])
+const FUNCTION_TO_TABLE_REL = new Set(['READS', 'WRITES'])
 // DBMS 의 READS/WRITES 는 루틴 루트가 아니라 그 안에 중첩된 구문 노드(SELECT/INSERT/MERGE…)에서
 // 나온다. 구문 → 소유 루틴은 PARENT_OF 엣지 체인으로만 거슬러 올라갈 수 있다
-// (parent_id/owner_id 는 모델 필드일 뿐 노드 속성으로 영속되지 않음 — Neo4j 실측 0건).
 // PARENT_OF 는 그릇/루틴 트리(parent)→child 방향이라, child id 로 부모를 찾으려면 target→source 로 인덱스.
 const STATEMENT_PARENT_REL = new Set(['PARENT_OF'])
 
@@ -87,45 +83,48 @@ export const useCanvasStore = defineStore('canvas', () => {
    * 모듈간 상호작용 가상 그래프 — MODULE/TABLE 노드 + 그 사이를 잇는 가상 링크.
    *
    * 올바른 데이터 체인(DBMS):
-   *   그릇 -[HAS_MEMBER]-> 루틴 -[PARENT_OF*]-> 구문(SELECT/INSERT/MERGE…) -[READS/WRITES]-> TABLE
+   *   그릇 -[PARENT_OF*]-> 루틴/구문 -[READS/WRITES]-> TABLE
    * READS/WRITES 의 source 는 루틴 루트가 아니라 그 안에 중첩된 구문 노드라(실측 156/157),
    * funcToModule 직접조회는 거의 다 실패해 2노드만 떴다 — 구문→소유그릇을 PARENT_OF 로 해소한다.
    *
    * 알고리즘 (O(N)):
-   *   1) linkMap 을 한 번 훑어 HAS_MEMBER 로 funcId → moduleId, PARENT_OF 로 childId → parentId 인덱스
+   *   1) PARENT_OF 로 childId → parentId 인덱스를 만든다.
    *   2) linkMap 을 한 번 더 훑어 (구문) -[READS/WRITES/...]-> TABLE 만나면
    *      resolveModule(구문) 로 PARENT_OF 를 거슬러 소유 그릇을 찾아 가상 링크 후보로 수집
-   *   3) (moduleId, tableId, type, op) 단위로 dedup —
-   *      원본 관계 타입(READS/WRITES/FROM/...) 과 op 등 속성을 그대로 보존.
+   *   3) (moduleId, tableId, type) 단위로 중복을 제거한다.
    *      → 색상/캡션이 일반 그래프와 동일하게 자동 적용됨.
    */
   /**
-   * 공유 인덱스(모듈간·건강 보기 공통):
-   *  - funcToModule: 루틴 id → 소유 그릇(모듈) id  (그릇 -HAS_MEMBER-> 루틴)
+   * 공유 인덱스:
+   *  - routineToModule: 루틴 id → 가장 가까운 소유 그릇 id
    *  - childToParent: 자식 id → 부모 id           (부모 -PARENT_OF-> 자식, 역방향)
-   * funcToModule 의 키 집합 = "루틴(호출가능 노드) id" 이기도 하다(구문→루틴 해소에 사용).
    */
-  function buildModuleIndexes(): { funcToModule: Map<string, string>; childToParent: Map<string, string> } {
-    const funcToModule = new Map<string, string>()
+  function buildModuleIndexes(): { routineToModule: Map<string, string>; childToParent: Map<string, string> } {
     const childToParent = new Map<string, string>()
     for (const link of projectStore.linkMap.values()) {
-      if (STATEMENT_PARENT_REL.has(link.type)) {
-        childToParent.set(link.target, link.source)
-        continue
-      }
-      if (!MODULE_TO_FUNCTION_REL.has(link.type)) continue
-      const moduleNode = projectStore.nodeMap.get(link.source)
-      const funcNode = projectStore.nodeMap.get(link.target)
-      if (!moduleNode || !funcNode) continue
-      if (!isContainerNode(moduleNode.labels || [])) continue
-      if (!(funcNode.labels || []).some(l => CALLABLE_LABELS.has(l))) continue
-      funcToModule.set(funcNode.id, moduleNode.id)
+      if (STATEMENT_PARENT_REL.has(link.type)) childToParent.set(link.target, link.source)
     }
-    return { funcToModule, childToParent }
+
+    const routineToModule = new Map<string, string>()
+    for (const node of projectStore.nodeMap.values()) {
+      if (!(node.labels || []).some(label => CALLABLE_LABELS.has(label))) continue
+      const seen = new Set<string>()
+      let parentId = childToParent.get(node.id)
+      while (parentId && !seen.has(parentId)) {
+        seen.add(parentId)
+        const parent = projectStore.nodeMap.get(parentId)
+        if (parent && isContainerNode(parent.labels || [])) {
+          routineToModule.set(node.id, parent.id)
+          break
+        }
+        parentId = childToParent.get(parentId)
+      }
+    }
+    return { routineToModule, childToParent }
   }
 
   function buildModuleInteractionGraph(): GraphData {
-    const { funcToModule, childToParent } = buildModuleIndexes()
+    const { routineToModule, childToParent } = buildModuleIndexes()
 
     // 구문 노드(READS/WRITES 의 source) → 소유 그릇 id 해소.
     // 자신이 루틴이면 funcToModule 에 바로 있고, 중첩 구문이면 PARENT_OF 를 거슬러
@@ -143,7 +142,7 @@ export const useCanvasStore = defineStore('canvas', () => {
       while (cur !== undefined && !seen.has(cur)) {
         const memo = resolveCache.get(cur)
         if (memo !== undefined) { result = memo; break }
-        const direct = funcToModule.get(cur)
+        const direct = routineToModule.get(cur)
         if (direct !== undefined) { result = direct; break }
         seen.add(cur)
         path.push(cur)
@@ -157,7 +156,6 @@ export const useCanvasStore = defineStore('canvas', () => {
       moduleId: string
       tableId: string
       type: string
-      op: string
       originProps: Record<string, unknown>
       viaFuncIds: Set<string>
     }
@@ -176,8 +174,7 @@ export const useCanvasStore = defineStore('canvas', () => {
       if (!hasLabel(tableNode, 'TABLE')) continue
 
       const tableId = tableNode.id
-      const op = typeof link.properties?.op === 'string' ? (link.properties.op as string) : ''
-      const key = `${moduleId}\u0000${tableId}\u0000${link.type}\u0000${op}`
+      const key = `${moduleId}\u0000${tableId}\u0000${link.type}`
 
       let info = virtuals.get(key)
       if (!info) {
@@ -185,7 +182,6 @@ export const useCanvasStore = defineStore('canvas', () => {
           moduleId,
           tableId,
           type: link.type,
-          op,
           originProps: { ...(link.properties || {}) },
           viaFuncIds: new Set(),
         }
@@ -240,7 +236,7 @@ export const useCanvasStore = defineStore('canvas', () => {
         if (viaNames.length >= 5) break
       }
       links.push({
-        id: `virtual:${info.type}:${info.op}:${info.moduleId}->${info.tableId}`,
+        id: `virtual:${info.type}:${info.moduleId}->${info.tableId}`,
         source: info.moduleId,
         target: info.tableId,
         type: info.type,
@@ -273,7 +269,7 @@ export const useCanvasStore = defineStore('canvas', () => {
       if (!presentIds.has(moduleId)) continue
       const routineIds: string[] = []
       for (const link of projectStore.linkMap.values()) {
-        if (link.type !== 'HAS_MEMBER' || link.source !== moduleId) continue
+        if (link.type !== 'PARENT_OF' || link.source !== moduleId) continue
         const routine = projectStore.nodeMap.get(link.target)
         if (!routine) continue
         if (!(routine.labels || []).some(l => CALLABLE_LABELS.has(l))) continue
@@ -281,10 +277,10 @@ export const useCanvasStore = defineStore('canvas', () => {
         routineIds.push(routine.id)
         // 모듈 → 자기 루틴: 소속을 보여주는 선. 같은 영역 안이라 흐리게 그려진다.
         links.push({
-          id: `expand:HAS_MEMBER:${moduleId}->${routine.id}`,
+          id: `expand:PARENT_OF:${moduleId}->${routine.id}`,
           source: moduleId,
           target: routine.id,
-          type: 'HAS_MEMBER',
+          type: 'PARENT_OF',
           properties: { virtual: true },
         })
       }
@@ -321,28 +317,31 @@ export const useCanvasStore = defineStore('canvas', () => {
 
 
   /**
-   * 계층 조상 맵 (spec 021) — 노드별 {파일, 패키지} 그룹 키/라벨. 중첩 헐의 단일 도출처(DRY).
-   * 기존 그래프 엣지로 도출 → 백엔드 무변경·재분석 0:
-   *   파일→패키지 = `FILE -BELONGS_TO-> PACKAGE`
-   *   파일→루틴   = `FILE -HAS_MEMBER-> 루틴` (역인덱스로 루틴→파일)
-   *   폴백        = 루틴.file_path (HAS_MEMBER 없을 때 파일 키)
+   * 계층 조상 맵 — PARENT_OF를 따라 패키지까지 올라가 그룹 키를 계산한다.
    * external 라벨이면 패키지를 가상 `"__external__"` 로 묶어 분리(프론트 분리 그룹).
    */
   // ★캐시되는 computed — hullLevels·clusterKeyOf·clusterLabelOf 가 공유한다. 과거엔 각 computed 가
   // 따로 호출해 한 렌더에 nodeMap+linkMap 전수 순회를 5번 했다 → 1회로(nodeMap/linkMap 바뀔 때만 재계산).
   const hierarchyMap = computed<Map<string, HierarchyInfo>>(() => {
-    const fileToPackage = new Map<string, string>()   // fileNodeId -> packageNodeId (BELONGS_TO)
-    const memberToFile = new Map<string, string>()    // memberId -> containerId (HAS_MEMBER)
+    const childToParent = new Map<string, string>()
     for (const link of projectStore.linkMap.values()) {
-      if (link.type === 'BELONGS_TO') fileToPackage.set(link.source, link.target)
-      else if (link.type === 'HAS_MEMBER') memberToFile.set(link.target, link.source)
+      if (link.type === 'PARENT_OF') childToParent.set(link.target, link.source)
     }
     const map = new Map<string, HierarchyInfo>()
     for (const node of projectStore.nodeMap.values()) {
-      const isExternal = (node.labels || []).includes('EXTERNAL')
-      const containerId = memberToFile.get(node.id) ?? null
-      let packageKey: string | null = containerId ? (fileToPackage.get(containerId) ?? null) : null
-      if (!packageKey) packageKey = fileToPackage.get(node.id) ?? null
+      const isExternal = (node.labels || []).includes('EXTERNAL_CHUNK')
+      let packageKey: string | null = null
+      const seen = new Set<string>()
+      let currentId: string | undefined = node.id
+      while (currentId && !seen.has(currentId)) {
+        seen.add(currentId)
+        const current = projectStore.nodeMap.get(currentId)
+        if (current?.labels.includes('PACKAGE')) {
+          packageKey = current.id
+          break
+        }
+        currentId = childToParent.get(currentId)
+      }
       if (isExternal) packageKey = '__external__'
       map.set(node.id, { packageKey, isExternal })
     }
@@ -446,7 +445,7 @@ export const useCanvasStore = defineStore('canvas', () => {
   function expandNodeOnCanvas(nodeId: string): void {
     const next = new Set(canvasNodeIds.value)
     next.add(nodeId)
-    // 확장 = 1-hop 이웃 추가. visibleLinks 가 숨김 "링크"는 거르지만, 보이는 링크(HAS_MEMBER 등)로
+    // 확장 = 1-hop 이웃 추가. visibleLinks 가 숨김 링크는 거르고 보이는 관계만 따른다.
     // 닿는 숨김 "노드"(변수·DEFINE 등)는 그냥 따라오면 안 된다 — "숨김 모두 보기" OFF 면 제외.
     // (캔버스 표시는 사용자가 로드한 노드 기준이라 render 단계에서 안 거르므로, 여기서 안 넣는 게 근본.)
     const showAll = projectStore.showHidden

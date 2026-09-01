@@ -9,7 +9,7 @@ export interface ProcedureStatement {
 export interface SourceCodePanelState {
   isOpen: boolean
   fileName: string
-  fileDirectory: string
+  filePath: string
   fileContent: string
   startLine: number
   highlightedLine: number
@@ -18,18 +18,16 @@ export interface SourceCodePanelState {
   isLoadingStatements: boolean
   statementError: string | null
   notFound: boolean
-  loadError: boolean
 }
 
 export interface OpenSourceCodePanelInput {
   fileName: string
-  fileDirectory: string
+  filePath: string
   fileContent: string
   highlightedLine: number
   procedureName: string
   startLine?: number
   found?: boolean
-  loadError?: boolean
 }
 
 export type ProcedureStatementsResult =
@@ -40,7 +38,7 @@ export function createClosedSourceCodePanel(): SourceCodePanelState {
   return {
     isOpen: false,
     fileName: '',
-    fileDirectory: '',
+    filePath: '',
     fileContent: '',
     startLine: 1,
     highlightedLine: 0,
@@ -49,34 +47,30 @@ export function createClosedSourceCodePanel(): SourceCodePanelState {
     isLoadingStatements: false,
     statementError: null,
     notFound: false,
-    loadError: false,
   }
 }
 
 export function createOpenSourceCodePanel({
   fileName,
-  fileDirectory,
+  filePath,
   fileContent,
   highlightedLine,
   procedureName,
   startLine = 1,
   found = true,
-  loadError = false,
 }: OpenSourceCodePanelInput): SourceCodePanelState {
-  const sourceAvailable = found && !loadError
   return {
     isOpen: true,
     fileName,
-    fileDirectory,
-    fileContent: sourceAvailable ? fileContent : '',
+    filePath,
+    fileContent: found ? fileContent : '',
     startLine,
     highlightedLine,
     procedureName,
     statements: [],
-    isLoadingStatements: sourceAvailable && Boolean(procedureName),
+    isLoadingStatements: found && Boolean(procedureName),
     statementError: null,
-    notFound: !found && !loadError,
-    loadError,
+    notFound: !found,
   }
 }
 
@@ -89,16 +83,16 @@ function isProcedureStatement(value: unknown): value is ProcedureStatement {
 
 export async function loadProcedureStatements(
   procedureName: string,
-  fileDirectory: string,
+  filePath: string,
   getStatements: (
     procedureName: string,
-    fileDirectory?: string,
+    filePath?: string,
   ) => Promise<{ statements: unknown }>,
 ): Promise<ProcedureStatementsResult> {
   if (!procedureName) return { ok: true, statements: [] }
 
   try {
-    const response = await getStatements(procedureName, fileDirectory)
+    const response = await getStatements(procedureName, filePath)
     if (!Array.isArray(response.statements) || !response.statements.every(isProcedureStatement)) {
       return { ok: false, error: 'Statement 설명 응답 형식이 올바르지 않습니다.' }
     }

@@ -20,14 +20,13 @@ const subLabel = computed(() => props.node.labels?.[0] || 'SQL')
 
 const subInfo = computed(() => {
   const p = props.node.properties || {}
-  const start = p.start_line ?? p.startLine
-  const end = p.end_line ?? p.endLine
+  const start = p.start_line
+  const end = p.end_line
   return start && end ? `라인 ${start}~${end}` : ''
 })
 
 const code = computed(() => {
-  const p = props.node.properties || {}
-  return (p.code as string) || (p.node_code as string) || (p.sql_text as string) || (p.code_text as string) || ''
+  return (props.node.properties?.code_text as string) || ''
 })
 
 const showFullCode = ref(false)
