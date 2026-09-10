@@ -97,11 +97,28 @@ export const useSessionStore = defineStore('session', () => {
     theme.value = theme.value === 'dark' ? 'light' : 'dark'
   }
 
+  /**
+   * 이 화면이 다룰 Neo4j graph.
+   *
+   * host(robo-architect)가 어느 프로젝트를 보고 있는지 알려 준다. 분석 결과는
+   * 프로젝트마다 다른 graph 에 사는데, 이걸 안 실으면 백엔드가 프로세스 환경에
+   * 고정된 graph 하나를 본다 — **오류가 아니라 남의 분석이 자기 것처럼 나오고,
+   * 분석을 돌리면 그 graph 를 통째로 비운다.**
+   *
+   * 단독 실행(host 없음)이면 비어 있고, 백엔드는 지금까지처럼 env 를 쓴다.
+   */
+  const neo4jDatabase = ref<string | null>(null)
+  const setNeo4jDatabase = (name: string | null): void => {
+    neo4jDatabase.value = name || null
+  }
+
   // 요청 헤더 — LLM 키는 프론트에서 보내지 않는다(백엔드 .env 일관 사용).
+  // 대상 graph 는 **여기 한 곳**에서만 붙인다. 호출부마다 챙기게 하면 한 곳만
+  // 빠져도 그 경로가 조용히 다른 graph 를 본다.
   const getHeaders = (): Record<string, string> => {
-    return {
-      'Accept-Language': 'ko'
-    }
+    const headers: Record<string, string> = { 'Accept-Language': 'ko' }
+    if (neo4jDatabase.value) headers['X-Neo4j-Database'] = neo4jDatabase.value
+    return headers
   }
 
   return {
@@ -115,6 +132,8 @@ export const useSessionStore = defineStore('session', () => {
     setActiveTab,
     goHome,
     getHeaders,
+    neo4jDatabase,
+    setNeo4jDatabase,
     navigateToSchemaSearch,
     consumeSchemaSearch,
     consumeSourceNavigation,

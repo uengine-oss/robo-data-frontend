@@ -14,6 +14,7 @@ import router from './router'
 import './styles/main.scss'
 import { initializeAppSettings } from './config/appSettings'
 import { useAnalyzerStore } from './stores/analyzer'
+import { useSessionStore } from './stores/session'
 
 let app: VueApp | null = null
 
@@ -22,6 +23,11 @@ let app: VueApp | null = null
  * @param opts.embedded    host(architect) 안에 끼워질 때 true — analyzer 자체 상단바를 숨긴다.
  * @param opts.projectRoot host(architect, Electron)가 고른 로컬 폴더 경로 — 주면 경로 모드
  *                         (업로드 없이 그 폴더를 직접 분석). 없으면 브라우저 업로드 모드.
+ * @param opts.neo4jDatabase host 가 고른 **프로젝트의 분석 graph**. 주면 모든 요청에
+ *                         `X-Neo4j-Database` 로 실려, 분석 쓰기와 그래프 조회가 그
+ *                         graph 안에서만 일어난다. 안 주면 백엔드가 자기 env 를 쓴다.
+ *                         매 분석 run 이 대상 graph 를 통째로 비우므로, 이 값이
+ *                         틀리면 남의 프로젝트 분석이 사라진다.
  * @param opts.onProjectRootChange 사용자가 이 화면에서 폴더를 바꿨을 때 host 에 알린다.
  *                         host 는 자기 저장소(localStorage / workdir ref)를 갱신해 다음
  *                         마운트에도 같은 값을 넘긴다. 주지 않으면 폴더 변경 UI 를 숨긴다 —
@@ -32,6 +38,7 @@ export function mount(
   opts: {
     embedded?: boolean
     projectRoot?: string
+    neo4jDatabase?: string
     onProjectRootChange?: (path: string) => void
   } = {},
 ): () => void {
@@ -47,6 +54,10 @@ export function mount(
   // 경로 모드: host 가 넘긴 로컬 폴더를 store 에 주입 (analyzer 는 "경로를 받았나"만 본다).
   if (opts.projectRoot) {
     useAnalyzerStore(pinia).setProjectRoot(opts.projectRoot)
+  }
+  // host 가 고른 프로젝트의 분석 graph. 모든 요청 헤더에 실린다 — getHeaders() 한 곳.
+  if (opts.neo4jDatabase) {
+    useSessionStore(pinia).setNeo4jDatabase(opts.neo4jDatabase)
   }
   // 폴더 변경을 host 에 알릴 통로. 없으면 UploadTab 이 변경 UI 를 숨긴다.
   app.provide('onProjectRootChange', opts.onProjectRootChange ?? null)
