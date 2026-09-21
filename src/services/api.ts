@@ -34,6 +34,21 @@ const ROBO_BASE_URL = `${API_GATEWAY_URL}/robo`
 type StreamCallback = (event: StreamEvent) => void
 type Headers = Record<string, string>
 
+/** FastAPI/Pydantic detail 배열을 `[object Object]`가 아닌 읽을 수 있는 문장으로 만든다. */
+function formatErrorDetail(detail: unknown): string {
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail.map((item) => {
+      if (!item || typeof item !== 'object') return String(item)
+      const issue = item as { loc?: unknown[]; msg?: string }
+      const location = Array.isArray(issue.loc) ? issue.loc.join('.') : ''
+      return [location, issue.msg].filter(Boolean).join(': ')
+    }).join('; ')
+  }
+  if (detail && typeof detail === 'object') return JSON.stringify(detail)
+  return String(detail ?? '')
+}
+
 // ============================================================================
 // HTTP 유틸리티
 // ============================================================================
@@ -97,7 +112,7 @@ async function handleHttpError(response: Response): Promise<never> {
     const errorJson = JSON.parse(errorText)
     if (errorJson.detail) {
       // FastAPI 스타일 오류 응답
-      errorMessage = errorJson.detail
+      errorMessage = formatErrorDetail(errorJson.detail)
       if (errorJson.error_type) {
         errorMessage = `[${errorJson.error_type}] ${errorMessage}`
       }
@@ -371,9 +386,19 @@ export const roboApi = {
     headers: Headers,
     onEvent: StreamCallback
   ): Promise<void> {
+    // Parser와 Analyzer는 요청 계약이 다르다. BackendRequestMetadata 전체를
+    // 그대로 보내면 Analyzer의 extra="forbid"에 target/nameCase/
+    // inferFkRelations/project_root가 걸려 422 detail 객체 배열이 반환된다.
+    // 파싱이 끝난 직후 분석만 매번 실패하던 이유가 이것이었다.
+    const analyzerRequest = {
+      strategy: metadata.strategy,
+      locale: 'ko',
+      selected_source_ids: [],
+      datasource: metadata.datasourceName ?? null,
+    }
     await streamFetch(
       `${ROBO_BASE_URL}/analyze`,
-      metadata,
+      analyzerRequest,
       headers,
       onEvent
     )
