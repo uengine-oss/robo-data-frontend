@@ -166,6 +166,7 @@ export interface StreamEvent {
   
   // Phase 이벤트 (phase_event 용)
   phase?: number
+  event?: 'complete' | 'stopped' | string
   name?: string
   status?: 'started' | 'in_progress' | 'completed' | 'skipped' | 'error'
   progress?: number
@@ -180,6 +181,8 @@ export interface StreamEvent {
   
   // 에러 정보
   errorType?: string
+  message?: string
+  fatal?: boolean
   traceId?: string
   summary?: string
 }

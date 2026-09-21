@@ -420,6 +420,8 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     addMessage('message', '🔍 분석 시작...')
 
     const schemaCanvasStore = useSchemaCanvasStore()
+    const terminal = { value: 'none' as 'none' | 'complete' | 'stopped' }
+    const fatalError = { value: null as string | null }
 
     await roboApi.analyze(
       analyzeMeta.value,
@@ -427,11 +429,17 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
       (event) => {
         // backend 가 'system_log' 도 보내지만 StreamEventType 에는 정의되지 않음 — 사용자 콘솔에 노출 X
         if ((event.type as string) === 'system_log') return
-        if (event.content) {
-          addMessage(event.type === 'error' ? 'error' : 'message', event.content)
+        const eventMessage = event.message ?? event.content
+        if (eventMessage) {
+          addMessage(event.type === 'error' ? 'error' : 'message', eventMessage)
+        }
+        if (event.type === 'error' && event.fatal) {
+          fatalError.value = eventMessage ?? '원인을 알 수 없는 Analyzer 오류'
         }
 
         if (event.type === 'phase_event') {
+          if (event.event === 'complete') terminal.value = 'complete'
+          if (event.event === 'stopped') terminal.value = 'stopped'
           const phaseNum = event.phase as number
           const phaseName = event.name || ''
           const phaseProgress = (event.progress as number) || 0
@@ -561,6 +569,12 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
         }
       }
     )
+
+    if (fatalError.value) throw new Error(fatalError.value)
+    if (terminal.value === 'stopped') throw new Error('Analyzer 작업이 중단되었습니다.')
+    if (terminal.value !== 'complete') {
+      throw new Error('Analyzer가 완료 신호 없이 연결을 종료했습니다.')
+    }
 
     addMessage('message', '✅ 분석 완료')
     currentPhaseProgress.value = 100
