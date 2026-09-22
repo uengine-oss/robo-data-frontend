@@ -36,6 +36,7 @@ export const useRuntimeStore = defineStore('runtime', () => {
   const apiKey = ref(loadFromStorage(STORAGE_KEY_API_KEY, ''))
   const apiProvider = ref<ApiProvider>(loadFromStorage(STORAGE_KEY_API_PROVIDER, 'openai') as ApiProvider)
   const neo4jConnection = ref<Neo4jConnection | null>(null)
+  const neo4jDatabase = ref<string | null>(null)
 
   watch(theme, newTheme => {
     saveToStorage(STORAGE_KEY_THEME, newTheme)
@@ -70,6 +71,10 @@ export const useRuntimeStore = defineStore('runtime', () => {
     neo4jConnection.value = connection
   }
 
+  function setNeo4jDatabase(database: string | null): void {
+    neo4jDatabase.value = database
+  }
+
   function getHeaders(): Record<string, string> {
     const headers: Record<string, string> = { 'Accept-Language': 'ko' }
     if (apiKey.value) headers['X-LLM-Api-Key'] = apiKey.value
@@ -79,8 +84,9 @@ export const useRuntimeStore = defineStore('runtime', () => {
       headers['X-Neo4j-Uri'] = connection.uri
       headers['X-Neo4j-User'] = connection.user
       headers['X-Neo4j-Password'] = connection.password
-      if (connection.database) headers['X-Neo4j-Database'] = connection.database
     }
+    const database = neo4jDatabase.value || connection?.database
+    if (database) headers['X-Neo4j-Database'] = database
 
     return headers
   }
@@ -90,11 +96,13 @@ export const useRuntimeStore = defineStore('runtime', () => {
     apiKey,
     apiProvider,
     neo4jConnection,
+    neo4jDatabase,
     setTheme,
     toggleTheme,
     setApiKey,
     setApiProvider,
     setNeo4jConnection,
+    setNeo4jDatabase,
     getHeaders,
   }
 })

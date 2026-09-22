@@ -27,10 +27,11 @@ let app: VueApp | null = null
  *                         (업로드 없이 그 폴더를 직접 분석). 없으면 브라우저 업로드 모드.
  * @param opts.neo4j       host(Electron)가 고른 Neo4j 연결 — 주면 요청 헤더로 백엔드에 override.
  *                         없으면(브라우저/테스트) 백엔드가 서버 env(ROBO_NEO4J_*) 사용.
+ * @param opts.neo4jDatabase 프로젝트의 분석 graph — 번들 연결에서는 내부 URI와 함께 사용.
  */
 export function mount(
   el: string | Element,
-  opts: { embedded?: boolean; projectRoot?: string; neo4j?: Neo4jConnection } = {},
+  opts: { embedded?: boolean; projectRoot?: string; neo4j?: Neo4jConnection; neo4jDatabase?: string } = {},
 ): () => void {
   // 앱 설정 초기화 (document.title 등)
   initializeAppSettings()
@@ -51,9 +52,10 @@ export function mount(
   }
 
   // Neo4j override: host(Electron)가 넘긴 연결을 session 에 주입 → getHeaders 가 X-Neo4j-* 헤더로 전달.
-  if (opts.neo4j) {
-    useRuntimeStore(pinia).setNeo4jConnection(opts.neo4j)
-  }
+  if (opts.neo4j) useRuntimeStore(pinia).setNeo4jConnection(opts.neo4j)
+  // The host's selected project pair wins over the connection's default DB.
+  // It must also work when the host supplies a DB but no explicit connection.
+  if (opts.neo4jDatabase) useRuntimeStore(pinia).setNeo4jDatabase(opts.neo4jDatabase)
 
   app.mount(el)
 
