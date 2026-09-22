@@ -74,6 +74,12 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const projectRoot = ref<string | null>(null)
   const usesStagedProjectIngress = ref(false)
 
+  // 임베디드 앱의 프로젝트별 업로드 상태는 분석 graph 와 같은 수명/경계를 가진다.
+  // 공용 키를 읽으면 새 프로젝트에서 이전 프로젝트 파일 목록이 다시 나타난다.
+  const projectStateKey = () => runtimeStore.neo4jDatabase
+    ? `${STORAGE_KEYS.PROJECT_STATE}:${runtimeStore.neo4jDatabase}`
+    : STORAGE_KEYS.PROJECT_STATE
+
   // ----- 파일 -----
   const uploadedFiles = ref<UploadedFile[]>([])
   const uploadedDdlFiles = ref<UploadedFile[]>([])
@@ -85,7 +91,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
         uploadedFiles: uploadedFiles.value,
         uploadedDdlFiles: uploadedDdlFiles.value,
       }
-      localStorage.setItem(STORAGE_KEYS.PROJECT_STATE, JSON.stringify(state))
+      localStorage.setItem(projectStateKey(), JSON.stringify(state))
     } catch (e) {
       logger.warn('LocalStorage 저장 실패:', e)
     }
@@ -93,7 +99,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   function restoreFromStorage() {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.PROJECT_STATE)
+      const saved = localStorage.getItem(projectStateKey())
       if (saved) {
         const state = JSON.parse(saved)
         if (state.sourceType) sourceType.value = state.sourceType
@@ -344,7 +350,9 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const showDataConfirmModal = ref(false)
   const pendingNodeCount = ref(0)
   const pendingUploadFiles = ref<File[]>([])
-  const pendingAction = ref<'upload' | 'restart' | null>(null)
+  const pendingAction = ref<'upload' | 'restart' | 'path' | null>(null)
+  let pendingIngressSummary: string | undefined
+  const replacingPathData = computed(() => pendingAction.value === 'path')
 
   // ----- 파이프라인 제어 (진행 상태는 분석 NDJSON 스트림의 phase_event 단일 채널) -----
   const isPipelinePaused = ref(false)
@@ -676,12 +684,8 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   // ----- 통합 파이프라인 -----
 
   async function checkExistingData(): Promise<{ hasData: boolean; nodeCount: number }> {
-    try {
-      return await catalogGraphApi.checkData(runtimeStore.getHeaders())
-    } catch (error) {
-      logger.warn('기존 데이터 확인 실패:', error)
-      return { hasData: false, nodeCount: 0 }
-    }
+    // 조회 실패를 빈 그래프로 간주하면 이전 결과 위에 새 결과가 섞인다.
+    return catalogGraphApi.checkData(runtimeStore.getHeaders())
   }
 
   async function loadExistingGraphData(): Promise<'loaded' | 'empty' | 'failed'> {
@@ -756,7 +760,14 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
       addMessage('message', currentAction === 'restart' ? '⏹️ 인제스천이 취소되었습니다.' : '⏹️ 업로드가 취소되었습니다.')
       pendingUploadFiles.value = []
       pendingAction.value = null
+      pendingIngressSummary = undefined
       return
+    }
+
+    if (currentAction === 'path' && action !== 'delete') {
+      pendingAction.value = null
+      pendingIngressSummary = undefined
+      throw new Error('폴더 전체 재분석은 기존 결과를 유지한 채 추가할 수 없습니다.')
     }
 
     if (action === 'delete') {
@@ -769,6 +780,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
         addMessage('error', `❌ 기존 데이터 삭제 실패: ${error}`)
         pendingUploadFiles.value = []
         pendingAction.value = null
+        pendingIngressSummary = undefined
         throw error
       }
     } else if (action === 'append') {
@@ -779,9 +791,11 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
       addMessage('message', `🔤 메타데이터 ${nameCase === 'uppercase' ? '대문자' : '소문자'} 변환 적용`)
     }
 
-    if (currentAction === 'restart') {
+    if (currentAction === 'restart' || currentAction === 'path') {
+      const summary = pendingIngressSummary
       pendingAction.value = null
-      await executeRestartPipeline()
+      pendingIngressSummary = undefined
+      await executeRestartPipeline(summary)
     } else {
       const files = pendingUploadFiles.value
       pendingUploadFiles.value = []
@@ -903,6 +917,16 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     } else {
       usesStagedProjectIngress.value = false
     }
+    // 경로 모드도 기존 데이터 확인을 거친다. uploadedFiles 가 비어 있어
+    // restartPipeline() 을 사용하지 않는 경로이기 때문이다.
+    const { hasData, nodeCount } = await checkExistingData()
+    if (hasData) {
+      pendingNodeCount.value = nodeCount
+      pendingAction.value = 'path'
+      pendingIngressSummary = ingressSummary
+      showDataConfirmModal.value = true
+      return
+    }
     await executeRestartPipeline(ingressSummary)
   }
 
@@ -980,7 +1004,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     clearMessages()
 
     try {
-      localStorage.removeItem(STORAGE_KEYS.PROJECT_STATE)
+      localStorage.removeItem(projectStateKey())
     } catch (e) {
       logger.warn('LocalStorage 삭제 실패:', e)
     }
@@ -1007,6 +1031,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
     // 데이터 확인 모달
     showDataConfirmModal,
+    replacingPathData,
     pendingNodeCount,
 
     // 파이프라인 제어

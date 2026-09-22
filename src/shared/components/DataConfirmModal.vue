@@ -9,6 +9,7 @@ export type NameCaseOption = 'original' | 'uppercase' | 'lowercase'
 const props = defineProps<{
   isOpen: boolean
   nodeCount: number
+  allowAppend?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -113,7 +114,8 @@ useDialogFocusLifecycle({
               </button>
               
               <!-- Append to Existing -->
-              <button 
+              <button
+                v-if="allowAppend !== false"
                 class="action-option action-append"
                 @click="handleAction('append')"
               >

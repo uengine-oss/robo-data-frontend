@@ -29,6 +29,7 @@ const {
   uploadedDdlFiles,
   isProcessing,
   showDataConfirmModal,
+  replacingPathData,
   pendingNodeCount,
   isPathMode,
   projectRoot
@@ -47,8 +48,12 @@ const handleRestartPipeline = async () => {
 const handleAnalyzePath = async () => {
   try {
     await projectStore.analyzeProjectPath()
-  } catch (error) {
-    logger.error('경로 분석 실패:', error)
+  } catch (cause: unknown) {
+    logger.error('경로 분석 실패:', cause)
+    workflowNotice.value = {
+      kind: 'error',
+      message: errorMessage(cause, '기존 분석 데이터 확인에 실패했습니다.'),
+    }
   }
 }
 
@@ -633,6 +638,7 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
     <DataConfirmModal
       :is-open="showDataConfirmModal"
       :node-count="pendingNodeCount"
+      :allow-append="!replacingPathData"
       @close="handleDataConfirmClose"
       @confirm="handleDataConfirmAction"
     />

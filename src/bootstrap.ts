@@ -52,6 +52,12 @@ export function mount(
     createFeatureNavigationPort(useAppNavigationStore(pinia)),
   )
 
+  // Analyzer store 는 생성되면서 업로드 상태를 복원한다. 프로젝트 DB를 먼저
+  // 주입해야 다른 프로젝트의 localStorage 상태를 읽지 않는다.
+  if (opts.neo4jDatabase) {
+    useRuntimeStore(pinia).setNeo4jDatabase(opts.neo4jDatabase)
+  }
+
   // 경로 모드: host 가 넘긴 로컬 폴더를 store 에 주입 (analyzer 는 "경로를 받았나"만 본다).
   if (opts.projectRoot) {
     useAnalyzerStore(pinia).setProjectRoot(opts.projectRoot)
