@@ -6,6 +6,7 @@ import { useFeatureNavigation } from '@/shared/navigation/featureNavigation'
 import { storeToRefs } from 'pinia'
 import DropZone from './DropZone.vue'
 import ScopeBrowser from './ScopeBrowser.vue'
+import DesktopSourceBar from './DesktopSourceBar.vue'
 import UploadModal from './UploadModal.vue'
 import UploadTree from './UploadTree.vue'
 import JsonViewer from './JsonViewer.vue'
@@ -399,6 +400,11 @@ const handleDataConfirmAction = async (action: DataAction, nameCase: 'original' 
 
 <template>
   <div class="upload-tab">
+    <!--
+      데스크톱 소스 도구막대 — 폴더 선택·예제 전환·메타데이터 추출.
+      `window.desktop` 이 없으면(브라우저 배포) 스스로 그리지 않는다.
+    -->
+    <DesktopSourceBar @root-selected="projectStore.setProjectRoot($event)" />
     <div
       v-if="workflowNotice"
       class="workflow-notice"
