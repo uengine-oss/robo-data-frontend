@@ -22,7 +22,7 @@ export function getAllDataSourceTypes(): DataSourceTypeConfig[] {
         { name: 'user', label: 'Username', type: 'text', required: true },
         { name: 'password', label: 'Password', type: 'password', required: true },
         { name: 'database', label: 'Database', type: 'text', required: true },
-        { name: 'schema', label: 'Schema', type: 'text', required: false, default: '', placeholder: '비워두면 모든 스키마 접근' }
+        { name: 'schema', label: 'Schema', type: 'text', required: false, default: '', placeholder: '비우면 public 을 가져옵니다' }
       ]
     },
     {
@@ -37,7 +37,7 @@ export function getAllDataSourceTypes(): DataSourceTypeConfig[] {
         { name: 'user', label: 'Username', type: 'text', required: true },
         { name: 'password', label: 'Password', type: 'password', required: true },
         { name: 'database', label: 'Database', type: 'text', required: true },
-        { name: 'schema', label: 'Schema', type: 'text', required: false, default: '', placeholder: '비워두면 모든 스키마 접근' }
+        { name: 'schema', label: 'Schema', type: 'text', required: false, default: '', placeholder: '비워 두세요 — MySQL 계열은 Database 를 씁니다' }
       ]
     },
     {
@@ -52,7 +52,7 @@ export function getAllDataSourceTypes(): DataSourceTypeConfig[] {
         { name: 'user', label: 'Username', type: 'text', required: true },
         { name: 'password', label: 'Password', type: 'password', required: true },
         { name: 'database', label: 'Database', type: 'text', required: true },
-        { name: 'schema', label: 'Schema', type: 'text', required: false, default: '', placeholder: '비워두면 모든 스키마 접근' }
+        { name: 'schema', label: 'Schema', type: 'text', required: false, default: '', placeholder: '비워 두세요 — MySQL 계열은 Database 를 씁니다' }
       ]
     },
     {
@@ -277,7 +277,7 @@ export function getAllDataSourceTypes(): DataSourceTypeConfig[] {
         { name: 'password', label: 'Password', type: 'password', required: true },
         { name: 'warehouse', label: 'Warehouse', type: 'text', required: true },
         { name: 'database', label: 'Database', type: 'text', required: true },
-        { name: 'schema', label: 'Schema', type: 'text', required: false, default: '', placeholder: '비워두면 모든 스키마 접근' }
+        { name: 'schema', label: 'Schema', type: 'text', required: false, default: '', placeholder: '비워 두세요 — MySQL 계열은 Database 를 씁니다' }
       ]
     },
     {
