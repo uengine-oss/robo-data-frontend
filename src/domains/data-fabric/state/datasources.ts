@@ -108,7 +108,7 @@ export const useDatasourcesStore = defineStore('datasources', () => {
         status: 'unknown',
         message: messageOf(cause, 'Health check failed'),
         db_connected: false,
-        mindsdb_connected: false,
+        source_connected: false,
       }
     }
   }
