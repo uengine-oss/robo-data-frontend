@@ -34,7 +34,7 @@ export interface HealthCheckResult {
   status: 'healthy' | 'partial' | 'disconnected' | 'unknown' | 'not_found' | 'checking'
   message: string
   db_connected: boolean
-  mindsdb_connected: boolean
+  source_connected: boolean
 }
 
 export interface DataSource {
