@@ -29,7 +29,7 @@ import type { DataSourceTypeConfig } from '../api/contracts.ts'
 //     `engine/src/fabric/mod.rs` 의 engine 분기.
 
 /** 지금 **실제로 붙는** engine 문자열. 위 주석의 실측이 근거다. */
-export const SUPPORTED_ENGINES: readonly string[] = ['postgres']
+export const SUPPORTED_ENGINES: readonly string[] = ['postgres', 'mysql', 'mariadb']
 
 /** 화면에 보일 것 — 붙는 것만 고른다. */
 export function getSupportedDataSourceTypes(): DataSourceTypeConfig[] {
