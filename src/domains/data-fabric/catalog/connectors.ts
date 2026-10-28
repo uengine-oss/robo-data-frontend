@@ -2,7 +2,42 @@
 import type { DataSourceTypeConfig } from '../api/contracts.ts'
 
 // ============================================================================
-// MindsDB 지원 데이터 소스 전체 목록
+// ⚠ **고를 수 있는 것과 실제로 붙는 것이 다르다**
+// ============================================================================
+//
+// 아래 목록은 **MindsDB 시절의 전체 목록**(87종)이다. 2026-10-27 에 데이터 소스
+// 연합이 MindsDB 에서 **Ontological 의 virtual fabric** 으로 바뀌었고, 그쪽은
+// PostgreSQL 의 **외부 데이터 래퍼(FDW)** 로 붙는다 — 종류마다 그 DB 용 FDW 확장이
+// 엔진 이미지에 들어 있어야 한다.
+//
+// 2026-10-29 실측:
+//
+//     엔진이 받는 engine 문자열   postgres · postgresql · mysql · mindsdb
+//     엔진 이미지에 든 FDW        file_fdw · postgres_fdw   ← **mysql_fdw 가 없다**
+//     ⇒ 실제로 붙는 것은 **PostgreSQL 하나**
+//
+// 그래서 화면에는 **붙는 것만** 보인다(`getSupportedDataSourceTypes`). 고르게 해
+// 놓고 **고른 뒤에 실패하는 것**이 제일 나쁘다 — 쓰는 사람은 자기 접속값을 의심한다.
+//
+// ⚠ **여기를 늘리기 전에 엔진부터 늘린다.** `mysql_fdw` 를 이미지에 넣고 fabric 이
+//   `mariadb`→`mysql` 이름을 맞추면 그때 이 목록에 더한다. 순서를 거꾸로 하면
+//   화면이 다시 거짓말을 한다.
+// ⚠ 목록 자체는 **지우지 않는다.** 엔진이 넓어질 때 쓸 양식이고, 지우면 87종을
+//   다시 적어야 한다.
+//
+// 짝: `robo-data-fabric` 의 `fabric/gateway.py` · 엔진의
+//     `engine/src/fabric/mod.rs` 의 engine 분기.
+
+/** 지금 **실제로 붙는** engine 문자열. 위 주석의 실측이 근거다. */
+export const SUPPORTED_ENGINES: readonly string[] = ['postgres']
+
+/** 화면에 보일 것 — 붙는 것만 고른다. */
+export function getSupportedDataSourceTypes(): DataSourceTypeConfig[] {
+  return getAllDataSourceTypes().filter((t) => SUPPORTED_ENGINES.includes(t.type))
+}
+
+// ============================================================================
+// 전체 목록 (양식 정의 — 엔진이 넓어지면 여기서 꺼내 쓴다)
 // ============================================================================
 
 export function getAllDataSourceTypes(): DataSourceTypeConfig[] {

@@ -10,7 +10,10 @@ import type {
   HealthCheckResult,
   TestConnectionRequest,
 } from '../api/contracts.ts'
-import { getAllDataSourceTypes } from '../catalog/connectors.ts'
+import {
+  getAllDataSourceTypes,
+  getSupportedDataSourceTypes,
+} from '../catalog/connectors.ts'
 
 function messageOf(error: unknown, fallback: string): string {
   if (typeof error !== 'object' || error === null || !('message' in error)) return fallback
@@ -39,7 +42,7 @@ export const useDatasourcesStore = defineStore('datasources', () => {
   const typesByCategory = computed(() => {
     const types = datasourceTypes.value.length > 0
       ? datasourceTypes.value
-      : getAllDataSourceTypes()
+      : getSupportedDataSourceTypes()
 
     const grouped: Record<DataSourceCategory, DataSourceTypeConfig[]> = {
       database: [],
@@ -75,7 +78,9 @@ export const useDatasourcesStore = defineStore('datasources', () => {
   }
 
   function fetchTypes() {
-    datasourceTypes.value = getAllDataSourceTypes()
+    // ⚠ **붙는 것만** 싣는다. 전체 목록(87종)을 그대로 실으면 고른 뒤에 실패한다
+    //    — 엔진은 PostgreSQL 말고는 받지 않는다(`catalog/connectors.ts` 머리말).
+    datasourceTypes.value = getSupportedDataSourceTypes()
   }
 
   async function fetchDatasources() {
@@ -210,7 +215,8 @@ export const useDatasourcesStore = defineStore('datasources', () => {
   }
 
   function getDefaultTypes(): DataSourceTypeConfig[] {
-    return getAllDataSourceTypes()
+    // ⚠ 화면이 **고를 목록**이다 — 붙는 것만 준다(`catalog/connectors.ts` 머리말).
+    return getSupportedDataSourceTypes()
   }
 
   return {
