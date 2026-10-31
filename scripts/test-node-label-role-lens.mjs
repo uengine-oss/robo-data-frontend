@@ -49,6 +49,21 @@ assert.equal(labels.colorLabelOfNode(multiRole, ['COMMAND', 'QUERY']), 'QUERY', 
 assert.equal(labels.colorLabelOfNode(multiRole, ['QUERY', 'COMMAND']), 'COMMAND', 'selection order is deterministic')
 assert.equal(labels.colorLabelOfNode(queryFunction, ['TABLE']), 'FUNCTION', 'unrelated selection preserves kind color')
 
+// Ontological DB returns labels as an inheritance chain: the common analyzer
+// parent comes first. It is a storage marker, never the kind or a role.
+const ontologicalMethod = {
+  labels: ['ANALYZER_OWNED', 'METHOD'],
+  properties: { stereotype: 'Service' },
+}
+assert.equal(labels.kindOfNode(ontologicalMethod), 'METHOD', 'ANALYZER_OWNED is not a kind')
+assert.deepEqual(labels.semanticRoleLabels(ontologicalMethod), ['Service'], 'ANALYZER_OWNED is not a role')
+assert.equal(labels.isHiddenMarker('ANALYZER_OWNED'), true)
+
+// External call stubs are marked by property now (label kept for old graphs).
+assert.equal(labels.isExternalStub({ labels: ['ANALYZER_OWNED', 'FUNCTION'], properties: { external: true } }), true)
+assert.equal(labels.isExternalStub({ labels: ['FUNCTION', 'EXTERNAL'], properties: {} }), true)
+assert.equal(labels.isExternalStub({ labels: ['ANALYZER_OWNED', 'FUNCTION'], properties: {} }), false)
+
 const [nvlSource, detailSource, graphTabSource, canvasSource] = await Promise.all([
   readFile(resolve('src/features/code-analysis/components/graph/NvlGraph.vue'), 'utf8'),
   readFile(resolve('src/features/code-analysis/components/graph/node-detail/NodeDetailBase.vue'), 'utf8'),

@@ -12,7 +12,14 @@ export interface NodeLabelSource {
 
 /** Labels that describe storage/runtime state, not a user-selectable role. */
 const SYSTEM_MARKERS: ReadonlySet<string> = new Set(['INTERNAL', 'EXTERNAL'])
-const HIDDEN_MARKERS: ReadonlySet<string> = new Set(['EMBEDDED'])
+/**
+ * Storage markers that are never a kind or a role.
+ * - ANALYZER_OWNED: common parent label of every analyzer node. Ontological DB
+ *   returns labels as an inheritance chain (parent → child), so it is always
+ *   labels[0] there; Neo4j may also put it first.
+ * - EMBEDDED: legacy search-vector marker label (now the `embedded` property).
+ */
+const HIDDEN_MARKERS: ReadonlySet<string> = new Set(['ANALYZER_OWNED', 'EMBEDDED'])
 const MARKER_LABELS: ReadonlySet<string> = new Set([...SYSTEM_MARKERS, ...HIDDEN_MARKERS])
 
 function visibleLabels(node: NodeLabelSource): string[] {
@@ -52,6 +59,14 @@ export function rolesOf(labels: readonly string[] | undefined): string[] {
 
 export function isStubMarker(label: string): boolean {
   return label === 'EXTERNAL'
+}
+
+/**
+ * External call stub (callee outside the analysed code). The analyzer marks it
+ * with the `external: true` property; older graphs used an `EXTERNAL` label.
+ */
+export function isExternalStub(node: NodeLabelSource): boolean {
+  return node.properties?.external === true || (node.labels ?? []).some(isStubMarker)
 }
 
 export function isHiddenMarker(label: string): boolean {
