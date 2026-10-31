@@ -139,6 +139,9 @@ function buildModulesTree(
 
   for (const node of nodes.values()) {
     if (visited.has(node.id) || !accepted(node)) continue
+    // 숨긴 부모(보기:기본에서 접힌 규칙 등) 아래 노드는 맨 위로 끌어올리지 않는다 — 규칙 예시가 줄줄이 뜬다
+    const parent = nodes.get(parents.get(node.id) ?? '')
+    if (parent && !visible(parent, showHidden)) continue
     const root = buildTree(
       node.id, nodes, children, showHidden, accepted, visited,
     )
