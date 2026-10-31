@@ -9,39 +9,48 @@ export const ANALYSIS_PHASES = [
   '후처리',
 ] as const
 
+// 분석기 백엔드 pipeline/strategies.py 의 steps 와 같은 이름 · 순서여야 한다. 없는 단계가 남아 있으면
+// 그 단계가 영영 끝나지 않아 진행 창이 그 단계에 머문다(예전 discover_datasource_step).
 export const STEP_TO_PHASE: Record<string, number> = {
   parse_ddl_step: 0,
   load_ast_step: 1,
   load_external_step: 1,
-  discover_datasource_step: 1,
   resolve_data_objects_step: 2,
   scan_codebase_step: 2,
   scan_external_step: 2,
   link_deterministic_step: 3,
-  link_parser_calls_step: 3,
+  link_calls_by_name_step: 3,
+  link_calls_by_ast_step: 3,
   link_residual_patterns_step: 3,
   link_dbms_tables_step: 3,
   link_external_step: 3,
   build_context_step: 4,
+  fetch_table_samples_step: 4,
   analyze_code_step: 5,
+  summarize_module_step: 6,
+  build_components_step: 6,
+  build_glossary_step: 6,
   enrich_table_description_step: 6,
-  build_search_embeddings_step: 6,
+  enrich_lineage_from_catalog_step: 6,
+  health_metrics_step: 6,
+  embed_step: 6,
 }
 
 export const FRAMEWORK_LEAVES = [
   'parse_ddl_step', 'load_ast_step', 'load_external_step',
-  'discover_datasource_step',
   'scan_codebase_step', 'scan_external_step',
-  'link_deterministic_step', 'link_parser_calls_step', 'link_residual_patterns_step', 'link_external_step',
-  'build_context_step', 'analyze_code_step',
-  'enrich_table_description_step', 'build_search_embeddings_step',
+  'link_deterministic_step', 'link_calls_by_name_step', 'link_residual_patterns_step', 'link_external_step',
+  'build_context_step', 'fetch_table_samples_step', 'analyze_code_step',
+  'summarize_module_step', 'build_components_step', 'build_glossary_step',
+  'enrich_table_description_step', 'health_metrics_step', 'embed_step',
 ] as const
 
 export const DBMS_LEAVES = [
-  'parse_ddl_step', 'load_ast_step', 'load_external_step', 'resolve_data_objects_step',
-  'scan_external_step', 'link_dbms_tables_step', 'link_parser_calls_step', 'link_external_step',
-  'build_context_step', 'analyze_code_step',
-  'enrich_table_description_step', 'build_search_embeddings_step',
+  'parse_ddl_step', 'load_ast_step', 'load_external_step', 'scan_external_step',
+  'link_dbms_tables_step', 'link_calls_by_ast_step', 'link_external_step',
+  'build_context_step', 'fetch_table_samples_step', 'analyze_code_step',
+  'summarize_module_step', 'build_components_step', 'build_glossary_step',
+  'enrich_table_description_step', 'enrich_lineage_from_catalog_step', 'health_metrics_step', 'embed_step',
 ] as const
 
 export function nextRunningLeaf(
@@ -69,14 +78,21 @@ export const STEP_SUBLABEL: Record<string, string> = {
   scan_codebase_step: '소스 훑어보는 중',
   scan_external_step: '외부 파일 형식 확인 중',
   link_deterministic_step: '확실한 관계 잇는 중',
-  link_parser_calls_step: '함수 호출 연결 중',
+  link_calls_by_name_step: '함수 호출 연결 중',
+  link_calls_by_ast_step: '함수 호출 연결 중',
   link_residual_patterns_step: '남은 관계 보완 중',
   link_dbms_tables_step: '테이블 사용 연결 중',
   link_external_step: '외부 파일 연결하는 중',
   build_context_step: '분석 맥락 만드는 중',
+  fetch_table_samples_step: '테이블 예시 데이터 가져오는 중',
   analyze_code_step: 'AI가 코드 의미 분석 중',
+  summarize_module_step: '모듈 요약하는 중',
+  build_components_step: '구성 요소 묶는 중',
+  build_glossary_step: '용어집 만드는 중',
   enrich_table_description_step: '테이블 설명 보강 중',
-  build_search_embeddings_step: '검색 색인 만드는 중',
+  enrich_lineage_from_catalog_step: '데이터 흐름 보강 중',
+  health_metrics_step: '코드 건강 지표 계산 중',
+  embed_step: '검색 색인 만드는 중',
 }
 
 export const NODE_KIND_LABELS: Record<string, string> = {
