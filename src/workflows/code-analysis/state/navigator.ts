@@ -17,14 +17,27 @@ export interface NavigatorTreeItem {
 }
 
 const showLogicalNames = ref(false)
-const CHILD_RELATIONS = new Set(['PARENT_OF', 'HAS_COLUMN', 'HAS_RULE'])
+// 부모 → 자식 관계. HAS_MEMBER(클래스 → 메서드) · HAS_EXAMPLE(규칙 → 예시)이 빠지면 Java 분석의
+// 메서드와 규칙 예시가 모두 맨 위에 늘어선다.
+const CHILD_RELATIONS = new Set(['PARENT_OF', 'HAS_COLUMN', 'HAS_RULE', 'HAS_MEMBER', 'HAS_EXAMPLE'])
+// 자식 → 부모 관계 (CLASS -BELONGS_TO-> PACKAGE)
+const PARENT_RELATIONS = new Set(['BELONGS_TO'])
+
+function clip(text: string): string {
+  return text.length > 40 ? `${text.slice(0, 40)}…` : text
+}
 
 function displayName(node: GraphNode): string {
   const properties = node.properties
   if (node.labels.includes('RULE')) {
-    const value = properties.condition_description ?? properties.condition
+    const value = properties.condition_description ?? properties.condition ?? properties.statement
     const text = typeof value === 'string' ? value.trim() : ''
-    if (text) return text.length > 40 ? `${text.slice(0, 40)}…` : text
+    if (text) return clip(text)
+  }
+  if (node.labels.includes('EXAMPLE')) {
+    const value = properties.when_ ?? properties.given
+    const text = typeof value === 'string' ? value.trim() : ''
+    if (text) return clip(text)
   }
   const physical = properties.name
     ? String(properties.name)
@@ -43,11 +56,13 @@ function childIndexes(links: Iterable<GraphLink>): {
   const children = new Map<string, string[]>()
   const parents = new Map<string, string>()
   for (const link of links) {
-    if (!CHILD_RELATIONS.has(link.type)) continue
-    const current = children.get(link.source) ?? []
-    current.push(link.target)
-    children.set(link.source, current)
-    if (!parents.has(link.target)) parents.set(link.target, link.source)
+    const down = CHILD_RELATIONS.has(link.type)
+    if (!down && !PARENT_RELATIONS.has(link.type)) continue
+    const [parent, child] = down ? [link.source, link.target] : [link.target, link.source]
+    const current = children.get(parent) ?? []
+    current.push(child)
+    children.set(parent, current)
+    if (!parents.has(child)) parents.set(child, parent)
   }
   return { children, parents }
 }
