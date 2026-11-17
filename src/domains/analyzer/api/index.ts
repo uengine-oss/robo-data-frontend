@@ -2,6 +2,7 @@ import type { AnalyzeEvent, BackendRequestMetadata, SearchEvent } from '@/shared
 import type { Headers, StreamCallback } from '@/shared/services/http'
 import { ANALYZER_BASE_URL as ROBO_BASE_URL } from './baseUrl'
 import { analyzerHttp } from './http'
+import { toAnalyzeRequestBody } from './analyzeRequest'
 
 export interface PipelinePhaseInfo {
   phase: string
@@ -36,7 +37,7 @@ export const analyzerApi = {
   ): Promise<void> {
     await analyzerHttp.stream(
       `${ROBO_BASE_URL}/analyze`,
-      metadata,
+      toAnalyzeRequestBody(metadata),
       headers,
       onEvent as unknown as StreamCallback,
     )
