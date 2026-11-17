@@ -23,6 +23,19 @@ function textList(value: unknown): string[] {
   return []
 }
 
+// 규칙의 Given · When · Then 예시 (RULE -HAS_EXAMPLE-> EXAMPLE)
+function examplesOf(ruleId: string) {
+  const out: { id: string, given: string, when: string, then: string }[] = []
+  for (const link of projectStore.linkMap.values()) {
+    if (link.type !== 'HAS_EXAMPLE' || link.source !== ruleId) continue
+    const ex = projectStore.nodeMap.get(link.target)
+    if (!ex) continue
+    const text = (key: string) => String(ex.properties[key] ?? '').trim()
+    out.push({ id: ex.id, given: text('given'), when: text('when_'), then: text('then_') })
+  }
+  return out
+}
+
 const rules = computed(() =>
   getSemanticReport(
     props.node.id,
@@ -36,11 +49,14 @@ const rules = computed(() =>
       ?? node.properties.condition
       ?? '',
     ).trim(),
+    // 지금 분석기는 규칙을 문장 하나(statement)로 쓴다
+    statement: String(node.properties.statement ?? '').trim(),
     effects: textList(
       node.properties.effect_descriptions
       ?? node.properties.effects,
     ),
     codeText: String(node.properties.code_text ?? '').trim(),
+    examples: examplesOf(node.id),
   })),
 )
 
@@ -69,11 +85,20 @@ const sourcePath = computed(() => String(props.node.properties?.file_path || '')
               <strong>조건</strong>
               <TextViewer :content="rule.condition" :max-height="160" compact />
             </div>
+            <p v-else-if="rule.statement" class="rule-statement">{{ rule.statement }}</p>
             <div v-if="rule.effects.length" class="rule-section">
               <strong>효과</strong>
               <ul>
                 <li v-for="effect in rule.effects" :key="effect">{{ effect }}</li>
               </ul>
+            </div>
+            <div v-if="rule.examples.length" class="rule-section">
+              <strong>예시</strong>
+              <dl v-for="ex in rule.examples" :key="ex.id" class="rule-example">
+                <template v-if="ex.given"><dt>상황</dt><dd>{{ ex.given }}</dd></template>
+                <template v-if="ex.when"><dt>요청</dt><dd>{{ ex.when }}</dd></template>
+                <template v-if="ex.then"><dt>결과</dt><dd>{{ ex.then }}</dd></template>
+              </dl>
             </div>
             <div v-if="rule.codeText" class="rule-section">
               <strong>근거 코드</strong>
@@ -104,6 +129,26 @@ const sourcePath = computed(() => String(props.node.properties?.file_path || '')
   border: 1px solid var(--color-border);
   border-radius: 6px;
   background: var(--color-bg-secondary);
+}
+
+.rule-statement {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: var(--color-text-light);
+}
+
+.rule-example {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  margin: 0;
+  font-size: 0.74rem;
+  line-height: 1.5;
+
+  & + & { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--color-border); }
+  dt { color: var(--color-text-muted); }
+  dd { margin: 0; color: var(--color-text-light); }
 }
 
 .rule-line {

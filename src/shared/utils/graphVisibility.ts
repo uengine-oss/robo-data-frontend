@@ -10,6 +10,7 @@
  * 숨김만 해제하며 시스템 노드에는 영향을 주지 않는다.
  */
 import type { GraphNode } from '@/shared/types'
+import { isExternalStub } from './nodeLabels'
 
 export const SYSTEM_NODE_LABELS: ReadonlySet<string> = new Set()
 
@@ -21,7 +22,7 @@ export const SYSTEM_NODE_LABELS: ReadonlySet<string> = new Set()
  * 표시 정책에 사용하지 않는다.
  */
 export const HIDDEN_NODE_LABELS: ReadonlySet<string> = new Set([
-  // 분석 대상 내부에 정의가 없는 외부 참조 stub.
+  // 분석 대상 내부에 정의가 없는 외부 참조 stub (옛 라벨 — 지금은 external 속성, isNodeHidden).
   'EXTERNAL',
   // 변수·상수 선언 — 상세 패널/전체 보기에서 확인.
   'VARIABLE', 'CONSTANT', 'GLOBAL_VARIABLE', 'DEFINE',
@@ -52,7 +53,7 @@ export const HIDDEN_LINK_TYPES: ReadonlySet<string> = new Set([
 ])
 
 export function isNodeHidden(node: GraphNode): boolean {
-  return (node.labels || []).some(l => HIDDEN_NODE_LABELS.has(l.toUpperCase()))
+  return isExternalStub(node) || (node.labels || []).some(l => HIDDEN_NODE_LABELS.has(l.toUpperCase()))
 }
 
 export function isSystemNode(node: GraphNode): boolean {

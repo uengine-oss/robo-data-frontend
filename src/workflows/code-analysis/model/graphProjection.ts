@@ -4,7 +4,7 @@ import type {
   Neo4jNode,
   Neo4jRelationship,
 } from '@/shared/types'
-import { kindOf } from '@/shared/utils/nodeLabels'
+import { isHiddenMarker, kindOf } from '@/shared/utils/nodeLabels'
 
 export interface GraphEvent {
   id: string
@@ -28,11 +28,19 @@ export function extractSubLabel(labels: readonly string[]): string {
   return kindOf(labels)
 }
 
+/**
+ * 저장된 그래프(카탈로그 /graph/)의 노드 → GraphNode.
+ * - id: 분석 중 스트림이 쓰는 논리 id(`id` 속성)와 같게 — 다시 띄운 앱에서도 같은 노드가 같은 id 다.
+ *   없으면 엔진 내부 id.
+ * - labels: 저장 표지(ANALYZER_OWNED · EMBEDDED)를 뺀다. Ontological DB 는 상속 사슬 순서로 돌려줘
+ *   표지가 labels[0] 에 오고, labels[0] 을 종류로 읽는 곳(색 · 상세 머리 · 이름)이 모두 표지로 칠했다.
+ */
 export function convertNeo4jNode(node: Neo4jNode): GraphNode {
-  const labels = node['Labels'] || []
+  const labels = (node['Labels'] || []).filter(label => !isHiddenMarker(label))
   const properties = node['Properties'] || {}
+  const logicalId = properties._id ?? properties.id
   return {
-    id: (properties._id as string) || node['Node ID'],
+    id: (typeof logicalId === 'string' && logicalId) || node['Node ID'],
     labels,
     properties,
   }

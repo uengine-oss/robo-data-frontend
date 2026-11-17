@@ -128,6 +128,13 @@ function optionalFiniteNumber(value: unknown, context: string): number | undefin
   return finiteNumber(value, context)
 }
 
+/** 사람이 쓴 설명이 없으면 분석기가 코드에서 읽어 채운 설명(analyzed_description). */
+function describedBy(item: Record<string, unknown>, context: string): string {
+  const written = item.description == null ? '' : string(item.description, `${context}.description`)
+  if (written.trim()) return written
+  return optionalString(item.analyzed_description, `${context}.analyzed_description`) ?? ''
+}
+
 export function parseSchemaTables(value: unknown): RoboSchemaTableInfo[] {
   return array(value, 'Catalog schema tables').map((entry, index) => {
     const item = record(entry, `Catalog schema tables[${index}]`)
@@ -138,7 +145,7 @@ export function parseSchemaTables(value: unknown): RoboSchemaTableInfo[] {
         ? ''
         : string(item.datasource, `Catalog schema tables[${index}].datasource`),
       logical_name: optionalString(item.logical_name, `Catalog schema tables[${index}].logical_name`),
-      description: string(item.description, `Catalog schema tables[${index}].description`),
+      description: describedBy(item, `Catalog schema tables[${index}]`),
       summary: optionalString(item.summary, `Catalog schema tables[${index}].summary`),
       column_count: finiteNumber(item.column_count, `Catalog schema tables[${index}].column_count`),
     }
@@ -154,10 +161,11 @@ export function parseSchemaColumns(value: unknown): RoboSchemaColumnInfo[] {
     return {
       name: string(item.name, `Catalog schema columns[${index}].name`, false),
       table_name: string(item.table_name, `Catalog schema columns[${index}].table_name`, false),
-      data_type: string(item.data_type, `Catalog schema columns[${index}].data_type`),
+      // 지금 카탈로그는 분석기 속성 이름 그대로 dtype 을 돌려준다
+      data_type: string(item.data_type ?? item.dtype, `Catalog schema columns[${index}].data_type`),
       nullable: item.nullable,
       logical_name: optionalString(item.logical_name, `Catalog schema columns[${index}].logical_name`),
-      description: string(item.description, `Catalog schema columns[${index}].description`),
+      description: describedBy(item, `Catalog schema columns[${index}]`),
       summary: optionalString(item.summary, `Catalog schema columns[${index}].summary`),
     }
   })

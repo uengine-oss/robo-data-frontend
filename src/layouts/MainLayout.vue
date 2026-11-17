@@ -19,6 +19,8 @@ const NavigatorPanel = defineAsyncComponent(async () => (
 
 // host(robo-architect)에 임베드되면 architect 상단바를 쓰므로 analyzer 자체 TopToolbar 는 숨긴다.
 const isEmbedded = inject<boolean>('isEmbedded', false)
+// host 가 자기 레일에 메뉴를 그리면 analyzer 왼쪽 메뉴는 숨긴다.
+const hideSideNav = inject<boolean>('hideSideNav', false)
 
 const projectStore = useAnalyzerStore()
 const navigationStore = useAppNavigationStore()
@@ -67,7 +69,7 @@ watch(activeFeatureId, featureId => {
     <!-- 메인 영역: 사이드바 + Navigator + 콘텐츠 -->
     <div class="main-body">
       <!-- 왼쪽 사이드바 네비게이션 -->
-      <SideNav />
+      <SideNav v-if="!hideSideNav" />
 
       <!-- Navigator 사이드 패널 — Graph 탭에서만 렌더 (헤더 ‹ 로 접음) -->
       <NavigatorPanel v-if="showNavigator" />
