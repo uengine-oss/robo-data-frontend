@@ -114,6 +114,54 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   restoreFromStorage()
 
+  /**
+   * 이 브라우저에 「코드」 화면 목록이 없으면 서버에 남은 업로드 소스로 채운다.
+   *
+   * **목록이 이 브라우저 localStorage 에만 있었다.** 같은 프로젝트를 다른 PC·브라우저·
+   * 시크릿 창에서 열면 코드 그래프(분석 결과)는 있는데 「코드」 화면은 업로드 첫 화면으로
+   * 비어 있었다(2026-11-18 golden-1117). 웹판은 여러 사람이 같은 프로젝트를 보므로 늘 그렇다.
+   * 파서가 올린 파일을 프로젝트 작업 폴더에 그대로 둔다 — 그것을 읽어 온다.
+   *
+   * **목록이 비어 있을 때 · 앱이 뜬 뒤 한 번만** 한다. 파일 빼기·전체 비우기는 이
+   * 화면 안에서만 하는 일이라(서버 파일은 다음 업로드 때 바뀐다), 볼 때마다 서버로
+   * 덮으면 사람이 뺀 파일이 되살아난다. 프로젝트를 바꾸면 앱이 다시 마운트되므로
+   * 새 프로젝트에서 다시 한 번 본다.
+   *
+   * 서버가 비었거나 못 읽으면 그대로 둔다(예전 analyzer 는 이 길이 없다 — 404).
+   * 경로 모드(데스크톱이 고른 로컬 폴더)와 처리 중에는 하지 않는다.
+   */
+  let serverSyncTried = false
+  async function syncUploadedFilesFromServer(): Promise<'synced' | 'empty' | 'skipped' | 'failed'> {
+    if (serverSyncTried) return 'skipped'
+    if (projectRoot.value || isProcessing.value) return 'skipped'
+    if (uploadedFiles.value.length > 0 || uploadedDdlFiles.value.length > 0) {
+      serverSyncTried = true
+      return 'skipped'
+    }
+    serverSyncTried = true
+    const key = projectStateKey()
+    try {
+      const result = await analyzerApi.getUploadedSources(runtimeStore.getHeaders())
+      // 기다리는 동안 업로드가 시작됐거나, 프로젝트가 바뀌었거나, 목록이 생겼으면 덮지 않는다.
+      if (isProcessing.value || key !== projectStateKey()) return 'skipped'
+      if (uploadedFiles.value.length > 0 || uploadedDdlFiles.value.length > 0) return 'skipped'
+      const files = result.files || []
+      const ddlFiles = result.ddlFiles || []
+      if (files.length === 0 && ddlFiles.length === 0) return 'empty'
+      uploadedFiles.value = files
+      uploadedDdlFiles.value = ddlFiles
+      saveToStorage()
+      addMessage('message', `📂 이 프로젝트에 올린 소스 ${files.length}개, DDL ${ddlFiles.length}개를 불러왔어요`)
+      if (result.truncated) {
+        addMessage('message', 'ℹ️ 올린 소스가 커서 일부 파일은 이름만 보여요')
+      }
+      return 'synced'
+    } catch (error) {
+      logger.warn('[analyzer] 서버의 업로드 목록을 읽지 못했습니다', error)
+      return 'failed'
+    }
+  }
+
   // ----- 그래프 데이터 (Map 기반 — id 로 덮어쓰기) -----
   // 노드·링크는 neo4j 날것 그대로 **전부** 여기 저장(메타·숨김 포함). 무엇을 가릴지는 오직
   // 표시 단계(graphData·canvasGraphData)에서 graphVisibility 정의로 판단(단일 진실원).
@@ -1060,6 +1108,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     uploadFiles,
     handleDataConfirmAction,
     loadExistingGraphData,
+    syncUploadedFilesFromServer,
     restartPipeline,
     removeFile,
     clearAllFiles,

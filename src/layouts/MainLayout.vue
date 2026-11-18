@@ -58,6 +58,8 @@ async function ensureExistingGraphData(): Promise<void> {
 watch(activeFeatureId, featureId => {
   if (!ANALYSIS_PROGRESS_TABS.has(featureId)) return
   void ensureExistingGraphData()
+  // 「코드」 화면 목록은 서버에 남은 업로드 소스가 진실이다 — 다른 PC·브라우저에서도 보이게.
+  if (featureId === 'upload') void projectStore.syncUploadedFilesFromServer()
 }, { immediate: true })
 </script>
 
