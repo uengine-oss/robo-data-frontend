@@ -30,6 +30,11 @@ export interface RoboSchemaRelationship {
   name?: string
 }
 
+// catalog 는 FK 를 만든 주체(`_owner`)를 그대로 보내고, 비어 있으면 'ddl' 로 채운다.
+// 표시용 값일 뿐이라 모르는 값 하나 때문에 응답 전체를 버리지 않는다(lite L-1, 2026-11-19).
+export type CatalogRelationshipSource = 'analyzer' | 'catalog' | 'ddl'
+const KNOWN_RELATIONSHIP_SOURCES: ReadonlySet<string> = new Set(['analyzer', 'catalog', 'ddl'])
+
 export interface CatalogRelatedTablesResponse {
   base_table: string
   tables: Array<{ name: string; schema: string; description?: string }>
@@ -37,7 +42,7 @@ export interface CatalogRelatedTablesResponse {
     from_table: string
     to_table: string
     type: 'FK'
-    source?: 'analyzer' | 'catalog'
+    source?: CatalogRelationshipSource
     column_pairs?: Array<{ source: string; target: string; name?: string }>
     name?: string
   }>
@@ -225,9 +230,6 @@ export function parseRelatedTables(value: unknown): CatalogRelatedTablesResponse
           relationship.source,
           `Catalog related tables.relationships[${index}].source`,
         )
-        if (source && source !== 'analyzer' && source !== 'catalog') {
-          throw new Error(`Catalog related tables.relationships[${index}].source가 올바르지 않습니다.`)
-        }
         const relationshipType = string(
           relationship.type,
           `Catalog related tables.relationships[${index}].type`,
@@ -248,7 +250,10 @@ export function parseRelatedTables(value: unknown): CatalogRelatedTablesResponse
             false,
           ),
           type: relationshipType,
-          source: source as CatalogRelatedTablesResponse['relationships'][number]['source'],
+          source:
+            source && KNOWN_RELATIONSHIP_SOURCES.has(source)
+              ? (source as CatalogRelationshipSource)
+              : undefined,
           column_pairs: parseColumnPairs(
             relationship.column_pairs,
             `Catalog related tables.relationships[${index}].column_pairs`,

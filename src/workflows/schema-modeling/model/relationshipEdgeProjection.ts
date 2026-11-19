@@ -17,7 +17,7 @@ export interface CatalogRelationship {
   from_table: string
   to_table: string
   type: 'FK'
-  source?: 'analyzer' | 'catalog'
+  source?: 'analyzer' | 'catalog' | 'ddl'
   column_pairs: Array<{ source: string; target: string; name?: string }>
   name?: string
 }
